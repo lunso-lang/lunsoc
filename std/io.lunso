@@ -5,6 +5,30 @@ pub fun read_into(buffer: *u8, capacity: u64): i64 {
     return lunso_sys_read(0, buffer, capacity)
 }
 
+pub fun read_exact(buffer: *u8, count: u64): i64 {
+    if count == 0 {
+        return 0
+    }
+    if (buffer as u64) == 0 || count > 9223372036854775807 {
+        return -22
+    }
+    var offset: u64 = 0
+    for offset < count {
+        var r = lunso_sys_read(0, &buffer[offset], count - offset)
+        if r == -4 {
+            continue
+        }
+        if r < 0 {
+            return r
+        }
+        if r == 0 {
+            return offset as i64
+        }
+        offset += r as u64
+    }
+    return offset as i64
+}
+
 pub fun read_line(buffer: *u8, capacity: u64, out: *[]u8): i64 {
     if capacity == 0 || (buffer as u64) == 0 || (out as u64) == 0 {
         return -22

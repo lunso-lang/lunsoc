@@ -31,11 +31,15 @@ fun main(): i32 {
         return 8
     }
 
-    // Verify read_line compiles and handles zero-capacity guard.
+    // Verify read_line and read_exact compile and handle edge guards.
     var small: [16]u8
     var line: []u8
     if io.read_line(&small[0], 0, &line) != -22 {
         return 9
+    }
+    var null_buf: *u8
+    if io.read_exact(&small[0], 0) != 0 || io.read_exact(null_buf, 4) != -22 {
+        return 11
     }
     if str.equals("ok", "ok") == false {
         return 10
