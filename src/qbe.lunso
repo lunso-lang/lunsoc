@@ -59,13 +59,18 @@ fun span_bytes(source: []u8, s: Span): []u8 {
 }
 
 fun entry_symbol(mod: *IrModule, f: IrFunction): bool {
-    return !f.external && str.equals(span_bytes(mod.source, f.name), "main")
+    return !f.external && !f.specialization && f.module == 0 && str.equals(span_bytes(mod.source, f.name), "main")
 }
 
 fun write_symbol(out: *vec.Vec[u8], mod: *IrModule, index: u32) {
     var fns = vec.as_slice.[IrFunction](&mod.functions)
     var f = fns[index as i64]
     push_byte(out, '$')
+    if f.specialization || (mod.module_count > 1 && !f.external && !entry_symbol(mod, f)) {
+        push_str(out, ".lunso.fn.")
+        push_u32(out, index)
+        push_byte(out, '.')
+    }
     push_str(out, span_bytes(mod.source, f.name))
 }
 
@@ -1069,7 +1074,7 @@ pub fun write(arena: *mem.Arena, mod: *IrModule, out: *vec.Vec[u8]): bool {
     }
     var fns = vec.as_slice.[IrFunction](&mod.functions)
     for var i: i64 = 0; i < len(fns); i += 1 {
-        if !fns[i].external {
+        if !fns[i].template_only && !fns[i].external {
             if !write_function(arena, out, mod, i as u32) {
                 return false
             }

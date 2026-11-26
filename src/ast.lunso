@@ -164,6 +164,32 @@ pub struct AstVariable {
     initializer: u32
 }
 
+pub enum AstBindingKind : u8 {
+    Function,
+    Struct,
+    Enum,
+    Const,
+    Module,
+}
+
+pub struct AstBinding {
+    name: []u8
+    index: u32
+    offset: u32
+    kind: AstBindingKind
+}
+
+pub struct AstModuleScope {
+    bindings: vec.Vec[AstBinding]
+}
+
+pub struct AstQualified {
+    node: u32
+    index: u32
+    kind: AstBindingKind
+    inaccessible: bool
+}
+
 pub struct Ast {
     source: []u8
     nodes: vec.Vec[AstNode]
@@ -176,6 +202,8 @@ pub struct Ast {
     if_branches: vec.Vec[AstIfBranches]
     for_headers: vec.Vec[AstForHeader]
     variables: vec.Vec[AstVariable]
+    modules: vec.Vec[AstModuleScope]
+    qualified: vec.Vec[AstQualified]
     declarations: NodeRange
 }
 
@@ -192,8 +220,29 @@ pub fun init(arena: *mem.Arena, source: []u8, out: *Ast): bool {
     if vec.init.[AstIfBranches](&out.if_branches, arena, 32) < 0 { return false }
     if vec.init.[AstForHeader](&out.for_headers, arena, 16) < 0 { return false }
     if vec.init.[AstVariable](&out.variables, arena, 32) < 0 { return false }
+    if vec.init.[AstModuleScope](&out.modules, arena, 8) < 0 { return false }
+    if vec.init.[AstQualified](&out.qualified, arena, 16) < 0 { return false }
     var zero = AstNode { kind: AstKind.Invalid, a: 0, b: 0, pos: 0 }
     return vec.push.[AstNode](&out.nodes, &zero) >= 0
+}
+
+pub fun find_qualified(tree: *Ast, node: u32, out: *AstQualified): bool {
+    var qs = vec.as_slice.[AstQualified](&tree.qualified)
+    var lo: i64 = 0
+    var hi: i64 = len(qs)
+    for lo < hi {
+        var mid = lo + (hi - lo) / 2
+        if qs[mid].node < node {
+            lo = mid + 1
+        } else {
+            hi = mid
+        }
+    }
+    if lo < len(qs) && qs[lo].node == node {
+        *out = qs[lo]
+        return true
+    }
+    return false
 }
 
 pub fun add_node(ast: *Ast, kind: AstKind, pos: u32, a: u32, b: u32): u32 {

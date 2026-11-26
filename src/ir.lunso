@@ -3,7 +3,7 @@ import std.io
 import std.mem
 import std.vec
 import ast { Ast, AstForHeader, AstFunction, AstIfBranches, AstKind, AstNode, AstStruct, AstVariable, NODE_NONE, Span }
-import sema { Sema, SemaBuiltin, SemaConstant, SemaFunction, SemaNode, SemaType, TypeKind, empty_type, is_float, is_signed, simple_type }
+import sema { Sema, SemaBuiltin, SemaConstant, SemaFunction, SemaNode, SemaRecord, SemaType, TypeKind, empty_type, is_float, is_signed, simple_type }
 
 pub enum IrOp : u8 {
     Label,
@@ -71,11 +71,15 @@ pub struct IrFunction {
     first_instruction: u32
     instruction_count: u32
     slot_count: u32
+    module: u32
     external: bool
+    template_only: bool
+    specialization: bool
 }
 
 pub struct IrModule {
     source: []u8
+    module_count: u32
     struct_names: vec.Vec[Span]
     pointees: vec.Vec[SemaType]
     elements: vec.Vec[SemaType]
@@ -96,6 +100,7 @@ struct Lowering {
     mod: *IrModule
     next_value: u32
     next_label: u32
+    current_fn: u32
     loops: vec.Vec[IrLoop]
     failed: bool
 }
@@ -164,6 +169,14 @@ fun uses_storage(t: SemaType): bool {
 }
 
 fun lower_node(l: *Lowering, id: u32): SemaNode {
+    if l.current_fn < (l.sem.functions.len as u32) {
+        var sf = &l.sem.functions.data[l.current_fn as i64]
+        if sf.nodes.len > 0 {
+            var ast_fns = vec.as_slice.[AstFunction](&l.tree.functions)
+            var first = ast_fns[sf.declaration as i64].nodes.first
+            return sf.nodes.data[(id - first) as i64]
+        }
+    }
     var sn = vec.as_slice.[SemaNode](&l.sem.nodes)
     return sn[id as i64]
 }
@@ -658,17 +671,19 @@ fun lower_statement(l: *Lowering, id: u32) {
 
 pub fun lower(arena: *mem.Arena, tree: *Ast, sem: *Sema, out: *IrModule): bool {
     out.source = tree.source
+    out.module_count = tree.modules.len as u32
     out.pointees = sem.pointees
     out.elements = sem.elements
-    if vec.init.[Span](&out.struct_names, arena, tree.structs.len + 1) < 0 { return false }
-    if vec.init.[IrFunction](&out.functions, arena, tree.functions.len + 1) < 0 { return false }
+    if vec.init.[Span](&out.struct_names, arena, sem.records.len + 1) < 0 { return false }
+    if vec.init.[IrFunction](&out.functions, arena, sem.functions.len + 1) < 0 { return false }
     if vec.init.[SemaType](&out.parameters, arena, 32) < 0 { return false }
     if vec.init.[IrInstruction](&out.instructions, arena, 256) < 0 { return false }
     if vec.init.[u32](&out.arguments, arena, 64) < 0 { return false }
 
     var structs = vec.as_slice.[AstStruct](&tree.structs)
-    for var i: i64 = 0; i < len(structs); i += 1 {
-        var sp = structs[i].name
+    var recs = vec.as_slice.[SemaRecord](&sem.records)
+    for var i: i64 = 0; i < len(recs); i += 1 {
+        var sp = structs[recs[i].declaration as i64].name
         vec.push.[Span](&out.struct_names, &sp)
     }
 
@@ -676,14 +691,17 @@ pub fun lower(arena: *mem.Arena, tree: *Ast, sem: *Sema, out: *IrModule): bool {
     l.tree = tree
     l.sem = sem
     l.mod = out
+    l.current_fn = ~0 as u32
     l.failed = false
     vec.init.[IrLoop](&l.loops, arena, 16)
 
     var ast_fns = vec.as_slice.[AstFunction](&tree.functions)
     var sema_fns = vec.as_slice.[SemaFunction](&sem.functions)
-    for var i: i64 = 0; i < len(ast_fns) && !l.failed; i += 1 {
-        var fdecl = ast_fns[i]
+    for var i: i64 = 0; i < len(sema_fns) && !l.failed; i += 1 {
         var sf = sema_fns[i]
+        var fdecl = ast_fns[sf.declaration as i64]
+        var is_template = fdecl.type_parameters.count > 0 && sf.arguments.len == 0
+        var is_spec = fdecl.type_parameters.count > 0 && sf.arguments.len > 0
         var first_param = out.parameters.len as u32
         var ptypes = vec.as_slice.[SemaType](&sf.param_types)
         for var p: i64 = 0; p < len(ptypes); p += 1 {
@@ -698,10 +716,14 @@ pub fun lower(arena: *mem.Arena, tree: *Ast, sem: *Sema, out: *IrModule): bool {
             first_instruction: out.instructions.len as u32,
             instruction_count: 0,
             slot_count: sf.slot_count,
+            module: fdecl.module,
             external: fdecl.body == NODE_NONE,
+            template_only: is_template,
+            specialization: is_spec,
         }
         vec.push.[IrFunction](&out.functions, &irf)
-        if fdecl.body != NODE_NONE {
+        if !is_template && fdecl.body != NODE_NONE {
+            l.current_fn = i as u32
             l.next_value = 1
             l.next_label = 0
             l.loops.len = 0
@@ -951,8 +973,9 @@ pub fun write(m: *IrModule) {
     var params = vec.as_slice.[SemaType](&m.parameters)
     var insts = vec.as_slice.[IrInstruction](&m.instructions)
     for var i: i64 = 0; i < len(fns); i += 1 {
-        if i > 0 { io.println("") }
         var fn = fns[i]
+        if fn.template_only { continue }
+        if i > 0 { io.println("") }
         if fn.external { io.print("ext fun @") } else { io.print("fun @") }
         write_span(m, fn.name)
         io.print("(")

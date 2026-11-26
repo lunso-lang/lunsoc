@@ -1,7 +1,7 @@
 import std.mem
 import std.str
 import std.vec
-import ast { Ast, AstConst, AstEnum, AstForHeader, AstFunction, AstIfBranches, AstKind, AstNode, AstStruct, AstVariable, NODE_NONE, NodeRange, Span }
+import ast { Ast, AstBinding, AstBindingKind, AstConst, AstEnum, AstForHeader, AstFunction, AstIfBranches, AstKind, AstModuleScope, AstNode, AstQualified, AstStruct, AstVariable, NODE_NONE, NodeRange, Span, find_qualified as ast_find_qualified }
 
 pub enum TypeKind : u8 {
     Invalid,
@@ -59,6 +59,8 @@ pub struct SemaFunction {
     slot_count: u32
     declaration: u32
     param_types: vec.Vec[SemaType]
+    arguments: vec.Vec[SemaType]
+    nodes: vec.Vec[SemaNode]
 }
 
 pub struct SemaConstant {
@@ -74,6 +76,7 @@ pub struct SemaRecord {
     alignment: u32
     state: u8
     fields: vec.Vec[SemaNode]
+    arguments: vec.Vec[SemaType]
 }
 
 pub struct Sema {
@@ -119,6 +122,50 @@ struct Checker {
     current_return: SemaType
     current_fn_idx: u32
     recursion_depth: u32
+    module: u32
+    type_parameters: NodeRange
+    type_arguments: []SemaType
+    instantiation_depth: u32
+}
+
+struct TypeScope {
+    parameters: NodeRange
+    arguments: []SemaType
+    module: u32
+    instantiation_depth: u32
+}
+
+fun enter_type_scope(c: *Checker, module: u32, params: NodeRange, args: []SemaType, depth: u32): TypeScope {
+    var saved = TypeScope {
+        parameters: c.type_parameters,
+        arguments: c.type_arguments,
+        module: c.module,
+        instantiation_depth: c.instantiation_depth,
+    }
+    c.type_parameters = params
+    c.type_arguments = args
+    c.module = module
+    c.instantiation_depth = depth
+    return saved
+}
+
+fun leave_type_scope(c: *Checker, saved: TypeScope) {
+    c.type_parameters = saved.parameters
+    c.type_arguments = saved.arguments
+    c.module = saved.module
+    c.instantiation_depth = saved.instantiation_depth
+}
+
+fun node_info(c: *Checker, id: u32): *SemaNode {
+    if c.current_fn_idx < (c.sema.functions.len as u32) {
+        var f = &c.sema.functions.data[c.current_fn_idx as i64]
+        if f.nodes.len > 0 {
+            var fdecls = vec.as_slice.[AstFunction](&c.tree.functions)
+            var first = fdecls[f.declaration as i64].nodes.first
+            return &f.nodes.data[(id - first) as i64]
+        }
+    }
+    return &c.sema.nodes.data[id as i64]
 }
 
 pub fun empty_type(): SemaType {
@@ -321,44 +368,58 @@ fun common_numeric_type(a: TypeKind, b: TypeKind): TypeKind {
     return TypeKind.Invalid
 }
 
-fun find_struct_idx(c: *Checker, name: Span): u32 {
-    var list = vec.as_slice.[AstStruct](&c.tree.structs)
-    for var i: i64 = 0; i < len(list); i += 1 {
-        if same_span(c.tree, list[i].name, name) {
-            return i as u32
+fun find_in_module(c: *Checker, name: Span, kind: AstBindingKind): u32 {
+    if (c.module as u64) >= c.tree.modules.len {
+        return ~0 as u32
+    }
+    var bs = vec.as_slice.[AstBinding](&c.tree.modules.data[c.module as i64].bindings)
+    var target = span_bytes(c.tree, name)
+    for var i: i64 = 0; i < len(bs); i += 1 {
+        if bs[i].kind == kind && str.equals(bs[i].name, target) {
+            return bs[i].index
         }
     }
     return ~0 as u32
+}
+
+fun find_struct_idx(c: *Checker, name: Span): u32 {
+    var list = vec.as_slice.[AstStruct](&c.tree.structs)
+    for var i: i64 = 0; i < len(list); i += 1 {
+        if list[i].module == c.module && same_span(c.tree, list[i].name, name) {
+            return i as u32
+        }
+    }
+    return find_in_module(c, name, AstBindingKind.Struct)
 }
 
 fun find_enum_idx(c: *Checker, name: Span): u32 {
     var list = vec.as_slice.[AstEnum](&c.tree.enums)
     for var i: i64 = 0; i < len(list); i += 1 {
-        if same_span(c.tree, list[i].name, name) {
+        if list[i].module == c.module && same_span(c.tree, list[i].name, name) {
             return i as u32
         }
     }
-    return ~0 as u32
+    return find_in_module(c, name, AstBindingKind.Enum)
 }
 
 fun find_const_idx(c: *Checker, name: Span): u32 {
     var list = vec.as_slice.[AstConst](&c.tree.consts)
     for var i: i64 = 0; i < len(list); i += 1 {
-        if !list[i].local && same_span(c.tree, list[i].name, name) {
+        if !list[i].local && list[i].module == c.module && same_span(c.tree, list[i].name, name) {
             return i as u32
         }
     }
-    return ~0 as u32
+    return find_in_module(c, name, AstBindingKind.Const)
 }
 
 fun find_fn_idx(c: *Checker, name: Span): u32 {
     var list = vec.as_slice.[AstFunction](&c.tree.functions)
     for var i: i64 = 0; i < len(list); i += 1 {
-        if same_span(c.tree, list[i].name, name) {
+        if list[i].module == c.module && same_span(c.tree, list[i].name, name) {
             return i as u32
         }
     }
-    return ~0 as u32
+    return find_in_module(c, name, AstBindingKind.Function)
 }
 
 fun find_local(c: *Checker, name: Span, min_depth: u32): i64 {
@@ -381,6 +442,26 @@ fun is_hex_char(b: u8, out: *u64): bool {
     if b >= 'a' && b <= 'f' { *out = (b - 'a' + 10) as u64; return true }
     if b >= 'A' && b <= 'F' { *out = (b - 'A' + 10) as u64; return true }
     return false
+}
+
+fun decoded_string_len(text: []u8): u32 {
+    if len(text) < 2 { return 0 }
+    var count: u32 = 0
+    var i: i64 = 1
+    var end = len(text) - 1
+    for i < end {
+        if text[i] == '\\' && i + 1 < end {
+            if text[i + 1] == 'x' && i + 3 < end {
+                i += 4
+            } else {
+                i += 2
+            }
+        } else {
+            i += 1
+        }
+        count += 1
+    }
+    return count
 }
 
 pub fun parse_int_literal(text: []u8, out: *u64): bool {
@@ -500,6 +581,99 @@ fun resolve_primitive(name: []u8): TypeKind {
     return TypeKind.Invalid
 }
 
+fun same_type_args(c: *Checker, a: []SemaType, b: []SemaType): bool {
+    if len(a) != len(b) { return false }
+    for var i: i64 = 0; i < len(a); i += 1 {
+        if !same_type(c, a[i], b[i]) { return false }
+    }
+    return true
+}
+
+fun resolve_type_args(c: *Checker, id: u32, expected_count: u32, out: *vec.Vec[SemaType]): bool {
+    var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
+    var children = vec.as_slice.[u32](&c.tree.children)
+    var node = nodes[id as i64]
+    if node.b - 1 != expected_count {
+        fail(c, id, "wrong number of type arguments")
+        return false
+    }
+    if vec.init.[SemaType](out, c.arena, expected_count as u64) < 0 {
+        fail(c, id, "could not allocate type arguments")
+        return false
+    }
+    for var i: u32 = 0; i < expected_count; i += 1 {
+        var at = resolve_type_inner(c, children[(node.a + 1 + i) as i64], false)
+        if c.has_error { return false }
+        vec.push.[SemaType](out, &at)
+    }
+    return true
+}
+
+fun specialize_record(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
+    var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
+    var children = vec.as_slice.[u32](&c.tree.children)
+    var node = nodes[id as i64]
+    var base = children[node.a as i64]
+    var decl: u32 = ~0 as u32
+    var q: AstQualified
+    if ast_find_qualified(c.tree, id, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
+        decl = q.index
+    } else if ast_find_qualified(c.tree, base, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
+        decl = q.index
+    } else {
+        var bnode = nodes[base as i64]
+        if bnode.kind == AstKind.Identifier || bnode.kind == AstKind.TypeName {
+            decl = find_struct_idx(c, node_span(c.tree, base, bnode.a))
+        }
+    }
+    if decl == (~0 as u32) {
+        return fail(c, id, "expected a generic struct")
+    }
+    var sdecls = vec.as_slice.[AstStruct](&c.tree.structs)
+    var count = sdecls[decl as i64].type_parameters.count
+    if count == 0 {
+        return fail(c, id, "struct does not take type arguments")
+    }
+    var args: vec.Vec[SemaType]
+    if !resolve_type_args(c, id, count, &args) {
+        return empty_type()
+    }
+    var arg_slice = vec.as_slice.[SemaType](&args)
+    var recs = c.sema.records.data
+    for var i = c.tree.structs.len as i64; i < (c.sema.records.len as i64); i += 1 {
+        if recs[i].declaration == decl && same_type_args(c, vec.as_slice.[SemaType](&recs[i].arguments), arg_slice) {
+            if !allow_incomplete {
+                resolve_struct_layout(c, i as u32)
+            }
+            var t = simple_type(TypeKind.Struct)
+            t.record = i as u32
+            t.record_size = c.sema.records.data[i].size
+            return t
+        }
+    }
+    if c.instantiation_depth >= 64 {
+        return fail(c, id, "generic instantiation nesting limit exceeded")
+    }
+    var rec_idx = c.sema.records.len as u32
+    var sr = SemaRecord {
+        declaration: decl,
+        size: 0,
+        alignment: 1,
+        state: 0,
+        fields: vec.Vec[SemaNode] { data: 0 as *SemaNode, len: 0, cap: 0, arena: c.arena },
+        arguments: args,
+    }
+    vec.init.[SemaNode](&sr.fields, c.arena, 8)
+    vec.push.[SemaRecord](&c.sema.records, &sr)
+    if !allow_incomplete {
+        resolve_struct_layout(c, rec_idx)
+    }
+    var t = simple_type(TypeKind.Struct)
+    t.record = rec_idx
+    t.record_size = c.sema.records.data[rec_idx as i64].size
+    return t
+}
+
 fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
     if id == NODE_NONE || c.has_error {
         return simple_type(TypeKind.Void)
@@ -509,6 +683,14 @@ fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
     if node.kind == AstKind.TypeName {
         var name = node_span(c.tree, id, node.a)
         var text = span_bytes(c.tree, name)
+        var children = vec.as_slice.[u32](&c.tree.children)
+        for var i: u32 = 0; i < c.type_parameters.count; i += 1 {
+            var tp_id = children[(c.type_parameters.first + i) as i64]
+            var tp_node = nodes[tp_id as i64]
+            if same_span(c.tree, name, node_span(c.tree, tp_id, tp_node.a)) {
+                return c.type_arguments[i as i64]
+            }
+        }
         var prim = resolve_primitive(text)
         if prim != TypeKind.Invalid {
             return simple_type(prim)
@@ -532,6 +714,31 @@ fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
             return backing
         }
         return fail(c, id, "unknown type name")
+    }
+    if node.kind == AstKind.QualifiedType {
+        var q: AstQualified
+        if !ast_find_qualified(c.tree, id, &q) {
+            return fail(c, id, "unknown qualified type")
+        }
+        if q.kind == AstBindingKind.Enum {
+            var enums = vec.as_slice.[AstEnum](&c.tree.enums)
+            var backing = resolve_type_inner(c, enums[q.index as i64].backing, false)
+            backing.record = q.index + 1
+            return backing
+        }
+        if q.kind == AstBindingKind.Struct {
+            if !allow_incomplete {
+                resolve_struct_layout(c, q.index)
+            }
+            var t = simple_type(TypeKind.Struct)
+            t.record = q.index
+            t.record_size = c.sema.records.data[q.index as i64].size
+            return t
+        }
+        return fail(c, id, "unknown qualified type")
+    }
+    if node.kind == AstKind.GenericType {
+        return specialize_record(c, id, allow_incomplete)
     }
     if node.kind == AstKind.PointerType {
         var pointee = resolve_type_inner(c, node.a, true)
@@ -615,13 +822,17 @@ fun resolve_struct_layout(c: *Checker, rec_idx: u32) {
         return
     }
     recs[rec_idx as i64].state = 1
+    var decl_idx = recs[rec_idx as i64].declaration
     var decls = vec.as_slice.[AstStruct](&c.tree.structs)
-    var decl = decls[rec_idx as i64]
+    var decl = decls[decl_idx as i64]
     if decl.fields.count == 0 {
         fail_at(c, decl.name.offset, "struct must have at least one field")
         return
     }
 
+    var saved = enter_type_scope(c, decl.module, decl.type_parameters,
+                                 vec.as_slice.[SemaType](&recs[rec_idx as i64].arguments),
+                                 c.instantiation_depth + 1)
     var offset: u32 = 0
     var max_align: u32 = 1
     var children = vec.as_slice.[u32](&c.tree.children)
@@ -630,7 +841,10 @@ fun resolve_struct_layout(c: *Checker, rec_idx: u32) {
         var fid = children[(decl.fields.first + i) as i64]
         var fnode = nodes[fid as i64]
         var ft = resolve_type(c, fnode.b)
-        if c.has_error { return }
+        if c.has_error {
+            leave_type_scope(c, saved)
+            return
+        }
         var align = type_alignment(c, ft)
         var sz = storage_size(ft)
         var rem = offset % align
@@ -655,6 +869,7 @@ fun resolve_struct_layout(c: *Checker, rec_idx: u32) {
             max_align = align
         }
     }
+    leave_type_scope(c, saved)
     var tail = offset % max_align
     if tail != 0 {
         offset += max_align - tail
@@ -802,11 +1017,41 @@ fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, ou
         arr.element_size = 1
         var elem = simple_type(TypeKind.U8)
         arr.element_type = add_element(c, elem)
-        arr.length = node.a - 2
+        arr.length = decoded_string_len(span_bytes(c.tree, node_span(c.tree, id, node.a)))
         set_node_type(c, id, arr)
         return arr
     }
     if node.kind == AstKind.Member {
+        var q: AstQualified
+        if ast_find_qualified(c.tree, id, &q) {
+            if q.kind == AstBindingKind.Const && !q.inaccessible {
+                check_const_decl(c, q.index)
+                if c.has_error { return empty_type() }
+                var consts = c.sema.constants.data
+                *out_bits = consts[q.index as i64].bits
+                *out_str = consts[q.index as i64].str_node
+                return consts[q.index as i64].type_info
+            }
+            if q.kind == AstBindingKind.Enum && !q.inaccessible {
+                var ei = q.index
+                var mname = node_span(c.tree, id, node.b)
+                var enums = vec.as_slice.[AstEnum](&c.tree.enums)
+                var edecl = enums[ei as i64]
+                var children = vec.as_slice.[u32](&c.tree.children)
+                var sn = c.sema.nodes.data
+                var evals = vec.as_slice.[u64](&c.sema.enum_values)
+                for var i: u32 = 0; i < edecl.cases.count; i += 1 {
+                    var cid = children[(edecl.cases.first + i) as i64]
+                    var cn = nodes[cid as i64]
+                    if same_span(c.tree, mname, node_span(c.tree, cid, cn.a)) {
+                        *out_bits = evals[sn[cid as i64].binding as i64]
+                        var et = resolve_type(c, edecl.backing)
+                        et.record = ei + 1
+                        return et
+                    }
+                }
+            }
+        }
         var base_node = nodes[node.a as i64]
         if base_node.kind == AstKind.Identifier {
             var ename = node_span(c.tree, node.a, base_node.a)
@@ -917,14 +1162,16 @@ fun check_const_decl(c: *Checker, idx: u32) {
     consts[idx as i64].state = 1
     var decls = vec.as_slice.[AstConst](&c.tree.consts)
     var decl = decls[idx as i64]
+    var saved = enter_type_scope(c, decl.module, NodeRange { first: 0, count: 0 }, c.type_arguments, 0)
     var expected = empty_type()
     if decl.type_node != NODE_NONE {
         expected = resolve_type(c, decl.type_node)
-        if c.has_error { return }
+        if c.has_error { leave_type_scope(c, saved); return }
     }
     var bits: u64 = 0
     var str_node: u32 = 0
     var val_type = eval_const_expr(c, decl.value, expected, &bits, &str_node)
+    leave_type_scope(c, saved)
     if c.has_error { return }
     if decl.type_node != NODE_NONE && !same_type(c, val_type, expected) {
         if expected.kind == TypeKind.Slice && val_type.kind == TypeKind.Array {
@@ -950,8 +1197,7 @@ fun check_const_decl(c: *Checker, idx: u32) {
 }
 
 fun set_node_type(c: *Checker, id: u32, t: SemaType) {
-    var sn = c.sema.nodes.data
-    sn[id as i64].type_info = t
+    node_info(c, id).type_info = t
 }
 
 fun check_value(c: *Checker, id: u32, expected: SemaType): SemaType {
@@ -965,8 +1211,7 @@ fun check_value(c: *Checker, id: u32, expected: SemaType): SemaType {
     if expected.kind == TypeKind.Slice && t.kind == TypeKind.Array {
         var elems = vec.as_slice.[SemaType](&c.sema.elements)
         if same_type(c, elems[t.element_type as i64], elems[expected.element_type as i64]) {
-            var sn = c.sema.nodes.data
-            sn[id as i64].borrow_array = true
+            node_info(c, id).borrow_array = true
             return expected
         }
     }
@@ -977,8 +1222,7 @@ fun check_value(c: *Checker, id: u32, expected: SemaType): SemaType {
         }
     }
     if !is_enum(t) && !is_enum(expected) && can_widen_num(t.kind, expected.kind) {
-        var sn = c.sema.nodes.data
-        sn[id as i64].promotion = expected.kind
+        node_info(c, id).promotion = expected.kind
         return expected
     }
     return fail(c, id, "type mismatch")
@@ -989,8 +1233,7 @@ fun is_writable_lvalue(c: *Checker, id: u32): bool {
     var cur = id
     for nodes[cur as i64].kind == AstKind.Member || nodes[cur as i64].kind == AstKind.Index {
         var base = nodes[cur as i64].a
-        var sn = c.sema.nodes.data
-        var bt = sn[base as i64].type_info
+        var bt = node_info(c, base).type_info
         if bt.kind == TypeKind.Pointer {
             return !bt.read_only
         }
@@ -1000,13 +1243,98 @@ fun is_writable_lvalue(c: *Checker, id: u32): bool {
         cur = base
     }
     if nodes[cur as i64].kind == AstKind.Dereference {
-        var sn = c.sema.nodes.data
-        var pt = sn[nodes[cur as i64].a as i64].type_info
+        var pt = node_info(c, nodes[cur as i64].a).type_info
         return !pt.read_only
     }
     if nodes[cur as i64].kind == AstKind.Identifier {
-        var sn = c.sema.nodes.data
-        return !sn[cur as i64].is_const && !sn[cur as i64].is_boolean_literal
+        var sn = node_info(c, cur)
+        return !sn.is_const && !sn.is_boolean_literal
+    }
+    return false
+}
+
+fun register_fn_sig(c: *Checker, fn_idx: u32) {
+    var fdecls = vec.as_slice.[AstFunction](&c.tree.functions)
+    var children = vec.as_slice.[u32](&c.tree.children)
+    var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
+    var sf = &c.sema.functions.data[fn_idx as i64]
+    var fdecl = fdecls[sf.declaration as i64]
+    var saved = enter_type_scope(c, fdecl.module, fdecl.type_parameters,
+                                 vec.as_slice.[SemaType](&sf.arguments),
+                                 c.instantiation_depth + 1)
+    var res_t = resolve_type(c, fdecl.return_type)
+    c.sema.functions.data[fn_idx as i64].result = res_t
+    for var p: u32 = 0; p < fdecl.parameters.count && !c.has_error; p += 1 {
+        var pid = children[(fdecl.parameters.first + p) as i64]
+        var pn = nodes[pid as i64]
+        var pt = resolve_type(c, pn.b)
+        vec.push.[SemaType](&c.sema.functions.data[fn_idx as i64].param_types, &pt)
+    }
+    leave_type_scope(c, saved)
+}
+
+fun specialize_function(c: *Checker, app_id: u32, decl_idx: u32): u32 {
+    var fdecls = vec.as_slice.[AstFunction](&c.tree.functions)
+    var fdecl = fdecls[decl_idx as i64]
+    var count = fdecl.type_parameters.count
+    var args: vec.Vec[SemaType]
+    if !resolve_type_args(c, app_id, count, &args) {
+        return ~0 as u32
+    }
+    var arg_slice = vec.as_slice.[SemaType](&args)
+    var fns = c.sema.functions.data
+    for var i = c.tree.functions.len as i64; i < (c.sema.functions.len as i64); i += 1 {
+        if fns[i].declaration == decl_idx && same_type_args(c, vec.as_slice.[SemaType](&fns[i].arguments), arg_slice) {
+            return i as u32
+        }
+    }
+    if c.instantiation_depth >= 64 {
+        fail(c, app_id, "generic instantiation nesting limit exceeded")
+        return ~0 as u32
+    }
+    var fn_idx = c.sema.functions.len as u32
+    var sf = SemaFunction {
+        result: empty_type(),
+        slot_count: 0,
+        declaration: decl_idx,
+        param_types: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: c.arena },
+        arguments: args,
+        nodes: vec.Vec[SemaNode] { data: 0 as *SemaNode, len: 0, cap: 0, arena: c.arena },
+    }
+    vec.init.[SemaType](&sf.param_types, c.arena, fdecl.parameters.count as u64)
+    vec.init.[SemaNode](&sf.nodes, c.arena, fdecl.nodes.count as u64)
+    var empty_sn = SemaNode {
+        type_info: empty_type(),
+        binding: 0,
+        builtin: SemaBuiltin.None,
+        promotion: TypeKind.Invalid,
+        is_boolean_literal: false,
+        borrow_array: false,
+        falls_through: false,
+        is_enum_case: false,
+        is_const: false,
+    }
+    for var i: u32 = 0; i < fdecl.nodes.count; i += 1 {
+        vec.push.[SemaNode](&sf.nodes, &empty_sn)
+    }
+    vec.push.[SemaFunction](&c.sema.functions, &sf)
+    register_fn_sig(c, fn_idx)
+    return fn_idx
+}
+
+fun is_literal_expr(tree: *Ast, id: u32): bool {
+    var nodes = vec.as_slice.[AstNode](&tree.nodes)
+    var cur = id
+    for cur != NODE_NONE {
+        var n = nodes[cur as i64]
+        if n.kind == AstKind.Integer || n.kind == AstKind.Float {
+            return true
+        }
+        if n.kind == AstKind.Positive || n.kind == AstKind.Negate {
+            cur = n.a
+        } else {
+            return false
+        }
     }
     return false
 }
@@ -1028,12 +1356,12 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         var name = node_span(c.tree, id, node.a)
         var text = span_bytes(c.tree, name)
         if str.equals(text, "true") || str.equals(text, "false") {
-            var sn = c.sema.nodes.data
-            sn[id as i64].is_boolean_literal = true
+            var sn = node_info(c, id)
+            sn.is_boolean_literal = true
             if str.equals(text, "true") {
-                sn[id as i64].binding = 1
+                sn.binding = 1
             } else {
-                sn[id as i64].binding = 0
+                sn.binding = 0
             }
             res = simple_type(TypeKind.Bool)
         } else {
@@ -1041,9 +1369,9 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
             if li >= 0 {
                 var locals = vec.as_slice.[LocalVar](&c.locals)
                 var lv = locals[li]
-                var sn = c.sema.nodes.data
-                sn[id as i64].binding = lv.slot
-                sn[id as i64].is_const = lv.is_const
+                var sn = node_info(c, id)
+                sn.binding = lv.slot
+                sn.is_const = lv.is_const
                 res = lv.type_info
             } else {
                 var ci = find_const_idx(c, name)
@@ -1051,9 +1379,9 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                     check_const_decl(c, ci)
                     if !c.has_error {
                         var consts = c.sema.constants.data
-                        var sn = c.sema.nodes.data
-                        sn[id as i64].binding = ci
-                        sn[id as i64].is_const = true
+                        var sn = node_info(c, id)
+                        sn.binding = ci
+                        sn.is_const = true
                         res = consts[ci as i64].type_info
                     }
                 } else {
@@ -1090,7 +1418,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         res.element = TypeKind.U8
         res.element_size = 1
         res.element_type = add_element(c, simple_type(TypeKind.U8))
-        res.length = node.a - 2
+        res.length = decoded_string_len(span_bytes(c.tree, node_span(c.tree, id, node.a)))
     } else if node.kind == AstKind.ArrayLiteral {
         var children = vec.as_slice.[u32](&c.tree.children)
         var elem_exp = empty_type()
@@ -1119,15 +1447,26 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         var children = vec.as_slice.[u32](&c.tree.children)
         var tid = children[node.a as i64]
         var tnode = nodes[tid as i64]
-        var si = find_struct_idx(c, node_span(c.tree, tid, tnode.a))
+        var si: u32 = ~0 as u32
+        if tnode.kind == AstKind.GenericType {
+            var st = specialize_record(c, tid, false)
+            if !c.has_error { si = st.record }
+        } else {
+            var q: AstQualified
+            if ast_find_qualified(c.tree, tid, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
+                si = q.index
+            } else if tnode.kind == AstKind.Identifier || tnode.kind == AstKind.TypeName {
+                si = find_struct_idx(c, node_span(c.tree, tid, tnode.a))
+            }
+        }
         if si == (~0 as u32) {
-            res = fail(c, tid, "unknown struct type")
+            if !c.has_error { res = fail(c, tid, "unknown struct type") }
         } else {
             resolve_struct_layout(c, si)
             if !c.has_error {
                 var recs = c.sema.records.data
                 var sdecls = vec.as_slice.[AstStruct](&c.tree.structs)
-                var sdecl = sdecls[si as i64]
+                var sdecl = sdecls[recs[si as i64].declaration as i64]
                 for var i: u32 = 1; i < node.b && !c.has_error; i += 1 {
                     var init_id = children[(node.a + i) as i64]
                     var init_node = nodes[init_id as i64]
@@ -1138,9 +1477,9 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                         var fn_node = nodes[fid as i64]
                         if same_span(c.tree, fname, node_span(c.tree, fid, fn_node.a)) {
                             var fields = vec.as_slice.[SemaNode](&recs[si as i64].fields)
-                            var sn = c.sema.nodes.data
-                            sn[init_id as i64].type_info = fields[f as i64].type_info
-                            sn[init_id as i64].binding = fields[f as i64].binding
+                            var sn = node_info(c, init_id)
+                            sn.type_info = fields[f as i64].type_info
+                            sn.binding = fields[f as i64].binding
                             check_value(c, init_node.b, fields[f as i64].type_info)
                             matched = true
                             break
@@ -1160,62 +1499,91 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
     } else if node.kind == AstKind.Call {
         var children = vec.as_slice.[u32](&c.tree.children)
         var callee = children[node.a as i64]
+        var app = NODE_NONE
+        if nodes[callee as i64].kind == AstKind.GenericCallee {
+            app = callee
+            callee = children[nodes[callee as i64].a as i64]
+        }
         var cnode = nodes[callee as i64]
-        if cnode.kind != AstKind.Identifier {
+        var q: AstQualified
+        var has_q = ast_find_qualified(c.tree, id, &q) && q.kind == AstBindingKind.Function
+        if !has_q && cnode.kind != AstKind.Identifier {
             res = fail(c, callee, "unsupported callee")
         } else {
-            var cname = node_span(c.tree, callee, cnode.a)
-            var text = span_bytes(c.tree, cname)
-            if str.equals(text, "len") || str.equals(text, "data") || str.equals(text, "size_of") {
-                if node.b != 2 {
-                    res = fail(c, id, "builtin expects 1 argument")
-                } else {
-                    var arg = children[(node.a + 1) as i64]
-                    var at = check_expr(c, arg, empty_type())
-                    if !c.has_error {
-                        var sn = c.sema.nodes.data
-                        if str.equals(text, "len") {
-                            if at.kind != TypeKind.Array && at.kind != TypeKind.Slice {
-                                res = fail(c, arg, "len requires an array or slice")
+            var is_builtin = false
+            if !has_q && app == NODE_NONE {
+                var cname = node_span(c.tree, callee, cnode.a)
+                var text = span_bytes(c.tree, cname)
+                if str.equals(text, "len") || str.equals(text, "data") || str.equals(text, "size_of") {
+                    is_builtin = true
+                    if node.b != 2 {
+                        res = fail(c, id, "builtin expects 1 argument")
+                    } else {
+                        var arg = children[(node.a + 1) as i64]
+                        var at = check_expr(c, arg, empty_type())
+                        if !c.has_error {
+                            var sn = node_info(c, id)
+                            if str.equals(text, "len") {
+                                if at.kind != TypeKind.Array && at.kind != TypeKind.Slice {
+                                    res = fail(c, arg, "len requires an array or slice")
+                                } else {
+                                    sn.builtin = SemaBuiltin.Len
+                                    res = simple_type(TypeKind.I64)
+                                }
+                            } else if str.equals(text, "data") {
+                                if at.kind != TypeKind.Array && at.kind != TypeKind.Slice {
+                                    res = fail(c, arg, "data requires an array or slice")
+                                } else {
+                                    sn.builtin = SemaBuiltin.Data
+                                    var elems = vec.as_slice.[SemaType](&c.sema.elements)
+                                    res = simple_type(TypeKind.Pointer)
+                                    res.pointee = add_pointee(c, elems[at.element_type as i64])
+                                    res.read_only = true
+                                }
                             } else {
-                                sn[id as i64].builtin = SemaBuiltin.Len
-                                res = simple_type(TypeKind.I64)
+                                sn.builtin = SemaBuiltin.SizeOf
+                                sn.binding = storage_size(at)
+                                res = simple_type(TypeKind.U64)
                             }
-                        } else if str.equals(text, "data") {
-                            if at.kind != TypeKind.Array && at.kind != TypeKind.Slice {
-                                res = fail(c, arg, "data requires an array or slice")
-                            } else {
-                                sn[id as i64].builtin = SemaBuiltin.Data
-                                var elems = vec.as_slice.[SemaType](&c.sema.elements)
-                                res = simple_type(TypeKind.Pointer)
-                                res.pointee = add_pointee(c, elems[at.element_type as i64])
-                                res.read_only = true
-                            }
-                        } else {
-                            sn[id as i64].builtin = SemaBuiltin.SizeOf
-                            sn[id as i64].binding = storage_size(at)
-                            res = simple_type(TypeKind.U64)
                         }
                     }
                 }
-            } else {
-                var fi = find_fn_idx(c, cname)
+            }
+            if !is_builtin {
+                var fi: u32 = ~0 as u32
+                if has_q {
+                    fi = q.index
+                } else {
+                    fi = find_fn_idx(c, node_span(c.tree, callee, cnode.a))
+                }
                 if fi == (~0 as u32) {
                     res = fail(c, callee, "unknown function")
                 } else {
-                    var fns = vec.as_slice.[SemaFunction](&c.sema.functions)
-                    var sf = fns[fi as i64]
-                    if node.b - 1 != (sf.param_types.len as u32) {
-                        res = fail(c, id, "wrong number of function arguments")
-                    } else {
-                        var ptypes = vec.as_slice.[SemaType](&sf.param_types)
-                        for var i: u32 = 0; i < node.b - 1 && !c.has_error; i += 1 {
-                            check_value(c, children[(node.a + 1 + i) as i64], ptypes[i as i64])
+                    var fdecls = vec.as_slice.[AstFunction](&c.tree.functions)
+                    if fdecls[fi as i64].type_parameters.count > 0 {
+                        if app == NODE_NONE {
+                            res = fail(c, callee, "generic function requires type arguments")
+                        } else {
+                            fi = specialize_function(c, app, fi)
                         }
-                        if !c.has_error {
-                            var sn = c.sema.nodes.data
-                            sn[id as i64].binding = fi
-                            res = sf.result
+                    } else if app != NODE_NONE {
+                        res = fail(c, app, "function does not take type arguments")
+                    }
+                    if !c.has_error && fi != (~0 as u32) {
+                        var fns = c.sema.functions.data
+                        var sf = &fns[fi as i64]
+                        if node.b - 1 != (sf.param_types.len as u32) {
+                            res = fail(c, id, "wrong number of function arguments")
+                        } else {
+                            var ptypes = vec.as_slice.[SemaType](&sf.param_types)
+                            for var i: u32 = 0; i < node.b - 1 && !c.has_error; i += 1 {
+                                check_value(c, children[(node.a + 1 + i) as i64], ptypes[i as i64])
+                            }
+                            if !c.has_error {
+                                var sn = node_info(c, id)
+                                sn.binding = fi
+                                res = sf.result
+                            }
                         }
                     }
                 }
@@ -1271,13 +1639,50 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
     } else if node.kind == AstKind.Member {
         var mname = node_span(c.tree, id, node.b)
         var base_node = nodes[node.a as i64]
-        var enum_hit = false
-        if base_node.kind == AstKind.Identifier {
+        var q: AstQualified
+        var handled = false
+        if ast_find_qualified(c.tree, id, &q) {
+            if q.kind == AstBindingKind.Const && !q.inaccessible {
+                check_const_decl(c, q.index)
+                if !c.has_error {
+                    var consts = c.sema.constants.data
+                    var sn = node_info(c, id)
+                    sn.binding = q.index
+                    sn.is_const = true
+                    res = consts[q.index as i64].type_info
+                }
+                handled = true
+            } else if q.kind == AstBindingKind.Enum && !q.inaccessible {
+                handled = true
+                var ei = q.index
+                var enums = vec.as_slice.[AstEnum](&c.tree.enums)
+                var edecl = enums[ei as i64]
+                var children = vec.as_slice.[u32](&c.tree.children)
+                var found = false
+                for var i: u32 = 0; i < edecl.cases.count; i += 1 {
+                    var cid = children[(edecl.cases.first + i) as i64]
+                    var cn = nodes[cid as i64]
+                    if same_span(c.tree, mname, node_span(c.tree, cid, cn.a)) {
+                        var sn = node_info(c, id)
+                        sn.is_enum_case = true
+                        sn.binding = c.sema.nodes.data[cid as i64].binding
+                        res = resolve_type(c, edecl.backing)
+                        res.record = ei + 1
+                        found = true
+                        break
+                    }
+                }
+                if !found {
+                    res = fail(c, id, "unknown enum member")
+                }
+            }
+        }
+        if !handled && base_node.kind == AstKind.Identifier {
             var ename = node_span(c.tree, node.a, base_node.a)
             if find_local(c, ename, 0) < 0 {
                 var ei = find_enum_idx(c, ename)
                 if ei != (~0 as u32) {
-                    enum_hit = true
+                    handled = true
                     var enums = vec.as_slice.[AstEnum](&c.tree.enums)
                     var edecl = enums[ei as i64]
                     var children = vec.as_slice.[u32](&c.tree.children)
@@ -1286,9 +1691,9 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                         var cid = children[(edecl.cases.first + i) as i64]
                         var cn = nodes[cid as i64]
                         if same_span(c.tree, mname, node_span(c.tree, cid, cn.a)) {
-                            var sn = c.sema.nodes.data
-                            sn[id as i64].is_enum_case = true
-                            sn[id as i64].binding = sn[cid as i64].binding
+                            var sn = node_info(c, id)
+                            sn.is_enum_case = true
+                            sn.binding = c.sema.nodes.data[cid as i64].binding
                             res = resolve_type(c, edecl.backing)
                             res.record = ei + 1
                             found = true
@@ -1301,7 +1706,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                 }
             }
         }
-        if !enum_hit {
+        if !handled {
             var bt = check_expr(c, node.a, empty_type())
             if !c.has_error {
                 if bt.kind == TypeKind.Pointer {
@@ -1313,7 +1718,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                 } else {
                     var recs = c.sema.records.data
                     var sdecls = vec.as_slice.[AstStruct](&c.tree.structs)
-                    var sdecl = sdecls[bt.record as i64]
+                    var sdecl = sdecls[recs[bt.record as i64].declaration as i64]
                     var children = vec.as_slice.[u32](&c.tree.children)
                     var found = false
                     for var i: u32 = 0; i < sdecl.fields.count; i += 1 {
@@ -1321,8 +1726,8 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                         var fn_node = nodes[fid as i64]
                         if same_span(c.tree, mname, node_span(c.tree, fid, fn_node.a)) {
                             var fields = vec.as_slice.[SemaNode](&recs[bt.record as i64].fields)
-                            var sn = c.sema.nodes.data
-                            sn[id as i64].binding = fields[i as i64].binding
+                            var sn = node_info(c, id)
+                            sn.binding = fields[i as i64].binding
                             res = fields[i as i64].type_info
                             found = true
                             break
@@ -1396,17 +1801,23 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
             }
         }
     } else if node.kind >= AstKind.Equal && node.kind <= AstKind.GreaterEqual {
-        var lt = check_expr(c, node.a, empty_type())
-        var rt = check_expr(c, node.b, lt)
+        var lt: SemaType
+        var rt: SemaType
+        if is_literal_expr(c.tree, node.a) && !is_literal_expr(c.tree, node.b) {
+            rt = check_expr(c, node.b, empty_type())
+            lt = check_expr(c, node.a, rt)
+        } else {
+            lt = check_expr(c, node.a, empty_type())
+            rt = check_expr(c, node.b, lt)
+        }
         if !c.has_error {
             if is_numeric(lt.kind) && is_numeric(rt.kind) && !is_enum(lt) && !is_enum(rt) {
                 var cm = common_numeric_type(lt.kind, rt.kind)
                 if cm == TypeKind.Invalid {
                     res = fail(c, id, "incompatible comparison operands")
                 } else {
-                    var sn = c.sema.nodes.data
-                    if lt.kind != cm { sn[node.a as i64].promotion = cm }
-                    if rt.kind != cm { sn[node.b as i64].promotion = cm }
+                    if lt.kind != cm { node_info(c, node.a).promotion = cm }
+                    if rt.kind != cm { node_info(c, node.b).promotion = cm }
                     res = simple_type(TypeKind.Bool)
                 }
             } else if same_type(c, lt, rt) {
@@ -1417,7 +1828,9 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         }
     } else if node.kind == AstKind.ShiftLeft || node.kind == AstKind.ShiftRight {
         var lt = check_expr(c, node.a, expected)
-        var rt = check_expr(c, node.b, empty_type())
+        var r_hint = empty_type()
+        if is_literal_expr(c.tree, node.b) { r_hint = lt }
+        var rt = check_expr(c, node.b, r_hint)
         if !c.has_error && (!is_integer(lt.kind) || !is_integer(rt.kind)) {
             res = fail(c, id, "shift requires integer operands")
         } else if !c.has_error {
@@ -1425,16 +1838,22 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         }
     } else {
         // Binary arithmetic/bitwise
-        var lt = check_expr(c, node.a, expected)
-        var rt = check_expr(c, node.b, lt)
+        var lt: SemaType
+        var rt: SemaType
+        if is_literal_expr(c.tree, node.a) && !is_literal_expr(c.tree, node.b) {
+            rt = check_expr(c, node.b, expected)
+            lt = check_expr(c, node.a, rt)
+        } else {
+            lt = check_expr(c, node.a, expected)
+            rt = check_expr(c, node.b, lt)
+        }
         if !c.has_error {
             var cm = common_numeric_type(lt.kind, rt.kind)
             if cm == TypeKind.Invalid {
                 res = fail(c, id, "incompatible binary operands")
             } else {
-                var sn = c.sema.nodes.data
-                if lt.kind != cm { sn[node.a as i64].promotion = cm }
-                if rt.kind != cm { sn[node.b as i64].promotion = cm }
+                if lt.kind != cm { node_info(c, node.a).promotion = cm }
+                if rt.kind != cm { node_info(c, node.b).promotion = cm }
                 res = simple_type(cm)
             }
         }
@@ -1492,8 +1911,7 @@ fun check_statement(c: *Checker, id: u32): bool {
                     target = 0
                 }
             }
-            var sn = c.sema.nodes.data
-            sn[id as i64].binding = target as u32
+            node_info(c, id).binding = target as u32
             if node.kind == AstKind.Break {
                 var lptr = c.loops.data
                 lptr[target].has_break = true
@@ -1530,9 +1948,9 @@ fun check_statement(c: *Checker, id: u32): bool {
             depth: c.scope_depth,
         }
         vec.push.[LocalVar](&c.locals, &lv)
-        var sn = c.sema.nodes.data
-        sn[id as i64].binding = slot
-        sn[id as i64].type_info = vt
+        var sn = node_info(c, id)
+        sn.binding = slot
+        sn.type_info = vt
         falls = true
     } else if node.kind == AstKind.Const {
         var idx = node.a
@@ -1584,9 +2002,9 @@ fun check_statement(c: *Checker, id: u32): bool {
                         } else {
                             var mv_idx = c.sema.match_values.len as u32
                             vec.push_value.[u64](&c.sema.match_values, pbits)
-                            var sn = c.sema.nodes.data
-                            sn[pat_id as i64].binding = mv_idx
-                            sn[pat_id as i64].type_info = st
+                            var sn = node_info(c, pat_id)
+                            sn.binding = mv_idx
+                            sn.type_info = st
                         }
                     }
                     pattern_count += 1
@@ -1642,8 +2060,7 @@ fun check_statement(c: *Checker, id: u32): bool {
         check_expr(c, id, empty_type())
         falls = true
     }
-    var sn = c.sema.nodes.data
-    sn[id as i64].falls_through = falls
+    node_info(c, id).falls_through = falls
     return falls
 }
 
@@ -1659,8 +2076,7 @@ fun check_block(c: *Checker, id: u32): bool {
     }
     c.scope_depth -= 1
     c.locals.len = saved_locals
-    var sn = c.sema.nodes.data
-    sn[id as i64].falls_through = falls
+    node_info(c, id).falls_through = falls
     return falls
 }
 
@@ -1696,12 +2112,23 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
     c.has_error = false
     c.scope_depth = 0
     c.slot_count = 0
+    c.current_fn_idx = ~0 as u32
     c.recursion_depth = 0
+    c.module = 0
+    c.type_parameters = NodeRange { first: 0, count: 0 }
+    c.instantiation_depth = 0
     vec.init.[LocalVar](&c.locals, arena, 64)
     vec.init.[LoopEntry](&c.loops, arena, 8)
 
     for var i: u64 = 0; i < tree.structs.len; i += 1 {
-        var sr = SemaRecord { declaration: i as u32, size: 0, alignment: 1, state: 0, fields: vec.Vec[SemaNode] {} }
+        var sr = SemaRecord {
+            declaration: i as u32,
+            size: 0,
+            alignment: 1,
+            state: 0,
+            fields: vec.Vec[SemaNode] { data: 0 as *SemaNode, len: 0, cap: 0, arena: arena },
+            arguments: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: arena },
+        }
         vec.init.[SemaNode](&sr.fields, arena, 8)
         vec.push.[SemaRecord](&out.records, &sr)
     }
@@ -1716,6 +2143,7 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
     var nodes = vec.as_slice.[AstNode](&tree.nodes)
     for var i: i64 = 0; i < len(enums) && !c.has_error; i += 1 {
         var edecl = enums[i]
+        c.module = edecl.module
         var bt = resolve_type(&c, edecl.backing)
         if !c.has_error && !is_integer(bt.kind) {
             fail(&c, edecl.backing, "enum backing type must be an integer")
@@ -1739,8 +2167,11 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
     }
 
     // Resolve structs and consts
+    var sdecls = vec.as_slice.[AstStruct](&tree.structs)
     for var i: u64 = 0; i < tree.structs.len && !c.has_error; i += 1 {
-        resolve_struct_layout(&c, i as u32)
+        if sdecls[i as i64].type_parameters.count == 0 {
+            resolve_struct_layout(&c, i as u32)
+        }
     }
     for var i: u64 = 0; i < tree.consts.len && !c.has_error; i += 1 {
         var consts = vec.as_slice.[AstConst](&tree.consts)
@@ -1754,28 +2185,31 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
     for var i: i64 = 0; i < len(fns) && !c.has_error; i += 1 {
         var fdecl = fns[i]
         var sf = SemaFunction {
-            result: resolve_type(&c, fdecl.return_type),
+            result: empty_type(),
             slot_count: 0,
             declaration: i as u32,
-            param_types: vec.Vec[SemaType] {},
+            param_types: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: arena },
+            arguments: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: arena },
+            nodes: vec.Vec[SemaNode] { data: 0 as *SemaNode, len: 0, cap: 0, arena: arena },
         }
         vec.init.[SemaType](&sf.param_types, arena, 8)
-        for var p: u32 = 0; p < fdecl.parameters.count && !c.has_error; p += 1 {
-            var pid = children[(fdecl.parameters.first + p) as i64]
-            var pn = nodes[pid as i64]
-            var pt = resolve_type(&c, pn.b)
-            vec.push.[SemaType](&sf.param_types, &pt)
-        }
         vec.push.[SemaFunction](&out.functions, &sf)
+        if fdecl.type_parameters.count == 0 {
+            register_fn_sig(&c, i as u32)
+        }
     }
 
-    // Check function bodies
-    for var i: i64 = 0; i < len(fns) && !c.has_error; i += 1 {
-        var fdecl = fns[i]
-        if fdecl.body == NODE_NONE {
+    // Check function bodies (including generic specializations appended during checking)
+    for var i: i64 = 0; i < (out.functions.len as i64) && !c.has_error; i += 1 {
+        var sf_list = out.functions.data
+        var decl_idx = sf_list[i].declaration
+        var fdecl = fns[decl_idx as i64]
+        if fdecl.body == NODE_NONE || (fdecl.type_parameters.count > 0 && sf_list[i].arguments.len == 0) {
             continue
         }
-        var sf_list = out.functions.data
+        var saved = enter_type_scope(&c, fdecl.module, fdecl.type_parameters,
+                                     vec.as_slice.[SemaType](&sf_list[i].arguments),
+                                     c.instantiation_depth + 1)
         c.current_return = sf_list[i].result
         c.current_fn_idx = i as u32
         c.locals.len = 0
@@ -1804,6 +2238,7 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
         }
         sf_list = out.functions.data
         sf_list[i].slot_count = c.slot_count
+        leave_type_scope(&c, saved)
     }
 
     *err = c.err

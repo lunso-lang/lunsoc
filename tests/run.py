@@ -58,7 +58,25 @@ def main() -> int:
                 return 1
             built_count += 1
 
-    print(f"OK ({len(samples) * 2} lexer+parser checks, {len(boot_pass) * 3} --check/--emit-ir/--emit-qbe checks, {built_count} --build+run checks)")
+        stage2 = Path(tmpdir) / "lunsoc-stage2"
+        stage3 = Path(tmpdir) / "lunsoc-stage3"
+        src_main = ROOT / "src" / "main.lunso"
+        s2_build = subprocess.run([str(LUNSOC), "--build", str(src_main), "-o", str(stage2)], cwd=ROOT, text=True, capture_output=True, check=False)
+        if s2_build.returncode != 0:
+            print(f"self-host stage2 build failed: {s2_build.stderr}", file=sys.stderr)
+            return 1
+        s3_build = subprocess.run([str(stage2), "--build", str(src_main), "-o", str(stage3)], cwd=ROOT, text=True, capture_output=True, check=False)
+        if s3_build.returncode != 0:
+            print(f"self-host stage3 build failed: {s3_build.stderr}", file=sys.stderr)
+            return 1
+        q1 = subprocess.run([str(LUNSOC), "--emit-qbe", str(src_main)], cwd=ROOT, capture_output=True, check=False)
+        q2 = subprocess.run([str(stage2), "--emit-qbe", str(src_main)], cwd=ROOT, capture_output=True, check=False)
+        q3 = subprocess.run([str(stage3), "--emit-qbe", str(src_main)], cwd=ROOT, capture_output=True, check=False)
+        if q1.returncode != 0 or q2.returncode != 0 or q3.returncode != 0 or q1.stdout != q2.stdout or q2.stdout != q3.stdout:
+            print("self-host QBE IL mismatch between stage1/stage2/stage3", file=sys.stderr)
+            return 1
+
+    print(f"OK ({len(samples) * 2} lexer+parser checks, {len(boot_pass) * 3} --check/--emit-ir/--emit-qbe checks, {built_count} --build+run checks, self-host 3-stage OK)")
     return 0
 
 

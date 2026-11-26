@@ -991,17 +991,14 @@ fun parse_import(p: *Parser): u32 {
     return add_node(p, AstKind.Import, kw, idx, 0)
 }
 
-pub fun parse(arena: *mem.Arena, source: []u8, out: *Ast, err: *ParseError): bool {
-    if !ast_init(arena, source, out) {
-        *err = ParseError { token: Token { kind: TokenKind.Eof, offset: 0, length: 0, line: 1, column: 1 }, message: "could not allocate AST storage" }
-        return false
-    }
+pub fun parse_append(arena: *mem.Arena, tree: *Ast, slice: []u8, source_base: u32, module: u32,
+                     out_decls: *NodeRange, err: *ParseError): bool {
     var p: Parser
-    p.lex = lexer_init(source)
+    p.lex = lexer_init(slice)
     p.has_error = false
-    p.tree = out
-    p.source_base = 0
-    p.module = 0
+    p.tree = tree
+    p.source_base = source_base
+    p.module = module
     p.group_depth = 0
     p.recursion_depth = 0
     p.disallow_struct_literal = false
@@ -1041,7 +1038,15 @@ pub fun parse(arena: *mem.Arena, source: []u8, out: *Ast, err: *ParseError): boo
         push_child(&p, decl)
         finish_item(&p, TokenKind.Eof, msg)
     }
-    out.declarations = finish_children(&p, mark)
+    *out_decls = finish_children(&p, mark)
     *err = p.error
     return !p.has_error
+}
+
+pub fun parse(arena: *mem.Arena, source: []u8, out: *Ast, err: *ParseError): bool {
+    if !ast_init(arena, source, out) {
+        *err = ParseError { token: Token { kind: TokenKind.Eof, offset: 0, length: 0, line: 1, column: 1 }, message: "could not allocate AST storage" }
+        return false
+    }
+    return parse_append(arena, out, source, 0, 0, &out.declarations, err)
 }
