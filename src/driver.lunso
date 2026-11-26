@@ -6,14 +6,14 @@ import std.os
 import std.path
 import std.str
 import std.vec
-import ast { Ast }
+import frontend.ast { Ast }
 import ir { IrModule, lower as ir_lower, write as ir_write }
-import lexer { Token, TokenKind, error_message, token_name, tokenize_all }
-import modules { ModuleProgram, format_unexpected_byte, load as modules_load, print_caret, report as modules_report }
+import frontend.lexer { Token, TokenKind, error_message, token_name, tokenize_all }
+import frontend.modules { ModuleProgram, format_unexpected_byte, load as modules_load, print_caret, report as modules_report }
 import native { NativeKind, NativeOptions, build as native_build, run_exe as native_run_exe }
-import parser { ParseError, parse }
+import frontend.parser { ParseError, parse }
 import qbe { write as qbe_write }
-import sema { Sema, SemaError, check }
+import frontend.sema { Sema, SemaError, check }
 
 fun print_lexeme(bytes: []u8) {
     for var i: i64 = 0; i < len(bytes); i += 1 {

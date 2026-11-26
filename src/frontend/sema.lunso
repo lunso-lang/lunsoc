@@ -1,7 +1,7 @@
 import std.mem
 import std.str
 import std.vec
-import ast { Ast, AstBinding, AstBindingKind, AstConst, AstEnum, AstForHeader, AstFunction, AstIfBranches, AstKind, AstModuleScope, AstNode, AstQualified, AstStruct, AstVariable, NODE_NONE, NodeRange, Span, find_qualified as ast_find_qualified }
+import frontend.ast { Ast, AstBinding, AstBindingKind, AstConst, AstEnum, AstForHeader, AstFunction, AstIfBranches, AstKind, AstModuleScope, AstNode, AstQualified, AstStruct, AstVariable, NODE_NONE, NodeRange, Span, find_qualified as ast_find_qualified }
 
 pub enum TypeKind : u8 {
     Invalid,

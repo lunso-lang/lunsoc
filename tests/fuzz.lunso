@@ -6,12 +6,12 @@ import std.mem
 import std.rand
 import std.str
 import std.vec
-import ast { Ast }
+import frontend.ast { Ast }
 import ir { IrModule, lower as ir_lower }
-import lexer { Token, tokenize_all }
-import parser { ParseError, parse }
+import frontend.lexer { Token, tokenize_all }
+import frontend.parser { ParseError, parse }
 import qbe { write as qbe_write }
-import sema { Sema, SemaError, check }
+import frontend.sema { Sema, SemaError, check }
 
 fun parse_u64(s: []u8, out: *u64): bool {
     if len(s) == 0 { return false }

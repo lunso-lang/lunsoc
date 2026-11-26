@@ -6,9 +6,9 @@ import std.os
 import std.path
 import std.str
 import std.vec
-import ast { Ast, AstBinding, AstBindingKind, AstConst, AstEnum, AstFunction, AstImport, AstKind, AstModuleScope, AstNode, AstQualified, AstStruct, ImportKind, NODE_NONE, NodeRange, Span, init as ast_init }
-import lexer { TokenKind }
-import parser { ParseError, parse_append }
+import frontend.ast { Ast, AstBinding, AstBindingKind, AstConst, AstEnum, AstFunction, AstImport, AstKind, AstModuleScope, AstNode, AstQualified, AstStruct, ImportKind, NODE_NONE, NodeRange, Span, init as ast_init }
+import frontend.lexer { TokenKind }
+import frontend.parser { ParseError, parse_append }
 
 pub struct ModuleFile {
     path: []u8

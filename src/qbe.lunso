@@ -2,9 +2,9 @@ import std.fmt
 import std.mem
 import std.str
 import std.vec
-import ast { Span }
+import frontend.ast { Span }
 import ir { IrFunction, IrInstruction, IrModule, IrOp }
-import sema { SemaType, TypeKind, element_size, is_signed, is_unsigned, parse_int_literal, scalar_size, storage_size }
+import frontend.sema { SemaType, TypeKind, element_size, is_signed, is_unsigned, parse_int_literal, scalar_size, storage_size }
 
 struct QbeType {
     base: u8

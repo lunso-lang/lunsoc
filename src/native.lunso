@@ -9,7 +9,7 @@ import std.time
 import std.vec
 import ir { IrFunction, IrModule }
 import qbe { write as qbe_write }
-import sema { TypeKind }
+import frontend.sema { TypeKind }
 
 pub enum NativeKind : u8 {
     Exe,

@@ -1,7 +1,7 @@
 import std.mem
 import std.vec
-import ast { Ast, AstConst, AstEnum, AstForHeader, AstFunction, AstIfBranches, AstImport, AstKind, AstNode, AstStruct, AstVariable, ImportKind, NODE_NONE, NodeRange, Span, add_node as ast_add_node, finish_children as ast_finish_children, init as ast_init }
-import lexer { Lexer, Token, TokenKind, error_message, init as lexer_init, next_token }
+import frontend.ast { Ast, AstConst, AstEnum, AstForHeader, AstFunction, AstIfBranches, AstImport, AstKind, AstNode, AstStruct, AstVariable, ImportKind, NODE_NONE, NodeRange, Span, add_node as ast_add_node, finish_children as ast_finish_children, init as ast_init }
+import frontend.lexer { Lexer, Token, TokenKind, error_message, init as lexer_init, next_token }
 
 const PREC_ASSIGNMENT: u32 = 1
 const PREC_LOGICAL_OR: u32 = 2
