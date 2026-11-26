@@ -61,6 +61,20 @@ fun main(): i32 {
         return 10
     }
 
+    var extra: [3]i32 = [100, 200, 300]
+    if vec.append_slice.[i32](&nums, extra[0..3]) < 0 || nums.len != 3 || nums.data[2] != 300 {
+        mem.deinit(&arena)
+        return 15
+    }
+    var buf: vec.Vec[u8]
+    if vec.init.[u8](&buf, &arena, 4) < 0 ||
+       vec.append_slice.[u8](&buf, "Content-Length: ") < 0 ||
+       vec.append_slice.[u8](&buf, "42") < 0 ||
+       buf.len != 18 || buf.data[0] != 'C' || buf.data[17] != '2' {
+        mem.deinit(&arena)
+        return 16
+    }
+
     var tokens: vec.Vec[Token]
     if vec.init.[Token](&tokens, &arena, 2) < 0 {
         mem.deinit(&arena)

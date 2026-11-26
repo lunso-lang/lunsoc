@@ -129,6 +129,32 @@ pub fun push_value[T](vec: *Vec[T], value: T): i64 {
     return 0
 }
 
+pub fun append_slice[T](vec: *Vec[T], items: []T): i64 {
+    if (vec as u64) == 0 {
+        return -22
+    }
+    var count = len(items) as u64
+    if count == 0 {
+        return 0
+    }
+    var max: u64 = ~0
+    if (*vec).len > max - count {
+        return -75
+    }
+    var needed = (*vec).len + count
+    if needed > (*vec).cap {
+        var status = reserve.[T](vec, needed)
+        if status < 0 {
+            return status
+        }
+    }
+    for var i: u64 = 0; i < count; i += 1 {
+        (*vec).data[(*vec).len + i] = items[i as i64]
+    }
+    (*vec).len = needed
+    return 0
+}
+
 pub fun pop[T](vec: *Vec[T], out: *T): bool {
     if (vec as u64) == 0 || (*vec).len == 0 {
         return false
