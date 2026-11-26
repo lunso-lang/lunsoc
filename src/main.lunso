@@ -6,6 +6,7 @@ import std.mem
 import std.str
 import std.vec
 import ast { Ast }
+import ir { IrModule, lower as ir_lower, write as ir_write }
 import lexer { Token, TokenKind, error_message, token_name, tokenize_all }
 import parser { ParseError, parse }
 import sema { Sema, SemaError, check }
@@ -129,7 +130,7 @@ fun report_offset_error(path: []u8, source: []u8, offset: u32, msg: []u8): i32 {
     return 1
 }
 
-fun run_check(path: []u8, source: []u8, arena: *mem.Arena): i32 {
+fun run_check(path: []u8, source: []u8, arena: *mem.Arena, emit_ir: bool): i32 {
     var tree: Ast
     var perr: ParseError
     if !parse(arena, source, &tree, &perr) {
@@ -139,6 +140,15 @@ fun run_check(path: []u8, source: []u8, arena: *mem.Arena): i32 {
     var serr: SemaError
     if !check(arena, &tree, &sem, &serr) {
         return report_offset_error(path, source, serr.offset, serr.message)
+    }
+    if emit_ir {
+        var mod: IrModule
+        if !ir_lower(arena, &tree, &sem, &mod) {
+            io.eprintln("lunsoc: could not lower to IR")
+            return 1
+        }
+        ir_write(&mod)
+        return 0
     }
     io.print("Checked ")
     fmt.print_u64(1, tree.functions.len)
@@ -155,13 +165,14 @@ fun main(): i32 {
 
     var argv: [][]u8
     if args.load(&arena, &argv) < 0 {
-        io.eprintln("usage: lunsoc [--parse | --check] <source.lunso>")
+        io.eprintln("usage: lunsoc [--parse | --check | --emit-ir] <source.lunso>")
         mem.deinit(&arena)
         return 1
     }
 
     var parse_mode = false
     var check_mode = false
+    var ir_mode = false
     var path: []u8 = ""
     for var i: i64 = 1; i < len(argv); i += 1 {
         var arg = argv[i]
@@ -169,16 +180,22 @@ fun main(): i32 {
             parse_mode = true
         } else if str.equals(arg, "--check") {
             check_mode = true
+        } else if str.equals(arg, "--emit-ir") {
+            ir_mode = true
         } else if len(path) == 0 {
             path = arg
         } else {
-            io.eprintln("usage: lunsoc [--parse | --check] <source.lunso>")
+            io.eprintln("usage: lunsoc [--parse | --check | --emit-ir] <source.lunso>")
             mem.deinit(&arena)
             return 1
         }
     }
-    if len(path) == 0 || (parse_mode && check_mode) {
-        io.eprintln("usage: lunsoc [--parse | --check] <source.lunso>")
+    var mode_count = 0
+    if parse_mode { mode_count += 1 }
+    if check_mode { mode_count += 1 }
+    if ir_mode { mode_count += 1 }
+    if len(path) == 0 || mode_count > 1 {
+        io.eprintln("usage: lunsoc [--parse | --check | --emit-ir] <source.lunso>")
         mem.deinit(&arena)
         return 1
     }
@@ -193,8 +210,8 @@ fun main(): i32 {
 
     var source = raw.ptr[0..raw.len]
     var rc: i32 = 0
-    if check_mode {
-        rc = run_check(path, source, &arena)
+    if check_mode || ir_mode {
+        rc = run_check(path, source, &arena, ir_mode)
     } else if parse_mode {
         rc = run_parse(path, source, &arena)
     } else {

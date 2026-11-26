@@ -84,6 +84,7 @@ pub struct Sema {
     pointees: vec.Vec[SemaType]
     elements: vec.Vec[SemaType]
     enum_values: vec.Vec[u64]
+    match_values: vec.Vec[u64]
 }
 
 pub struct SemaError {
@@ -102,6 +103,7 @@ struct LocalVar {
 
 struct LoopEntry {
     label: Span
+    has_break: bool
 }
 
 struct Checker {
@@ -690,16 +692,30 @@ fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, ou
         if expected.kind == TypeKind.F32 {
             k = TypeKind.F32
         }
-        // Store integer part for simple float->int constant casts during --check.
         var text = span_bytes(c.tree, node_span(c.tree, id, node.a))
-        var int_val: u64 = 0
-        for var i: i64 = 0; i < len(text); i += 1 {
-            if text[i] < '0' || text[i] > '9' {
-                break
-            }
-            int_val = int_val * 10 + ((text[i] - '0') as u64)
+        var val: f64 = 0.0
+        var i: i64 = 0
+        for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+            val = val * 10.0 + ((text[i] - '0') as f64)
+            i += 1
         }
-        *out_bits = int_val
+        if i < len(text) && text[i] == '.' {
+            i += 1
+            var frac: f64 = 0.1
+            for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+                val = val + ((text[i] - '0') as f64) * frac
+                frac = frac * 0.1
+                i += 1
+            }
+        }
+        if k == TypeKind.F32 {
+            var f = val as f32
+            var ptr = ((&f) as u64) as *const u32
+            *out_bits = (*ptr) as u64
+        } else {
+            var ptr = ((&val) as u64) as *const u64
+            *out_bits = *ptr
+        }
         return simple_type(k)
     }
     if node.kind == AstKind.Positive || node.kind == AstKind.BitNot || node.kind == AstKind.LogicalNot {
@@ -739,7 +755,13 @@ fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, ou
         var b: u64 = 0
         var s: u32 = 0
         var t = eval_const_expr(c, node.a, expected, &b, &s)
-        *out_bits = (0 as u64) - b
+        if t.kind == TypeKind.F64 {
+            *out_bits = b ^ ((1 as u64) << 63)
+        } else if t.kind == TypeKind.F32 {
+            *out_bits = b ^ ((1 as u64) << 31)
+        } else {
+            *out_bits = (0 as u64) - b
+        }
         return t
     }
     if node.kind == AstKind.Identifier {
@@ -781,6 +803,7 @@ fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, ou
         var elem = simple_type(TypeKind.U8)
         arr.element_type = add_element(c, elem)
         arr.length = node.a - 2
+        set_node_type(c, id, arr)
         return arr
     }
     if node.kind == AstKind.Member {
@@ -814,7 +837,38 @@ fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, ou
         if c.has_error { return empty_type() }
         var b: u64 = 0
         var s: u32 = 0
-        eval_const_expr(c, node.a, dst, &b, &s)
+        var src_t = eval_const_expr(c, node.a, dst, &b, &s)
+        if dst.kind == TypeKind.F64 && is_integer(src_t.kind) {
+            var d: f64 = 0.0
+            if is_signed(src_t.kind) { d = (b as i64) as f64 } else { d = b as f64 }
+            var ptr = ((&d) as u64) as *const u64
+            b = *ptr
+        } else if dst.kind == TypeKind.F32 && is_integer(src_t.kind) {
+            var f: f32 = 0.0
+            if is_signed(src_t.kind) { f = (b as i64) as f32 } else { f = b as f32 }
+            var ptr = ((&f) as u64) as *const u32
+            b = (*ptr) as u64
+        } else if is_integer(dst.kind) && src_t.kind == TypeKind.F64 {
+            var ptr = ((&b) as u64) as *const f64
+            var d = *ptr
+            if is_signed(dst.kind) { b = (d as i64) as u64 } else { b = d as u64 }
+        } else if is_integer(dst.kind) && src_t.kind == TypeKind.F32 {
+            var b32 = b as u32
+            var ptr = ((&b32) as u64) as *const f32
+            var f = *ptr
+            if is_signed(dst.kind) { b = (f as i64) as u64 } else { b = f as u64 }
+        } else if dst.kind == TypeKind.F32 && src_t.kind == TypeKind.F64 {
+            var ptr = ((&b) as u64) as *const f64
+            var f = (*ptr) as f32
+            var fptr = ((&f) as u64) as *const u32
+            b = (*fptr) as u64
+        } else if dst.kind == TypeKind.F64 && src_t.kind == TypeKind.F32 {
+            var b32 = b as u32
+            var ptr = ((&b32) as u64) as *const f32
+            var d = (*ptr) as f64
+            var dptr = ((&d) as u64) as *const u64
+            b = *dptr
+        }
         *out_bits = b
         return dst
     }
@@ -965,6 +1019,11 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         if str.equals(text, "true") || str.equals(text, "false") {
             var sn = c.sema.nodes.data
             sn[id as i64].is_boolean_literal = true
+            if str.equals(text, "true") {
+                sn[id as i64].binding = 1
+            } else {
+                sn[id as i64].binding = 0
+            }
             res = simple_type(TypeKind.Bool)
         } else {
             var li = find_local(c, name, 0)
@@ -998,9 +1057,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
             res = fail(c, id, "invalid integer literal")
         } else {
             var k = TypeKind.I32
-            if text[0] == '\'' {
-                k = TypeKind.U8
-            } else if is_integer(expected.kind) && !is_enum(expected) {
+            if is_integer(expected.kind) && !is_enum(expected) {
                 k = expected.kind
             } else if bits > 2147483647 {
                 k = TypeKind.I64
@@ -1070,6 +1127,9 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                         var fn_node = nodes[fid as i64]
                         if same_span(c.tree, fname, node_span(c.tree, fid, fn_node.a)) {
                             var fields = vec.as_slice.[SemaNode](&recs[si as i64].fields)
+                            var sn = c.sema.nodes.data
+                            sn[init_id as i64].type_info = fields[f as i64].type_info
+                            sn[init_id as i64].binding = fields[f as i64].binding
                             check_value(c, init_node.b, fields[f as i64].type_info)
                             matched = true
                             break
@@ -1266,7 +1326,12 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
     } else if node.kind == AstKind.Cast {
         var dst = resolve_type(c, node.b)
         if !c.has_error {
-            var src = check_expr(c, node.a, dst)
+            var hint = empty_type()
+            var op_node = nodes[node.a as i64]
+            if op_node.kind == AstKind.Integer {
+                hint = simple_type(TypeKind.U64)
+            }
+            check_expr(c, node.a, hint)
             if !c.has_error {
                 res = dst
             }
@@ -1377,10 +1442,10 @@ fun check_statement(c: *Checker, id: u32): bool {
     }
     var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
     var node = nodes[id as i64]
+    var falls = true
     if node.kind == AstKind.Block {
-        return check_block(c, id)
-    }
-    if node.kind == AstKind.Return {
+        falls = check_block(c, id)
+    } else if node.kind == AstKind.Return {
         if node.a == NODE_NONE {
             if c.current_return.kind != TypeKind.Void {
                 fail(c, id, "non-void function must return a value")
@@ -1392,15 +1457,39 @@ fun check_statement(c: *Checker, id: u32): bool {
                 check_value(c, node.a, c.current_return)
             }
         }
-        return false
-    }
-    if node.kind == AstKind.Break || node.kind == AstKind.Continue {
+        falls = false
+    } else if node.kind == AstKind.Break || node.kind == AstKind.Continue {
         if c.loops.len == 0 {
             fail(c, id, "break or continue outside loop")
+        } else {
+            var target = (c.loops.len - 1) as i64
+            if node.a != NODE_NONE {
+                var lbl_node = nodes[node.a as i64]
+                var lbl = node_span(c.tree, node.a, lbl_node.a)
+                var loops = vec.as_slice.[LoopEntry](&c.loops)
+                target = -1
+                var k = len(loops) - 1
+                for k >= 0 {
+                    if loops[k].label.length > 0 && same_span(c.tree, loops[k].label, lbl) {
+                        target = k
+                        break
+                    }
+                    k -= 1
+                }
+                if target < 0 {
+                    fail(c, node.a, "unknown loop label")
+                    target = 0
+                }
+            }
+            var sn = c.sema.nodes.data
+            sn[id as i64].binding = target as u32
+            if node.kind == AstKind.Break {
+                var lptr = c.loops.data
+                lptr[target].has_break = true
+            }
         }
-        return false
-    }
-    if node.kind == AstKind.Var {
+        falls = false
+    } else if node.kind == AstKind.Var {
         var vars = vec.as_slice.[AstVariable](&c.tree.variables)
         var v = vars[node.a as i64]
         var name = node_span(c.tree, id, v.name_length)
@@ -1433,9 +1522,8 @@ fun check_statement(c: *Checker, id: u32): bool {
         var sn = c.sema.nodes.data
         sn[id as i64].binding = slot
         sn[id as i64].type_info = vt
-        return true
-    }
-    if node.kind == AstKind.Const {
+        falls = true
+    } else if node.kind == AstKind.Const {
         var idx = node.a
         check_const_decl(c, idx)
         if c.has_error { return true }
@@ -1450,24 +1538,23 @@ fun check_statement(c: *Checker, id: u32): bool {
             depth: c.scope_depth,
         }
         vec.push.[LocalVar](&c.locals, &lv)
-        return true
-    }
-    if node.kind == AstKind.If {
+        falls = true
+    } else if node.kind == AstKind.If {
         check_value(c, node.a, simple_type(TypeKind.Bool))
         var brs = vec.as_slice.[AstIfBranches](&c.tree.if_branches)
         var br = brs[node.b as i64]
         var then_falls = check_block(c, br.then_branch)
         if br.else_branch == NODE_NONE {
-            return true
+            falls = true
+        } else {
+            var else_falls = check_statement(c, br.else_branch)
+            falls = then_falls || else_falls
         }
-        var else_falls = check_statement(c, br.else_branch)
-        return then_falls || else_falls
-    }
-    if node.kind == AstKind.Match {
+    } else if node.kind == AstKind.Match {
         var children = vec.as_slice.[u32](&c.tree.children)
         var st = check_expr(c, children[node.a as i64], empty_type())
         var has_else = false
-        var falls = false
+        var arm_falls = false
         var pattern_count: u32 = 0
         for var i: u32 = 1; i < node.b && !c.has_error; i += 1 {
             var arm_id = children[(node.a + i) as i64]
@@ -1476,13 +1563,27 @@ fun check_statement(c: *Checker, id: u32): bool {
                 has_else = true
             } else {
                 for var p: u32 = 0; p < arm.b - 1 && !c.has_error; p += 1 {
-                    check_value(c, children[(arm.a + p) as i64], st)
+                    var pat_id = children[(arm.a + p) as i64]
+                    var pbits: u64 = 0
+                    var pstr: u32 = 0
+                    var pt = eval_const_expr(c, pat_id, st, &pbits, &pstr)
+                    if !c.has_error {
+                        if !same_type(c, pt, st) && !(!is_enum(pt) && !is_enum(st) && can_widen_num(pt.kind, st.kind)) {
+                            fail(c, pat_id, "match pattern type mismatch")
+                        } else {
+                            var mv_idx = c.sema.match_values.len as u32
+                            vec.push_value.[u64](&c.sema.match_values, pbits)
+                            var sn = c.sema.nodes.data
+                            sn[pat_id as i64].binding = mv_idx
+                            sn[pat_id as i64].type_info = st
+                        }
+                    }
                     pattern_count += 1
                 }
             }
             var body = children[(arm.a + arm.b - 1) as i64]
             if check_statement(c, body) {
-                falls = true
+                arm_falls = true
             }
         }
         if !has_else && is_enum(st) {
@@ -1493,20 +1594,18 @@ fun check_statement(c: *Checker, id: u32): bool {
         } else if !has_else && st.kind == TypeKind.Bool && pattern_count >= 2 {
             has_else = true
         }
-        return !has_else || falls
-    }
-    if node.kind == AstKind.For {
+        falls = !has_else || arm_falls
+    } else if node.kind == AstKind.For {
         if node.a != NODE_NONE {
             check_value(c, node.a, simple_type(TypeKind.Bool))
         }
-        var le = LoopEntry { label: Span { offset: 0, length: 0 } }
+        var le = LoopEntry { label: Span { offset: 0, length: 0 }, has_break: false }
         vec.push.[LoopEntry](&c.loops, &le)
         check_block(c, node.b)
-        var dummy: LoopEntry
-        vec.pop.[LoopEntry](&c.loops, &dummy)
-        return node.a != NODE_NONE
-    }
-    if node.kind == AstKind.ForCStyle {
+        var popped: LoopEntry
+        vec.pop.[LoopEntry](&c.loops, &popped)
+        falls = node.a != NODE_NONE || popped.has_break
+    } else if node.kind == AstKind.ForCStyle {
         var saved_locals = c.locals.len
         c.scope_depth += 1
         var headers = vec.as_slice.[AstForHeader](&c.tree.for_headers)
@@ -1520,17 +1619,21 @@ fun check_statement(c: *Checker, id: u32): bool {
         if h.step != NODE_NONE {
             check_expr(c, h.step, empty_type())
         }
-        var le = LoopEntry { label: h.label }
+        var le = LoopEntry { label: h.label, has_break: false }
         vec.push.[LoopEntry](&c.loops, &le)
         check_block(c, node.b)
-        var dummy: LoopEntry
-        vec.pop.[LoopEntry](&c.loops, &dummy)
+        var popped: LoopEntry
+        vec.pop.[LoopEntry](&c.loops, &popped)
         c.scope_depth -= 1
         c.locals.len = saved_locals
-        return h.condition != NODE_NONE
+        falls = h.condition != NODE_NONE || popped.has_break
+    } else {
+        check_expr(c, id, empty_type())
+        falls = true
     }
-    check_expr(c, id, empty_type())
-    return true
+    var sn = c.sema.nodes.data
+    sn[id as i64].falls_through = falls
+    return falls
 }
 
 fun check_block(c: *Checker, id: u32): bool {
@@ -1545,6 +1648,8 @@ fun check_block(c: *Checker, id: u32): bool {
     }
     c.scope_depth -= 1
     c.locals.len = saved_locals
+    var sn = c.sema.nodes.data
+    sn[id as i64].falls_through = falls
     return falls
 }
 
@@ -1556,6 +1661,7 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
     if vec.init.[SemaType](&out.pointees, arena, 32) < 0 { return false }
     if vec.init.[SemaType](&out.elements, arena, 32) < 0 { return false }
     if vec.init.[u64](&out.enum_values, arena, 32) < 0 { return false }
+    if vec.init.[u64](&out.match_values, arena, 32) < 0 { return false }
 
     var empty_sn = SemaNode {
         type_info: empty_type(),

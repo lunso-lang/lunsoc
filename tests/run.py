@@ -27,17 +27,18 @@ def main() -> int:
                 return 1
     boot_pass = sorted((ROOT.parent / "lunso-boot" / "tests" / "pass").glob("*.lunso"))
     for sample in boot_pass:
-        got = subprocess.run([str(LUNSOC), "--check", str(sample)], text=True, capture_output=True, check=False)
-        exp = subprocess.run([str(BOOT), "--check", str(sample)], text=True, capture_output=True, check=False)
-        if got.returncode != exp.returncode or got.stdout != exp.stdout:
-            print(
-                f"check mismatch on {sample.name}: rc {got.returncode} vs {exp.returncode}\n"
-                f"got: {got.stdout!r}\nexp: {exp.stdout!r}\nstderr: {got.stderr}",
-                file=sys.stderr,
-            )
-            return 1
+        for flag in ("--check", "--emit-ir"):
+            got = subprocess.run([str(LUNSOC), flag, str(sample)], text=True, capture_output=True, check=False)
+            exp = subprocess.run([str(BOOT), flag, str(sample)], text=True, capture_output=True, check=False)
+            if got.returncode != exp.returncode or got.stdout != exp.stdout:
+                print(
+                    f"{flag} mismatch on {sample.name}: rc {got.returncode} vs {exp.returncode}\n"
+                    f"got:\n{got.stdout}\nexp:\n{exp.stdout}\nstderr: {got.stderr}",
+                    file=sys.stderr,
+                )
+                return 1
 
-    print(f"OK ({len(samples) * 2} lexer+parser checks, {len(boot_pass)} --check checks)")
+    print(f"OK ({len(samples) * 2} lexer+parser checks, {len(boot_pass) * 2} --check/--emit-ir checks)")
     return 0
 
 
