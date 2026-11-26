@@ -10,7 +10,7 @@ import ast { Ast }
 import ir { IrModule, lower as ir_lower, write as ir_write }
 import lexer { Token, TokenKind, error_message, token_name, tokenize_all }
 import modules { ModuleProgram, load as modules_load, report as modules_report }
-import native { NativeKind, NativeOptions, build as native_build }
+import native { NativeKind, NativeOptions, build as native_build, run_exe as native_run_exe }
 import parser { ParseError, parse }
 import qbe { write as qbe_write }
 import sema { Sema, SemaError, check }
@@ -134,6 +134,8 @@ fun report_offset_error(path: []u8, source: []u8, offset: u32, msg: []u8): i32 {
     return 1
 }
 
+const VERSION: []u8 = "lunsoc 0.1.0"
+
 enum Mode : u8 {
     Tokens,
     Parse,
@@ -143,9 +145,45 @@ enum Mode : u8 {
     EmitAsm,
     EmitObj,
     Build,
+    Run,
 }
 
-fun run_compile(path: []u8, source: []u8, std_dir: []u8, arena: *mem.Arena, mode: Mode, opts: *NativeOptions): i32 {
+fun print_usage(fd: i32, prog: []u8) {
+    io.write_bytes(fd, "usage: ")
+    io.write_bytes(fd, prog)
+    io.write_bytes(fd, " [options] <source.lunso>\n       ")
+    io.write_bytes(fd, prog)
+    io.write_bytes(fd, " --build [options] <source.lunso> [-o <executable>] [--link <object>]...\n       ")
+    io.write_bytes(fd, prog)
+    io.write_bytes(fd, " --run [options] <source.lunso> [-- <args>...]\n")
+}
+
+fun print_help(prog: []u8) {
+    print_usage(1, prog)
+    io.println("")
+    io.println("Modes:")
+    io.println("  (default)        Dump lexer tokens")
+    io.println("  --parse          Parse and report AST summary")
+    io.println("  --check          Run module loading and semantic checks")
+    io.println("  --emit-ir        Emit Lunso IR to stdout")
+    io.println("  --emit-qbe       Emit QBE IL to stdout")
+    io.println("  --emit-asm       Emit assembly (.s) file")
+    io.println("  -c, --emit-obj   Compile to an object (.o) file")
+    io.println("  --build          Compile and link a native executable")
+    io.println("  --run            Compile to a temporary executable and run it")
+    io.println("")
+    io.println("Options:")
+    io.println("  --std=<dir>      Override standard library directory")
+    io.println("  --std <dir>      Override standard library directory")
+    io.println("  -o <file>        Output path (with --build, -c/--emit-obj, --emit-asm)")
+    io.println("  --link <obj>     Link an additional object or archive (with --build/--run)")
+    io.println("  -nostdlib        Link without standard C runtime/libraries")
+    io.println("  -h, --help       Show this help message and exit")
+    io.println("  -V, --version    Show compiler version and exit")
+}
+
+fun run_compile(path: []u8, source: []u8, std_dir: []u8, arena: *mem.Arena, mode: Mode,
+                opts: *NativeOptions, run_args: [][]u8): i32 {
     var prog: ModuleProgram
     if !modules_load(arena, path, source, std_dir, &prog) {
         return 1
@@ -180,6 +218,9 @@ fun run_compile(path: []u8, source: []u8, std_dir: []u8, arena: *mem.Arena, mode
         io.write_bytes(1, vec.as_slice.[u8](&out_buf))
         return 0
     }
+    if mode == Mode.Run {
+        return native_run_exe(arena, &mod, path, opts, run_args)
+    }
     if !native_build(arena, &mod, path, opts) {
         return 1
     }
@@ -209,10 +250,33 @@ fun resolve_std_obj(arena: *mem.Arena): []u8 {
     return ""
 }
 
-fun default_output(mode: Mode): []u8 {
-    if mode == Mode.EmitAsm { return "a.s" }
-    if mode == Mode.EmitObj { return "a.o" }
-    return "a.out"
+fun default_output_name(arena: *mem.Arena, path: []u8, mode: Mode): []u8 {
+    var base_start: i64 = 0
+    for var i: i64 = 0; i < len(path); i += 1 {
+        if path[i] == '/' { base_start = i + 1 }
+    }
+    var base = path[base_start..len(path)]
+    var has_ext = len(base) > 6 && str.equals(base[(len(base) - 6)..len(base)], ".lunso")
+    var stem = base
+    if has_ext {
+        stem = base[0..(len(base) - 6)]
+    }
+    var suffix: []u8 = ""
+    if mode == Mode.EmitAsm {
+        suffix = ".s"
+    } else if mode == Mode.EmitObj {
+        suffix = ".o"
+    } else if !has_ext {
+        suffix = ".out"
+    }
+    var total = len(stem) + len(suffix)
+    var buf: *u8
+    if mem.alloc(arena, total as u64, 1, &buf) < 0 {
+        return "a.out"
+    }
+    for var i: i64 = 0; i < len(stem); i += 1 { buf[i] = stem[i] }
+    for var i: i64 = 0; i < len(suffix); i += 1 { buf[len(stem) + i] = suffix[i] }
+    return buf[0..total]
 }
 
 fun main(): i32 {
@@ -224,9 +288,14 @@ fun main(): i32 {
 
     var argv: [][]u8
     if args.load(&arena, &argv) < 0 {
-        io.eprintln("usage: lunsoc [--parse | --check | --emit-ir | --emit-qbe | --emit-asm | -c | --build] <source.lunso>")
+        print_usage(2, "lunsoc")
         mem.deinit(&arena)
         return 1
+    }
+
+    var prog_name: []u8 = "lunsoc"
+    if len(argv) > 0 {
+        prog_name = argv[0]
     }
 
     var mode = Mode.Tokens
@@ -235,6 +304,8 @@ fun main(): i32 {
     var output: []u8 = ""
     var std_dir: []u8 = ""
     var nostdlib = false
+    var stop_options = false
+    var run_args_start: i64 = len(argv)
     var objects: vec.Vec[[]u8]
     if vec.init.[[]u8](&objects, &arena, 4) < 0 {
         mem.deinit(&arena)
@@ -243,30 +314,51 @@ fun main(): i32 {
 
     for var i: i64 = 1; i < len(argv); i += 1 {
         var arg = argv[i]
-        if str.equals(arg, "--parse") {
+        if !stop_options && str.equals(arg, "--") {
+            stop_options = true
+            if mode == Mode.Run && len(path) > 0 {
+                run_args_start = i + 1
+                break
+            }
+            continue
+        }
+        if !stop_options && (str.equals(arg, "-h") || str.equals(arg, "--help")) {
+            print_help(prog_name)
+            mem.deinit(&arena)
+            return 0
+        }
+        if !stop_options && (str.equals(arg, "-V") || str.equals(arg, "--version")) {
+            io.println(VERSION)
+            mem.deinit(&arena)
+            return 0
+        }
+        if !stop_options && str.equals(arg, "--parse") {
             mode = Mode.Parse
             mode_count += 1
-        } else if str.equals(arg, "--check") {
+        } else if !stop_options && str.equals(arg, "--check") {
             mode = Mode.Check
             mode_count += 1
-        } else if str.equals(arg, "--emit-ir") {
+        } else if !stop_options && str.equals(arg, "--emit-ir") {
             mode = Mode.EmitIr
             mode_count += 1
-        } else if str.equals(arg, "--emit-qbe") {
+        } else if !stop_options && str.equals(arg, "--emit-qbe") {
             mode = Mode.EmitQbe
             mode_count += 1
-        } else if str.equals(arg, "--emit-asm") {
+        } else if !stop_options && str.equals(arg, "--emit-asm") {
             mode = Mode.EmitAsm
             mode_count += 1
-        } else if str.equals(arg, "-c") || str.equals(arg, "--emit-obj") {
+        } else if !stop_options && (str.equals(arg, "-c") || str.equals(arg, "--emit-obj")) {
             mode = Mode.EmitObj
             mode_count += 1
-        } else if str.equals(arg, "--build") {
+        } else if !stop_options && str.equals(arg, "--build") {
             mode = Mode.Build
             mode_count += 1
-        } else if str.equals(arg, "-nostdlib") {
+        } else if !stop_options && str.equals(arg, "--run") {
+            mode = Mode.Run
+            mode_count += 1
+        } else if !stop_options && (str.equals(arg, "-nostdlib") || str.equals(arg, "--nostdlib")) {
             nostdlib = true
-        } else if str.equals(arg, "--std") {
+        } else if !stop_options && str.equals(arg, "--std") {
             if i + 1 >= len(argv) || len(std_dir) > 0 {
                 io.eprintln("lunsoc: invalid --std option")
                 mem.deinit(&arena)
@@ -274,9 +366,14 @@ fun main(): i32 {
             }
             i += 1
             std_dir = argv[i]
-        } else if len(arg) > 6 && str.equals(arg[0..6], "--std=") {
+        } else if !stop_options && len(arg) > 6 && str.equals(arg[0..6], "--std=") {
+            if len(std_dir) > 0 || len(arg) == 6 {
+                io.eprintln("lunsoc: invalid --std option")
+                mem.deinit(&arena)
+                return 1
+            }
             std_dir = arg[6..len(arg)]
-        } else if str.equals(arg, "-o") {
+        } else if !stop_options && str.equals(arg, "-o") {
             if i + 1 >= len(argv) || len(output) > 0 {
                 io.eprintln("lunsoc: invalid -o option")
                 mem.deinit(&arena)
@@ -284,7 +381,7 @@ fun main(): i32 {
             }
             i += 1
             output = argv[i]
-        } else if str.equals(arg, "--link") {
+        } else if !stop_options && str.equals(arg, "--link") {
             if i + 1 >= len(argv) {
                 io.eprintln("lunsoc: --link requires a path")
                 mem.deinit(&arena)
@@ -292,16 +389,33 @@ fun main(): i32 {
             }
             i += 1
             vec.push_value.[[]u8](&objects, argv[i])
+        } else if !stop_options && len(arg) > 1 && arg[0] == '-' {
+            io.eprint("unknown option: ")
+            io.eprintln(arg)
+            print_usage(2, prog_name)
+            mem.deinit(&arena)
+            return 1
         } else if len(path) == 0 {
             path = arg
         } else {
-            io.eprintln("usage: lunsoc [--parse | --check | --emit-ir | --emit-qbe | --emit-asm | -c | --build] <source.lunso>")
+            io.eprint("unexpected argument: ")
+            io.eprintln(arg)
+            print_usage(2, prog_name)
             mem.deinit(&arena)
             return 1
         }
     }
+
     if len(path) == 0 || mode_count > 1 {
-        io.eprintln("usage: lunsoc [--parse | --check | --emit-ir | --emit-qbe | --emit-asm | -c | --build] <source.lunso>")
+        print_usage(2, prog_name)
+        mem.deinit(&arena)
+        return 1
+    }
+
+    var allows_output = mode == Mode.Build || mode == Mode.EmitObj || mode == Mode.EmitAsm
+    var allows_link = mode == Mode.Build || mode == Mode.Run
+    if (len(output) > 0 && !allows_output) || (!allows_link && (objects.len > 0 || nostdlib)) {
+        io.eprintln("-o, --link, and -nostdlib require a compatible build/run mode")
         mem.deinit(&arena)
         return 1
     }
@@ -321,10 +435,10 @@ fun main(): i32 {
     } else if mode == Mode.Parse {
         rc = run_parse(path, source, &arena)
     } else {
-        if len(output) == 0 {
-            output = default_output(mode)
+        if allows_output && len(output) == 0 {
+            output = default_output_name(&arena, path, mode)
         }
-        if mode == Mode.Build && !nostdlib && objects.len == 0 {
+        if allows_link && !nostdlib && objects.len == 0 {
             var std_obj = resolve_std_obj(&arena)
             if len(std_obj) > 0 {
                 vec.push_value.[[]u8](&objects, std_obj)
@@ -339,7 +453,8 @@ fun main(): i32 {
             output: output,
             objects: vec.as_slice.[[]u8](&objects),
         }
-        rc = run_compile(path, source, std_dir, &arena, mode, &opts)
+        var run_args = argv[run_args_start..len(argv)]
+        rc = run_compile(path, source, std_dir, &arena, mode, &opts, run_args)
     }
 
     mem.deinit(&arena)

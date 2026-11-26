@@ -76,7 +76,19 @@ def main() -> int:
             print("self-host QBE IL mismatch between stage1/stage2/stage3", file=sys.stderr)
             return 1
 
-    print(f"OK ({len(samples) * 2} lexer+parser checks, {len(boot_pass) * 3} --check/--emit-ir/--emit-qbe checks, {built_count} --build+run checks, self-host 3-stage OK)")
+        ver = subprocess.run([str(stage2), "--version"], text=True, capture_output=True, check=False)
+        hlp = subprocess.run([str(stage2), "--help"], text=True, capture_output=True, check=False)
+        if ver.returncode != 0 or "lunsoc " not in ver.stdout or hlp.returncode != 0 or "--run" not in hlp.stdout:
+            print("CLI --version / --help check failed", file=sys.stderr)
+            return 1
+        hello = Path(tmpdir) / "hello_run.lunso"
+        hello.write_text("fun main(): i32 { return 42 }\n")
+        run_res = subprocess.run([str(stage2), "--run", str(hello), "--", "arg1"], check=False)
+        if run_res.returncode != 42:
+            print(f"CLI --run check failed: {run_res.returncode} vs 42", file=sys.stderr)
+            return 1
+
+    print(f"OK ({len(samples) * 2} lexer+parser checks, {len(boot_pass) * 3} --check/--emit-ir/--emit-qbe checks, {built_count} --build+run checks, self-host 3-stage + CLI OK)")
     return 0
 
 

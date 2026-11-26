@@ -166,3 +166,38 @@ pub fun build(arena: *mem.Arena, mod: *IrModule, source_path: []u8, opts: *Nativ
     os.rmdir(dir)
     return ok
 }
+
+pub fun run_exe(arena: *mem.Arena, mod: *IrModule, source_path: []u8, opts: *NativeOptions, run_args: [][]u8): i32 {
+    var dir = make_temp_dir(arena)
+    if len(dir) == 0 {
+        io.eprintln("lunsoc: could not create temporary directory")
+        return 1
+    }
+    var exe_path = join_str(arena, dir, "/program")
+    var run_opts = NativeOptions {
+        kind: NativeKind.Exe,
+        nostdlib: opts.nostdlib,
+        output: exe_path,
+        objects: opts.objects,
+    }
+    var rc: i32 = 1
+    if build(arena, mod, source_path, &run_opts) {
+        var argv_buf: vec.Vec[[]u8]
+        if vec.init.[[]u8](&argv_buf, arena, (len(run_args) + 1) as u64) >= 0 {
+            vec.push_value.[[]u8](&argv_buf, exe_path)
+            for var i: i64 = 0; i < len(run_args); i += 1 {
+                vec.push_value.[[]u8](&argv_buf, run_args[i])
+            }
+            var status = os.run(exe_path, vec.as_slice.[[]u8](&argv_buf))
+            if status < 0 {
+                io.eprint(exe_path)
+                io.eprintln(": could not run program")
+            } else {
+                rc = status as i32
+            }
+        }
+    }
+    os.remove(exe_path)
+    os.rmdir(dir)
+    return rc
+}
