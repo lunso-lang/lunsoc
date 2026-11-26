@@ -171,15 +171,15 @@ fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
     if !std_root_mod {
         if in_std {
             var sub = name[4..len(name)]
-            file_path = path.join(l.arena, l.std_root, path.join2(l.arena, sub, ".lunso"))
+            file_path = path.join(l.arena, l.std_root, str.concat(l.arena, sub, ".lunso"))
             if !file.exists(file_path) {
                 file_path = ""
             }
         } else {
-            file_path = path.join3(l.arena, l.root, name, ".lunso")
+            file_path = str.concat3(l.arena, l.root, name, ".lunso")
             if !file.exists(file_path) {
                 file_path = ""
-                var fname = path.join2(l.arena, name, ".lunso")
+                var fname = str.concat(l.arena, name, ".lunso")
                 for var k: i64 = 0; k < len(l.include_dirs); k += 1 {
                     var inc = l.include_dirs[k]
                     if len(inc) == 0 { continue }
@@ -371,7 +371,7 @@ fun module_path_str(l: *Loader, path: NodeRange): []u8 {
 
 fun child_module(l: *Loader, parent: u32, name: []u8, offset: u32, out: *u32): bool {
     var mods = vec.as_slice.[ModuleEntry](&l.modules)
-    var p = path.join3(l.arena, mods[parent as i64].name, "/", name)
+    var p = str.concat3(l.arena, mods[parent as i64].name, "/", name)
     return get_module(l, p, offset, out)
 }
 

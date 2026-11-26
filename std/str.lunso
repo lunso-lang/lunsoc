@@ -1,3 +1,5 @@
+import std.mem
+
 pub fun equals(a: []u8, b: []u8): bool {
     if len(a) != len(b) {
         return false
@@ -77,6 +79,46 @@ pub fun trim_right(s: []u8): []u8 {
 
 pub fun trim(s: []u8): []u8 {
     return trim_right(trim_left(s))
+}
+
+pub fun strip_prefix(s: []u8, prefix: []u8): []u8 {
+    if starts_with(s, prefix) {
+        return s[len(prefix)..len(s)]
+    }
+    return s
+}
+
+pub fun strip_suffix(s: []u8, suffix: []u8): []u8 {
+    if ends_with(s, suffix) {
+        return s[0..(len(s) - len(suffix))]
+    }
+    return s
+}
+
+pub fun concat(arena: *mem.Arena, a: []u8, b: []u8): []u8 {
+    var total = len(a) + len(b)
+    if total == 0 { return "" }
+    var buf: *u8
+    if mem.alloc(arena, total as u64, 1, &buf) < 0 {
+        return ""
+    }
+    for var i: i64 = 0; i < len(a); i += 1 { buf[i] = a[i] }
+    for var i: i64 = 0; i < len(b); i += 1 { buf[len(a) + i] = b[i] }
+    return buf[0..total]
+}
+
+pub fun concat3(arena: *mem.Arena, a: []u8, b: []u8, c: []u8): []u8 {
+    var total = len(a) + len(b) + len(c)
+    if total == 0 { return "" }
+    var buf: *u8
+    if mem.alloc(arena, total as u64, 1, &buf) < 0 {
+        return ""
+    }
+    var pos: i64 = 0
+    for var i: i64 = 0; i < len(a); i += 1 { buf[pos] = a[i]; pos += 1 }
+    for var i: i64 = 0; i < len(b); i += 1 { buf[pos] = b[i]; pos += 1 }
+    for var i: i64 = 0; i < len(c); i += 1 { buf[pos] = c[i]; pos += 1 }
+    return buf[0..total]
 }
 
 pub fun parse_u64(s: []u8, out: *u64): bool {

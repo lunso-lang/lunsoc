@@ -47,6 +47,14 @@ fun main(): i32 {
         return 11
     }
 
+    if !str.equals(str.concat(&arena, "foo", "bar"), "foobar") ||
+       !str.equals(str.concat3(&arena, "a", "/", "b"), "a/b") ||
+       !str.equals(str.strip_prefix("pre_name", "pre_"), "name") ||
+       !str.equals(str.strip_suffix("main.lunso", ".lunso"), "main") {
+        mem.deinit(&arena)
+        return 14
+    }
+
     var hbuf: [16]u8
     var hn = fmt.hex_to_buf(0xdeadbeef, &hbuf[0], 16)
     if hn != 8 || !str.equals(hbuf[0..hn], "deadbeef") {

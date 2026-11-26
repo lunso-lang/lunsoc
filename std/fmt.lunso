@@ -1,5 +1,6 @@
 import std.io
 import std.mem
+import std.str
 
 pub fun u64_to_buf(value: u64, buf: *u8, cap: i64): i64 {
     if cap <= 0 {
@@ -116,87 +117,14 @@ pub fun print_i64(fd: i32, value: i64): i64 {
     return io.write_bytes(fd, buf[0..n])
 }
 
-fun is_ascii_space(b: u8): bool {
-    return b == ' ' || b == '\t' || b == '\r' || b == '\n'
-}
-
 pub fun parse_u64(text: []u8, out: *u64): bool {
-    var start: i64 = 0
-    var end = len(text)
-    for start < end && is_ascii_space(text[start]) {
-        start += 1
+    var trimmed = str.trim(text)
+    if len(trimmed) > 0 && trimmed[0] == '+' {
+        trimmed = trimmed[1..len(trimmed)]
     }
-    for end > start && is_ascii_space(text[end - 1]) {
-        end -= 1
-    }
-    if start >= end {
-        return false
-    }
-    if text[start] == '+' {
-        start += 1
-        if start >= end {
-            return false
-        }
-    }
-    var val: u64 = 0
-    var max: u64 = ~0
-    for var i = start; i < end; i += 1 {
-        var ch = text[i]
-        if ch < '0' || ch > '9' {
-            return false
-        }
-        var digit = (ch - '0') as u64
-        if val > (max - digit) / 10 {
-            return false
-        }
-        val = val * 10 + digit
-    }
-    *out = val
-    return true
+    return str.parse_u64(trimmed, out)
 }
 
 pub fun parse_i64(text: []u8, out: *i64): bool {
-    var start: i64 = 0
-    var end = len(text)
-    for start < end && is_ascii_space(text[start]) {
-        start += 1
-    }
-    for end > start && is_ascii_space(text[end - 1]) {
-        end -= 1
-    }
-    if start >= end {
-        return false
-    }
-    var neg = false
-    if text[start] == '-' {
-        neg = true
-        start += 1
-    } else if text[start] == '+' {
-        start += 1
-    }
-    if start >= end {
-        return false
-    }
-    var limit: u64 = ((1 as u64) << 63) - 1
-    if neg {
-        limit = (1 as u64) << 63
-    }
-    var mag: u64 = 0
-    for var i = start; i < end; i += 1 {
-        var ch = text[i]
-        if ch < '0' || ch > '9' {
-            return false
-        }
-        var digit = (ch - '0') as u64
-        if mag > (limit - digit) / 10 {
-            return false
-        }
-        mag = mag * 10 + digit
-    }
-    if neg {
-        *out = ((0 as u64) - mag) as i64
-    } else {
-        *out = mag as i64
-    }
-    return true
+    return str.parse_i64(str.trim(text), out)
 }

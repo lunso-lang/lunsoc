@@ -1,5 +1,6 @@
 import std.file
 import std.mem
+import std.str
 
 ext fun lunso_sys_fork(): i64
 ext fun lunso_sys_execve(path: *const u8, argv: **u8, envp: **u8): i64
@@ -73,18 +74,6 @@ pub fun rmdir(path: []u8): i64 {
     return lunso_sys_unlink(data(buf), 0x200)
 }
 
-fun has_prefix(haystack: []u8, prefix: []u8): bool {
-    if len(haystack) < len(prefix) {
-        return false
-    }
-    for var i: i64 = 0; i < len(prefix); i += 1 {
-        if haystack[i] != prefix[i] {
-            return false
-        }
-    }
-    return true
-}
-
 fun find_env_in_raw(raw: []u8, name: []u8, out: *[]u8): bool {
     var n = len(name)
     var raw_len = len(raw)
@@ -92,7 +81,7 @@ fun find_env_in_raw(raw: []u8, name: []u8, out: *[]u8): bool {
     for var i: i64 = 0; i < raw_len; i += 1 {
         if raw[i] == '\0' {
             var entry = raw[start..i]
-            if len(entry) > n && entry[n] == '=' && has_prefix(entry, name) {
+            if len(entry) > n && entry[n] == '=' && str.starts_with(entry, name) {
                 *out = raw[(start + n + 1)..i]
                 return true
             }

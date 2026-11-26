@@ -228,7 +228,7 @@ fun resolve_std_obj(arena: *mem.Arena): []u8 {
 
 fun default_output_name(arena: *mem.Arena, src_path: []u8, mode: Mode): []u8 {
     var base = path.basename(src_path)
-    var stem = path.strip_suffix(base, ".lunso")
+    var stem = str.strip_suffix(base, ".lunso")
     var has_ext = len(stem) < len(base)
     var suffix: []u8 = ""
     if mode == Mode.EmitAsm {
@@ -238,7 +238,7 @@ fun default_output_name(arena: *mem.Arena, src_path: []u8, mode: Mode): []u8 {
     } else if !has_ext {
         suffix = ".out"
     }
-    var out = path.join2(arena, stem, suffix)
+    var out = str.concat(arena, stem, suffix)
     if len(out) == 0 {
         return "a.out"
     }
