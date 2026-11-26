@@ -6,14 +6,15 @@ import std.os
 import std.path
 import std.str
 import std.vec
-import frontend.ast { Ast }
-import backend.ir { IrModule, lower as ir_lower, write as ir_write }
-import frontend.lexer { Token, TokenKind, error_message, token_name, tokenize_all }
-import frontend.modules { ModuleProgram, format_unexpected_byte, load as modules_load, print_caret, report as modules_report }
-import backend.native { NativeKind, NativeOptions, build as native_build, run_exe as native_run_exe }
-import frontend.parser { ParseError, parse }
-import backend.qbe { write as qbe_write }
-import frontend.sema { Sema, SemaError, check }
+import frontend.ast
+import backend.ir
+import frontend.lexer
+import frontend.modules
+import backend.native
+import backend.native { NativeKind, NativeOptions }
+import frontend.parser
+import backend.qbe
+import frontend.sema
 
 fun print_lexeme(bytes: []u8) {
     for var i: i64 = 0; i < len(bytes); i += 1 {
@@ -42,14 +43,14 @@ fun print_lexeme(bytes: []u8) {
     }
 }
 
-fun has_lexeme(kind: TokenKind): bool {
+fun has_lexeme(kind: lexer.TokenKind): bool {
     match kind {
-        TokenKind.Identifier, TokenKind.Integer, TokenKind.Float, TokenKind.String, TokenKind.Char, TokenKind.Comment => return true
+        lexer.TokenKind.Identifier, lexer.TokenKind.Integer, lexer.TokenKind.Float, lexer.TokenKind.String, lexer.TokenKind.Char, lexer.TokenKind.Comment => return true
         else => return false
     }
 }
 
-fun report_error(path: []u8, source: []u8, tok: Token, msg: []u8): i32 {
+fun report_error(path: []u8, source: []u8, tok: lexer.Token, msg: []u8): i32 {
     io.eprint(path)
     io.eprint(":")
     fmt.print_u64(2, tok.line)
@@ -57,34 +58,34 @@ fun report_error(path: []u8, source: []u8, tok: Token, msg: []u8): i32 {
     fmt.print_u64(2, tok.column)
     io.eprint(": ")
     io.eprintln(msg)
-    print_caret(source, 0, len(source) as u32, tok.offset as u32, tok.line, tok.column)
+    modules.print_caret(source, 0, len(source) as u32, tok.offset as u32, tok.line, tok.column)
     return 1
 }
 
 fun dump_tokens(path: []u8, source: []u8, arena: *mem.Arena): i32 {
-    var tokens: vec.Vec[Token]
-    if vec.init.[Token](&tokens, arena, 128) < 0 {
+    var tokens: vec.Vec[lexer.Token]
+    if vec.init.[lexer.Token](&tokens, arena, 128) < 0 {
         io.eprintln("lunsoc: out of memory")
         return 1
     }
 
-    var err_tok: Token
-    if !tokenize_all(source, &tokens, &err_tok) {
-        var msg = error_message(err_tok.kind)
-        if err_tok.kind == TokenKind.Invalid && (err_tok.offset as i64) < len(source) {
-            msg = format_unexpected_byte(arena, source[err_tok.offset as i64])
+    var err_tok: lexer.Token
+    if !lexer.tokenize_all(source, &tokens, &err_tok) {
+        var msg = lexer.error_message(err_tok.kind)
+        if err_tok.kind == lexer.TokenKind.Invalid && (err_tok.offset as i64) < len(source) {
+            msg = modules.format_unexpected_byte(arena, source[err_tok.offset as i64])
         }
         return report_error(path, source, err_tok, msg)
     }
 
-    var slice = vec.as_slice.[Token](&tokens)
+    var slice = vec.as_slice.[lexer.Token](&tokens)
     for var i: i64 = 0; i < len(slice); i += 1 {
         var tok = slice[i]
         fmt.print_u64(1, tok.line)
         io.print(":")
         fmt.print_u64(1, tok.column)
         io.print(" ")
-        io.print(token_name(tok.kind))
+        io.print(lexer.token_name(tok.kind))
         if has_lexeme(tok.kind) {
             io.print(" ")
             var start = tok.offset as i64
@@ -97,12 +98,12 @@ fun dump_tokens(path: []u8, source: []u8, arena: *mem.Arena): i32 {
 }
 
 fun run_parse(path: []u8, source: []u8, arena: *mem.Arena): i32 {
-    var tree: Ast
-    var err: ParseError
-    if !parse(arena, source, &tree, &err) {
+    var tree: ast.Ast
+    var err: parser.ParseError
+    if !parser.parse(arena, source, &tree, &err) {
         var msg = err.message
-        if err.token.kind == TokenKind.Invalid && (err.token.offset as i64) < len(source) {
-            msg = format_unexpected_byte(arena, source[err.token.offset as i64])
+        if err.token.kind == lexer.TokenKind.Invalid && (err.token.offset as i64) < len(source) {
+            msg = modules.format_unexpected_byte(arena, source[err.token.offset as i64])
         }
         return report_error(path, source, err.token, msg)
     }
@@ -169,16 +170,16 @@ fun print_help(prog: []u8) {
 
 fun run_compile(path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, arena: *mem.Arena, mode: Mode,
                 opts: *NativeOptions, run_args: [][]u8): i32 {
-    var prog: ModuleProgram
-    if !modules_load(arena, path, source, std_dir, include_dirs, &prog) {
+    var prog: modules.ModuleProgram
+    if !modules.load(arena, path, source, std_dir, include_dirs, &prog) {
         return 1
     }
-    var sem: Sema
-    var serr: SemaError
-    if !check(arena, &prog.tree, &sem, &serr) {
-        modules_report(&prog, serr.offset, serr.message)
+    var sem: sema.Sema
+    var serr: sema.SemaError
+    if !sema.check(arena, &prog.tree, &sem, &serr) {
+        modules.report(&prog, serr.offset, serr.message)
         if serr.note_offset != 0 {
-            modules_report(&prog, serr.note_offset, serr.note_message)
+            modules.report(&prog, serr.note_offset, serr.note_message)
         }
         return 1
     }
@@ -188,18 +189,18 @@ fun run_compile(path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, a
         io.println(" function(s)")
         return 0
     }
-    var mod: IrModule
-    if !ir_lower(arena, &prog.tree, &sem, &mod) {
+    var mod: ir.IrModule
+    if !ir.lower(arena, &prog.tree, &sem, &mod) {
         io.eprintln("lunsoc: could not lower to IR")
         return 1
     }
     if mode == Mode.EmitIr {
-        ir_write(&mod)
+        ir.write(&mod)
         return 0
     }
     if mode == Mode.EmitQbe {
         var out_buf: vec.Vec[u8]
-        if !qbe_write(arena, &mod, &out_buf) {
+        if !qbe.write(arena, &mod, &out_buf) {
             io.eprintln("lunsoc: could not emit QBE IL")
             return 1
         }
@@ -207,9 +208,9 @@ fun run_compile(path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, a
         return 0
     }
     if mode == Mode.Run {
-        return native_run_exe(arena, &mod, path, opts, run_args)
+        return native.run_exe(arena, &mod, path, opts, run_args)
     }
-    if !native_build(arena, &mod, path, opts) {
+    if !native.build(arena, &mod, path, opts) {
         return 1
     }
     return 0

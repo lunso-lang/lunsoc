@@ -1,7 +1,7 @@
 import std.args
 import std.io
 import std.mem
-import driver { run as driver_run }
+import driver
 
 fun main(): i32 {
     var arena: mem.Arena
@@ -17,7 +17,7 @@ fun main(): i32 {
         return 1
     }
 
-    var rc = driver_run(&arena, argv)
+    var rc = driver.run(&arena, argv)
     mem.deinit(&arena)
     return rc
 }

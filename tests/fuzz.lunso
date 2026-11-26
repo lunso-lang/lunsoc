@@ -6,12 +6,12 @@ import std.mem
 import std.rand
 import std.str
 import std.vec
-import frontend.ast { Ast }
-import backend.ir { IrModule, lower as ir_lower }
-import frontend.lexer { Token, tokenize_all }
-import frontend.parser { ParseError, parse }
-import backend.qbe { write as qbe_write }
-import frontend.sema { Sema, SemaError, check }
+import frontend.ast
+import backend.ir
+import frontend.lexer
+import frontend.parser
+import backend.qbe
+import frontend.sema
 
 fun parse_u64(s: []u8, out: *u64): bool {
     if len(s) == 0 { return false }
@@ -25,24 +25,24 @@ fun parse_u64(s: []u8, out: *u64): bool {
 }
 
 fun fuzz_one(arena: *mem.Arena, src: []u8) {
-    var tokens: vec.Vec[Token]
-    if vec.init.[Token](&tokens, arena, 64) < 0 { return }
-    var err_tok: Token
-    if !tokenize_all(src, &tokens, &err_tok) { return }
+    var tokens: vec.Vec[lexer.Token]
+    if vec.init.[lexer.Token](&tokens, arena, 64) < 0 { return }
+    var err_tok: lexer.Token
+    if !lexer.tokenize_all(src, &tokens, &err_tok) { return }
 
-    var tree: Ast
-    var perr: ParseError
-    if !parse(arena, src, &tree, &perr) { return }
+    var tree: ast.Ast
+    var perr: parser.ParseError
+    if !parser.parse(arena, src, &tree, &perr) { return }
 
-    var sem: Sema
-    var serr: SemaError
-    if !check(arena, &tree, &sem, &serr) { return }
+    var sem: sema.Sema
+    var serr: sema.SemaError
+    if !sema.check(arena, &tree, &sem, &serr) { return }
 
-    var mod: IrModule
-    if !ir_lower(arena, &tree, &sem, &mod) { return }
+    var mod: ir.IrModule
+    if !ir.lower(arena, &tree, &sem, &mod) { return }
 
     var qbe_buf: vec.Vec[u8]
-    qbe_write(arena, &mod, &qbe_buf)
+    qbe.write(arena, &mod, &qbe_buf)
 }
 
 fun mutate_buf(rng: *rand.Rng, seed: []u8, buf: *u8, cap: i64): i64 {

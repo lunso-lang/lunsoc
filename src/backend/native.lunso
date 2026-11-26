@@ -7,9 +7,9 @@ import std.path
 import std.str
 import std.time
 import std.vec
-import backend.ir { IrFunction, IrModule }
-import backend.qbe { write as qbe_write }
-import frontend.sema { TypeKind }
+import backend.ir
+import backend.qbe
+import frontend.sema
 
 pub enum NativeKind : u8 {
     Exe,
@@ -24,15 +24,15 @@ pub struct NativeOptions {
     objects: [][]u8
 }
 
-fun has_entry_point(mod: *IrModule): bool {
-    var fns = vec.as_slice.[IrFunction](&mod.functions)
+fun has_entry_point(mod: *ir.IrModule): bool {
+    var fns = vec.as_slice.[ir.IrFunction](&mod.functions)
     for var i: i64 = 0; i < len(fns); i += 1 {
         var f = fns[i]
         var start = f.name.offset as i64
         var end = (f.name.offset + f.name.length) as i64
         var name = mod.source[start..end]
         if !f.external && str.equals(name, "main") {
-            return f.result.kind == TypeKind.I32 && f.parameter_count == 0
+            return f.result.kind == sema.TypeKind.I32 && f.parameter_count == 0
         }
     }
     return false
@@ -76,7 +76,7 @@ fun get_tool(arena: *mem.Arena, env_name: []u8, fallback: []u8): []u8 {
     return fallback
 }
 
-pub fun build(arena: *mem.Arena, mod: *IrModule, source_path: []u8, opts: *NativeOptions): bool {
+pub fun build(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *NativeOptions): bool {
     if opts.kind == NativeKind.Exe && !has_entry_point(mod) {
         io.eprint(source_path)
         io.eprintln(": expected entry point 'fun main(): i32'")
@@ -102,7 +102,7 @@ pub fun build(arena: *mem.Arena, mod: *IrModule, source_path: []u8, opts: *Nativ
     var asm_path = path.join2(arena, dir, "/module.s")
 
     var qbe_buf: vec.Vec[u8]
-    var ok = qbe_write(arena, mod, &qbe_buf)
+    var ok = qbe.write(arena, mod, &qbe_buf)
     if !ok {
         io.eprintln("lunsoc: could not generate QBE IL")
     } else if file.write_all(il_path, vec.as_slice.[u8](&qbe_buf)) < 0 {
@@ -150,7 +150,7 @@ pub fun build(arena: *mem.Arena, mod: *IrModule, source_path: []u8, opts: *Nativ
     return ok
 }
 
-pub fun run_exe(arena: *mem.Arena, mod: *IrModule, source_path: []u8, opts: *NativeOptions, run_args: [][]u8): i32 {
+pub fun run_exe(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *NativeOptions, run_args: [][]u8): i32 {
     var dir = make_temp_dir(arena)
     if len(dir) == 0 {
         io.eprintln("lunsoc: could not create temporary directory")
