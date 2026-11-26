@@ -55,6 +55,17 @@ fun main(): i32 {
         return 14
     }
 
+    var orig = "cloned"
+    var copy = str.clone(&arena, orig)
+    if !str.equals(copy, orig) || data(copy) == data(orig) || !str.equals(str.clone(&arena, ""), "") {
+        mem.deinit(&arena)
+        return 15
+    }
+    if str.hash("") != 0xcbf29ce484222325 || str.hash("hello") != str.hash(str.clone(&arena, "hello")) || str.hash("hello") == str.hash("world") {
+        mem.deinit(&arena)
+        return 16
+    }
+
     var hbuf: [16]u8
     var hn = fmt.hex_to_buf(0xdeadbeef, &hbuf[0], 16)
     if hn != 8 || !str.equals(hbuf[0..hn], "deadbeef") {

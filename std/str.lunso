@@ -121,6 +121,28 @@ pub fun concat3(arena: *mem.Arena, a: []u8, b: []u8, c: []u8): []u8 {
     return buf[0..total]
 }
 
+pub fun clone(arena: *mem.Arena, s: []u8): []u8 {
+    var n = len(s)
+    if n == 0 { return "" }
+    var buf: *u8
+    if mem.alloc(arena, n as u64, 1, &buf) < 0 {
+        return ""
+    }
+    for var i: i64 = 0; i < n; i += 1 {
+        buf[i] = s[i]
+    }
+    return buf[0..n]
+}
+
+pub fun hash(s: []u8): u64 {
+    var h: u64 = 0xcbf29ce484222325
+    for var i: i64 = 0; i < len(s); i += 1 {
+        h ^= s[i] as u64
+        h *= 0x100000001b3
+    }
+    return h
+}
+
 pub fun parse_u64(s: []u8, out: *u64): bool {
     if len(s) == 0 {
         return false
