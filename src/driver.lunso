@@ -374,14 +374,13 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
         return 1
     }
 
-    var raw: file.Bytes
-    if file.read_all(path, arena, &raw) < 0 {
+    var source: []u8
+    if file.read_all(path, arena, &source) < 0 {
         io.eprint(path)
         io.eprintln(": could not read source")
         return 1
     }
 
-    var source = raw.ptr[0..raw.len]
     var rc: i32 = 0
     if mode == Mode.Tokens {
         rc = dump_tokens(path, source, arena)

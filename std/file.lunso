@@ -5,7 +5,7 @@ pub struct File {
     active: bool
 }
 
-pub struct Bytes {
+struct ReadBuf {
     ptr: *u8
     len: i64
 }
@@ -105,7 +105,7 @@ pub fun write_to(handle: *File, bytes: []u8): i64 {
     return written
 }
 
-fun grow(arena: *mem.Arena, bytes: *Bytes, capacity: *i64): i64 {
+fun grow(arena: *mem.Arena, bytes: *ReadBuf, capacity: *i64): i64 {
     var max: i64 = 9223372036854775807
     if *capacity == max {
         return -75
@@ -129,7 +129,7 @@ fun grow(arena: *mem.Arena, bytes: *Bytes, capacity: *i64): i64 {
     return 0
 }
 
-fun read_contents(handle: *File, arena: *mem.Arena, bytes: *Bytes): i64 {
+fun read_contents(handle: *File, arena: *mem.Arena, bytes: *ReadBuf): i64 {
     var capacity: i64 = 0
     var count: i64 = 1
     for count > 0 {
@@ -170,18 +170,22 @@ fun finish(handle: *File, count: i64): i64 {
     return count
 }
 
-pub fun read_all(path: []u8, arena: *mem.Arena, out: *Bytes): i64 {
+pub fun read_all(path: []u8, arena: *mem.Arena, out: *[]u8): i64 {
     var handle: File
     var status = open_read(path, &handle)
     if status < 0 {
         return status
     }
-    var bytes: Bytes
+    var bytes: ReadBuf
     status = finish(&handle, read_contents(&handle, arena, &bytes))
     if status < 0 {
         return status
     }
-    *out = bytes
+    if bytes.len == 0 {
+        *out = ""
+    } else {
+        *out = bytes.ptr[0..bytes.len]
+    }
     return status
 }
 

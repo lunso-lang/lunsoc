@@ -108,9 +108,9 @@ fun main(): i32 {
                 return 1
             }
         } else {
-            var raw: file.Bytes
+            var raw: []u8
             if file.read_all(arg, &arena, &raw) >= 0 {
-                vec.push_value.[[]u8](&seeds, raw.ptr[0..raw.len])
+                vec.push_value.[[]u8](&seeds, raw)
             }
         }
     }

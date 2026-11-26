@@ -675,7 +675,7 @@ fun load_module(l: *Loader, mod_id: u32, owner: u32, offset: u32): bool {
         l.modules.data[mod_id as i64].state = LoadState.Loaded
         return true
     }
-    var raw: file.Bytes
+    var raw: []u8
     if file.read_all(file_path, l.arena, &raw) < 0 {
         return err_at(l, offset, "could not read imported module")
     }
@@ -683,7 +683,7 @@ fun load_module(l: *Loader, mod_id: u32, owner: u32, offset: u32): bool {
     l.modules.data[mod_id as i64].state = LoadState.Loading
     l.modules.data[mod_id as i64].parent = owner
     var first = l.program.tree.nodes.len as u32
-    var ok = parse_file(l, mod_id, raw.ptr[0..raw.len], offset)
+    var ok = parse_file(l, mod_id, raw, offset)
     if ok {
         var start_node = first
         if start_node == 0 { start_node = 1 }

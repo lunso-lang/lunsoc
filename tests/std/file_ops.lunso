@@ -12,9 +12,9 @@ fun main(): i32 {
         return 2
     }
 
-    var bytes: file.Bytes
+    var bytes: []u8
     var n = file.read_all("data.txt", &arena, &bytes)
-    if n != 16 || bytes.len != 16 {
+    if n != 16 || len(bytes) != 16 {
         return 3
     }
 
@@ -22,7 +22,7 @@ fun main(): i32 {
     if file.open_write("stream.txt", &out) < 0 {
         return 4
     }
-    if file.write_to(&out, bytes.ptr[0..bytes.len]) < 0 {
+    if file.write_to(&out, bytes) < 0 {
         return 5
     }
     if file.close(&out) < 0 {
@@ -47,7 +47,7 @@ fun main(): i32 {
     }
 
     // Missing file must return negative error code.
-    var missing: file.Bytes
+    var missing: []u8
     if file.read_all("does-not-exist.txt", &arena, &missing) >= 0 {
         return 11
     }

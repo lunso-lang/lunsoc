@@ -2,19 +2,20 @@ import std.file
 import std.mem
 
 pub fun load(arena: *mem.Arena, out: *[][]u8): i64 {
-    var raw: file.Bytes
+    var raw: []u8
     var status = file.read_all("/proc/self/cmdline", arena, &raw)
     if status < 0 {
         return status
     }
 
+    var raw_len = len(raw)
     var count: i64 = 0
-    for var i: i64 = 0; i < raw.len; i += 1 {
-        if raw.ptr[i] == '\0' {
+    for var i: i64 = 0; i < raw_len; i += 1 {
+        if raw[i] == '\0' {
             count += 1
         }
     }
-    if raw.len > 0 && raw.ptr[raw.len - 1] != '\0' {
+    if raw_len > 0 && raw[raw_len - 1] != '\0' {
         count += 1
     }
 
@@ -34,15 +35,15 @@ pub fun load(arena: *mem.Arena, out: *[][]u8): i64 {
     var items = mem_ptr as *[]u8
     var idx: i64 = 0
     var start: i64 = 0
-    for var i: i64 = 0; i < raw.len; i += 1 {
-        if raw.ptr[i] == '\0' {
-            items[idx] = raw.ptr[start..i]
+    for var i: i64 = 0; i < raw_len; i += 1 {
+        if raw[i] == '\0' {
+            items[idx] = raw[start..i]
             idx += 1
             start = i + 1
         }
     }
-    if idx < count && start < raw.len {
-        items[idx] = raw.ptr[start..raw.len]
+    if idx < count && start < raw_len {
+        items[idx] = raw[start..raw_len]
     }
 
     *out = items[0..count]
