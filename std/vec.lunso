@@ -148,6 +148,14 @@ pub fun get[T](vec: *Vec[T], index: u64, out: *T): bool {
     return true
 }
 
+pub fun get_ptr[T](vec: *Vec[T], index: u64, out: **T): bool {
+    if (vec as u64) == 0 || (out as u64) == 0 || index >= (*vec).len {
+        return false
+    }
+    *out = &(*vec).data[index]
+    return true
+}
+
 pub fun clear[T](vec: *Vec[T]) {
     if (vec as u64) != 0 {
         (*vec).len = 0

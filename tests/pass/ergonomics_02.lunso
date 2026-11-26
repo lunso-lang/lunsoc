@@ -1,0 +1,28 @@
+// expect-exit: 15
+// lunsoc-only
+import std.mem
+import std.vec
+
+fun main(): i32 {
+    var a = 1
+    var b = 2
+    if a == 1 &&
+       b == 2 {
+        a = 10
+    }
+    var argv: [3][]u8 = ["-c", "-o", "out"]
+    var arena: mem.Arena
+    mem.init(&arena, 4096)
+    var v: vec.Vec[[]u8]
+    vec.init.[[]u8](&v, &arena, 4)
+    vec.push_value.[[]u8](&v, "-o")
+    var p: *[]u8
+    if !vec.get_ptr.[[]u8](&v, 0, &p) {
+        return 1
+    }
+    *p = argv[2]
+    var s = vec.as_slice.[[]u8](&v)
+    var rc = a + (len(s[0]) as i32) + (len(argv[0]) as i32)
+    mem.deinit(&arena)
+    return rc
+}

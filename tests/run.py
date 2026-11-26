@@ -23,13 +23,16 @@ def find_boot() -> Path | None:
 
 
 def find_pass_samples() -> list[Path]:
-    local_pass = ROOT / "tests" / "pass"
-    if local_pass.is_dir():
-        return sorted(local_pass.glob("*.lunso"))
+    by_name: dict[str, Path] = {}
     boot_pass = ROOT.parent / "lunso-boot" / "tests" / "pass"
     if boot_pass.is_dir():
-        return sorted(boot_pass.glob("*.lunso"))
-    return []
+        for p in sorted(boot_pass.glob("*.lunso")):
+            by_name[p.name] = p
+    local_pass = ROOT / "tests" / "pass"
+    if local_pass.is_dir():
+        for p in sorted(local_pass.glob("*.lunso")):
+            by_name[p.name] = p
+    return [by_name[k] for k in sorted(by_name)]
 
 
 def main() -> int:
@@ -54,6 +57,8 @@ def main() -> int:
     pass_samples = find_pass_samples()
     if boot is not None:
         for sample in pass_samples:
+            if "// lunsoc-only" in sample.read_text():
+                continue
             for flag in ("--check", "--emit-ir", "--emit-qbe"):
                 got = subprocess.run([str(LUNSOC), flag, str(sample)], text=True, capture_output=True, check=False)
                 exp = subprocess.run([str(boot), flag, str(sample)], text=True, capture_output=True, check=False)

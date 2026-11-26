@@ -444,6 +444,9 @@ fun parse_expression(p: *Parser, minimum: u32): u32 {
         }
         var op_kind = infix_kind(tok.kind)
         advance(p)
+        for p.current.kind == TokenKind.Newline {
+            advance(p)
+        }
         var next_min = prec
         if prec != PREC_ASSIGNMENT {
             next_min += 1
