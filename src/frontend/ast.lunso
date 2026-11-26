@@ -271,3 +271,49 @@ pub fun finish_children(ast: *Ast, pending: *vec.Vec[u32], mark: u64): NodeRange
     pending.len = mark
     return NodeRange { first: first, count: count as u32 }
 }
+
+pub struct SourcePos {
+    line: u64
+    col: u64
+}
+
+pub fun offset_to_pos(src: []u8, offset: u32): SourcePos {
+    var limit = offset as i64
+    if limit > len(src) {
+        limit = len(src)
+    }
+    var line: u64 = 1
+    var col: u64 = 1
+    for var i: i64 = 0; i < limit; i += 1 {
+        var ch = src[i]
+        if ch == '\n' {
+            line += 1
+            col = 1
+        } else if ch != '\r' {
+            col += 1
+        }
+    }
+    return SourcePos { line: line, col: col }
+}
+
+pub fun pos_to_offset(src: []u8, line: u64, col: u64): u32 {
+    var cur_line: u64 = 1
+    var cur_col: u64 = 1
+    var n = len(src)
+    for var i: i64 = 0; i < n; i += 1 {
+        if cur_line > line || (cur_line == line && cur_col >= col) {
+            return i as u32
+        }
+        var ch = src[i]
+        if ch == '\n' {
+            if cur_line == line {
+                return i as u32
+            }
+            cur_line += 1
+            cur_col = 1
+        } else if ch != '\r' {
+            cur_col += 1
+        }
+    }
+    return n as u32
+}

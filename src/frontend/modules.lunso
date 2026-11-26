@@ -1,6 +1,7 @@
 import std.file
 import std.fmt
 import std.io
+import std.map
 import std.mem
 import std.os
 import std.path
@@ -43,12 +44,30 @@ struct Loader {
     root: []u8
     std_root: []u8
     include_dirs: [][]u8
+    overlays: *map.StrMap[[]u8]
     modules: vec.Vec[ModuleEntry]
     depth: u32
 }
 
 const NO_MODULE: u32 = ~0 as u32
 const MAX_MODULE_DEPTH: u32 = 256
+
+fun file_available(l: *Loader, p: []u8): bool {
+    if (l.overlays as u64) != 0 && map.has.[[]u8](l.overlays, p) {
+        return true
+    }
+    return file.exists(p)
+}
+
+pub fun find_file_at(files: []ModuleFile, offset: u32): i64 {
+    for var i: i64 = 0; i < len(files); i += 1 {
+        var f = files[i]
+        if offset >= f.start && offset <= f.start + f.length {
+            return i
+        }
+    }
+    return -1
+}
 
 pub fun print_caret(src: []u8, file_start: u32, file_end: u32, offset: u32, line: u64, col: u64) {
     if offset < file_start || offset > file_end || (file_end as i64) > len(src) {
@@ -172,19 +191,19 @@ fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
         if in_std {
             var sub = name[4..len(name)]
             file_path = path.join(l.arena, l.std_root, str.concat(l.arena, sub, ".lunso"))
-            if !file.exists(file_path) {
+            if !file_available(l, file_path) {
                 file_path = ""
             }
         } else {
             file_path = str.concat3(l.arena, l.root, name, ".lunso")
-            if !file.exists(file_path) {
+            if !file_available(l, file_path) {
                 file_path = ""
                 var fname = str.concat(l.arena, name, ".lunso")
                 for var k: i64 = 0; k < len(l.include_dirs); k += 1 {
                     var inc = l.include_dirs[k]
                     if len(inc) == 0 { continue }
                     var cand = path.join(l.arena, inc, fname)
-                    if file.exists(cand) {
+                    if file_available(l, cand) {
                         file_path = cand
                         break
                     }
@@ -676,7 +695,8 @@ fun load_module(l: *Loader, mod_id: u32, owner: u32, offset: u32): bool {
         return true
     }
     var raw: []u8
-    if file.read_all(file_path, l.arena, &raw) < 0 {
+    var from_overlay = (l.overlays as u64) != 0 && map.get.[[]u8](l.overlays, file_path, &raw)
+    if !from_overlay && file.read_all(file_path, l.arena, &raw) < 0 {
         return err_at(l, offset, "could not read imported module")
     }
     l.depth += 1
@@ -722,7 +742,8 @@ fun select_std_root(arena: *mem.Arena, override: []u8): []u8 {
     return ""
 }
 
-pub fun load(arena: *mem.Arena, entry_path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, out: *ModuleProgram): bool {
+pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, std_dir: []u8,
+                              include_dirs: [][]u8, overlays: *map.StrMap[[]u8], out: *ModuleProgram): bool {
     if !init(arena, source, &out.tree) {
         return false
     }
@@ -736,6 +757,7 @@ pub fun load(arena: *mem.Arena, entry_path: []u8, source: []u8, std_dir: []u8, i
         root: path.dir_prefix(entry_path),
         std_root: select_std_root(arena, std_dir),
         include_dirs: include_dirs,
+        overlays: overlays,
         modules: vec.Vec[ModuleEntry] { data: 0 as *ModuleEntry, len: 0, cap: 0, arena: arena },
         depth: 1,
     }
@@ -773,4 +795,8 @@ pub fun load(arena: *mem.Arena, entry_path: []u8, source: []u8, std_dir: []u8, i
         }
     }
     return true
+}
+
+pub fun load(arena: *mem.Arena, entry_path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, out: *ModuleProgram): bool {
+    return load_with_overlays(arena, entry_path, source, std_dir, include_dirs, 0 as *map.StrMap[[]u8], out)
 }
