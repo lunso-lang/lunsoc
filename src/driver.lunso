@@ -11,7 +11,6 @@ import backend.ir
 import frontend.lexer
 import frontend.modules
 import backend.native
-import backend.native { NativeKind, NativeOptions }
 import frontend.parser
 import backend.qbe
 import frontend.sema
@@ -169,7 +168,7 @@ fun print_help(prog: []u8) {
 }
 
 fun run_compile(path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, arena: *mem.Arena, mode: Mode,
-                opts: *NativeOptions, run_args: [][]u8): i32 {
+                opts: *native.NativeOptions, run_args: [][]u8): i32 {
     var prog: modules.ModuleProgram
     if !modules.load(arena, path, source, std_dir, include_dirs, &prog) {
         return 1
@@ -398,10 +397,10 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
                 vec.push_value.[[]u8](&objects, std_obj)
             }
         }
-        var nkind = NativeKind.Exe
-        if mode == Mode.EmitAsm { nkind = NativeKind.Asm }
-        if mode == Mode.EmitObj { nkind = NativeKind.Obj }
-        var opts = NativeOptions {
+        var nkind = native.NativeKind.Exe
+        if mode == Mode.EmitAsm { nkind = native.NativeKind.Asm }
+        if mode == Mode.EmitObj { nkind = native.NativeKind.Obj }
+        var opts = native.NativeOptions {
             kind: nkind,
             nostdlib: nostdlib,
             output: output,

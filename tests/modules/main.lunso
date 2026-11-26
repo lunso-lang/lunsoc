@@ -4,5 +4,6 @@ import nested.ops as nops
 import nested.ops { mul as multiply }
 
 fun main(): i32 {
-    return (add(2, 3) + nops.sub(20, 5) + multiply(3, 4)) + (FACTOR + nops.OFFSET)
+    var p = nops.Pair { x: nops.OFFSET, y: 0 }
+    return (add(2, 3) + nops.sub(20, 5) + multiply(3, 4)) + (FACTOR + p.x + p.y)
 }

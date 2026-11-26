@@ -1,5 +1,10 @@
 pub const OFFSET: i32 = 10
 
+pub struct Pair {
+    x: i32
+    y: i32
+}
+
 pub fun sub(a: i32, b: i32): i32 {
     return a - b
 }

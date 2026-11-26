@@ -1478,7 +1478,9 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
             if !c.has_error { si = st.record }
         } else {
             var q: AstQualified
-            if find_qualified(c.tree, tid, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
+            if find_qualified(c.tree, id, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
+                si = q.index
+            } else if find_qualified(c.tree, tid, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
                 si = q.index
             } else if tnode.kind == AstKind.Identifier || tnode.kind == AstKind.TypeName {
                 si = find_struct_idx(c, node_span(c.tree, tid, tnode.a))

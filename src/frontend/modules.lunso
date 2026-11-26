@@ -586,9 +586,10 @@ fun resolve_references(l: *Loader, owner: u32, first: u32, end: u32, member_pref
                 return false
             }
         } else if (node.kind == AstKind.Call || node.kind == AstKind.GenericType ||
+                  node.kind == AstKind.StructLiteral ||
                   (node.kind == AstKind.Member && !member_prefixes[(id - first) as i64])) {
             var is_call = node.kind == AstKind.Call
-            var is_type = node.kind == AstKind.GenericType
+            var is_type = node.kind == AstKind.GenericType || node.kind == AstKind.StructLiteral
             var base = id
             if is_call || is_type {
                 base = children[node.a as i64]
@@ -648,7 +649,7 @@ fun finish_module(l: *Loader, mod_id: u32, first: u32, end: u32): bool {
         var prefix = NODE_NONE
         if node.kind == AstKind.Member {
             prefix = node.a
-        } else if node.kind == AstKind.Call || node.kind == AstKind.GenericType || node.kind == AstKind.GenericCallee {
+        } else if node.kind == AstKind.Call || node.kind == AstKind.GenericType || node.kind == AstKind.GenericCallee || node.kind == AstKind.StructLiteral {
             prefix = children[node.a as i64]
         } else {
             continue
