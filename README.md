@@ -5,15 +5,15 @@ Self-hosted compiler for the Lunso programming language.
 ## Requirements
 
 - [QBE](https://c9x.me/compile/)
-- [lunso-boot 1.0](https://github.com/lunso-lang/lunso-boot/releases/tag/v1.0)
+- [lunsoc v0.1](https://github.com/lunso-lang/lunsoc/releases/tag/v0.1) (or [lunso-boot 1.0](https://github.com/lunso-lang/lunso-boot/releases/tag/v1.0) for bootstrapping from C)
 - C compiler (`cc`), `make`, `python3`
 
 ## Build & Test
 
 ```sh
-make
-make test
-make fuzz
+make LUNSO=/path/to/lunsoc
+make test LUNSO=/path/to/lunsoc
+make fuzz LUNSO=/path/to/lunsoc
 ```
 
-By default `Makefile` expects `lunso-boot` at `../lunso-boot/build/lunso`. Override with `LUNSO=/path/to/lunso`.
+By default `Makefile` uses `LUNSO=../lunso-boot/build/lunso`.

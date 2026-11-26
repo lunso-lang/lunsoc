@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lunsoc
+
+      - uses: actions/checkout@v4
+        with:
+          repository: lunso-lang/lunso-boot
+          ref: v1.0
+          path: lunso-boot
+
+      - name: Install QBE
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qbe
+
+      - name: Build lunso-boot
+        run: make -C lunso-boot all build/std-linux-x86_64.o
+
+      - name: Build and test lunsoc
+        run: make -C lunsoc test
+
+      - name: Package self-hosted release binary
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PKG="lunsoc-${VERSION}-linux-x86_64"
+          mkdir -p "dist/${PKG}" dist/assets
+          (cd lunsoc && ./build/lunsoc --build src/main.lunso -o "../dist/${PKG}/lunsoc")
+          strip "dist/${PKG}/lunsoc"
+          cp lunso-boot/build/std-linux-x86_64.o "dist/${PKG}/std-linux-x86_64.o"
+          cp -r lunso-boot/std "dist/${PKG}/std"
+          cp lunsoc/LICENSE lunsoc/README.md "dist/${PKG}/"
+          cp "dist/${PKG}/lunsoc" "dist/assets/lunsoc-linux-x86_64"
+          tar -C dist -czf "dist/assets/${PKG}.tar.gz" "${PKG}"
+          (cd dist/assets && sha256sum "${PKG}.tar.gz" "lunsoc-linux-x86_64" > SHA256SUMS.txt)
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: lunsoc
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            ../dist/assets/* \
+            --title "lunsoc ${GITHUB_REF_NAME}" \
+            --generate-notes
