@@ -1,0 +1,414 @@
+import std.file
+import std.fmt
+import std.io
+import std.mem
+import std.os
+import std.path
+import std.str
+import std.vec
+import ast { Ast }
+import ir { IrModule, lower as ir_lower, write as ir_write }
+import lexer { Token, TokenKind, error_message, token_name, tokenize_all }
+import modules { ModuleProgram, format_unexpected_byte, load as modules_load, print_caret, report as modules_report }
+import native { NativeKind, NativeOptions, build as native_build, run_exe as native_run_exe }
+import parser { ParseError, parse }
+import qbe { write as qbe_write }
+import sema { Sema, SemaError, check }
+
+fun print_lexeme(bytes: []u8) {
+    for var i: i64 = 0; i < len(bytes); i += 1 {
+        var b = bytes[i]
+        if b == '\r' {
+            io.print("\\r")
+        } else if b == '\n' {
+            io.print("\\n")
+        } else if b == '\t' {
+            io.print("\\t")
+        } else if b == '\\' {
+            io.print("\\\\")
+        } else if b < ' ' || b == 127 {
+            var hex: [16]u8
+            var n = fmt.hex_to_buf(b as u64, &hex[0], 16)
+            io.print("\\x")
+            if n == 1 {
+                io.print("0")
+            }
+            if n > 0 {
+                io.print(hex[0..n])
+            }
+        } else {
+            io.write_bytes(1, bytes[i..(i + 1)])
+        }
+    }
+}
+
+fun has_lexeme(kind: TokenKind): bool {
+    match kind {
+        TokenKind.Identifier, TokenKind.Integer, TokenKind.Float, TokenKind.String, TokenKind.Char, TokenKind.Comment => return true
+        else => return false
+    }
+}
+
+fun report_error(path: []u8, source: []u8, tok: Token, msg: []u8): i32 {
+    io.eprint(path)
+    io.eprint(":")
+    fmt.print_u64(2, tok.line)
+    io.eprint(":")
+    fmt.print_u64(2, tok.column)
+    io.eprint(": ")
+    io.eprintln(msg)
+    print_caret(source, 0, len(source) as u32, tok.offset as u32, tok.line, tok.column)
+    return 1
+}
+
+fun dump_tokens(path: []u8, source: []u8, arena: *mem.Arena): i32 {
+    var tokens: vec.Vec[Token]
+    if vec.init.[Token](&tokens, arena, 128) < 0 {
+        io.eprintln("lunsoc: out of memory")
+        return 1
+    }
+
+    var err_tok: Token
+    if !tokenize_all(source, &tokens, &err_tok) {
+        var msg = error_message(err_tok.kind)
+        if err_tok.kind == TokenKind.Invalid && (err_tok.offset as i64) < len(source) {
+            msg = format_unexpected_byte(arena, source[err_tok.offset as i64])
+        }
+        return report_error(path, source, err_tok, msg)
+    }
+
+    var slice = vec.as_slice.[Token](&tokens)
+    for var i: i64 = 0; i < len(slice); i += 1 {
+        var tok = slice[i]
+        fmt.print_u64(1, tok.line)
+        io.print(":")
+        fmt.print_u64(1, tok.column)
+        io.print(" ")
+        io.print(token_name(tok.kind))
+        if has_lexeme(tok.kind) {
+            io.print(" ")
+            var start = tok.offset as i64
+            var end = (tok.offset + tok.length) as i64
+            print_lexeme(source[start..end])
+        }
+        io.println("")
+    }
+    return 0
+}
+
+fun run_parse(path: []u8, source: []u8, arena: *mem.Arena): i32 {
+    var tree: Ast
+    var err: ParseError
+    if !parse(arena, source, &tree, &err) {
+        var msg = err.message
+        if err.token.kind == TokenKind.Invalid && (err.token.offset as i64) < len(source) {
+            msg = format_unexpected_byte(arena, source[err.token.offset as i64])
+        }
+        return report_error(path, source, err.token, msg)
+    }
+    var nodes: u64 = 0
+    if tree.nodes.len > 0 {
+        nodes = tree.nodes.len - 1
+    }
+    io.print("Parsed ")
+    fmt.print_u64(1, tree.functions.len)
+    io.print(" function(s), ")
+    fmt.print_u64(1, nodes)
+    io.println(" AST node(s)")
+    return 0
+}
+
+const VERSION: []u8 = "lunsoc 0.2.0"
+
+enum Mode : u8 {
+    Tokens,
+    Parse,
+    Check,
+    EmitIr,
+    EmitQbe,
+    EmitAsm,
+    EmitObj,
+    Build,
+    Run,
+}
+
+fun print_usage(fd: i32, prog: []u8) {
+    io.write_bytes(fd, "usage: ")
+    io.write_bytes(fd, prog)
+    io.write_bytes(fd, " [options] <source.lunso>\n       ")
+    io.write_bytes(fd, prog)
+    io.write_bytes(fd, " --build [options] <source.lunso> [-o <executable>] [--link <object>]...\n       ")
+    io.write_bytes(fd, prog)
+    io.write_bytes(fd, " --run [options] <source.lunso> [-- <args>...]\n")
+}
+
+fun print_help(prog: []u8) {
+    print_usage(1, prog)
+    io.println("")
+    io.println("Modes:")
+    io.println("  (default)        Dump lexer tokens")
+    io.println("  --parse          Parse and report AST summary")
+    io.println("  --check          Run module loading and semantic checks")
+    io.println("  --emit-ir        Emit Lunso IR to stdout")
+    io.println("  --emit-qbe       Emit QBE IL to stdout")
+    io.println("  --emit-asm       Emit assembly (.s) file")
+    io.println("  -c, --emit-obj   Compile to an object (.o) file")
+    io.println("  --build          Compile and link a native executable")
+    io.println("  --run            Compile to a temporary executable and run it")
+    io.println("")
+    io.println("Options:")
+    io.println("  --std=<dir>      Override standard library directory")
+    io.println("  --std <dir>      Override standard library directory")
+    io.println("  -I <dir>         Add module search directory")
+    io.println("  -o <file>        Output path (with --build, -c/--emit-obj, --emit-asm)")
+    io.println("  --link <obj>     Link an additional object or archive (with --build/--run)")
+    io.println("  -nostdlib        Link without standard C runtime/libraries")
+    io.println("  -h, --help       Show this help message and exit")
+    io.println("  -V, --version    Show compiler version and exit")
+}
+
+fun run_compile(path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, arena: *mem.Arena, mode: Mode,
+                opts: *NativeOptions, run_args: [][]u8): i32 {
+    var prog: ModuleProgram
+    if !modules_load(arena, path, source, std_dir, include_dirs, &prog) {
+        return 1
+    }
+    var sem: Sema
+    var serr: SemaError
+    if !check(arena, &prog.tree, &sem, &serr) {
+        modules_report(&prog, serr.offset, serr.message)
+        if serr.note_offset != 0 {
+            modules_report(&prog, serr.note_offset, serr.note_message)
+        }
+        return 1
+    }
+    if mode == Mode.Check {
+        io.print("Checked ")
+        fmt.print_u64(1, prog.tree.functions.len)
+        io.println(" function(s)")
+        return 0
+    }
+    var mod: IrModule
+    if !ir_lower(arena, &prog.tree, &sem, &mod) {
+        io.eprintln("lunsoc: could not lower to IR")
+        return 1
+    }
+    if mode == Mode.EmitIr {
+        ir_write(&mod)
+        return 0
+    }
+    if mode == Mode.EmitQbe {
+        var out_buf: vec.Vec[u8]
+        if !qbe_write(arena, &mod, &out_buf) {
+            io.eprintln("lunsoc: could not emit QBE IL")
+            return 1
+        }
+        io.write_bytes(1, vec.as_slice.[u8](&out_buf))
+        return 0
+    }
+    if mode == Mode.Run {
+        return native_run_exe(arena, &mod, path, opts, run_args)
+    }
+    if !native_build(arena, &mod, path, opts) {
+        return 1
+    }
+    return 0
+}
+
+fun resolve_std_obj(arena: *mem.Arena): []u8 {
+    var env_val: []u8
+    if os.getenv("LUNSO_STD_OBJ", arena, &env_val) == 0 && len(env_val) > 0 {
+        return env_val
+    }
+    if file.exists("build/std-linux-x86_64.o") {
+        return "build/std-linux-x86_64.o"
+    }
+    return ""
+}
+
+fun default_output_name(arena: *mem.Arena, src_path: []u8, mode: Mode): []u8 {
+    var base = path.basename(src_path)
+    var stem = path.strip_suffix(base, ".lunso")
+    var has_ext = len(stem) < len(base)
+    var suffix: []u8 = ""
+    if mode == Mode.EmitAsm {
+        suffix = ".s"
+    } else if mode == Mode.EmitObj {
+        suffix = ".o"
+    } else if !has_ext {
+        suffix = ".out"
+    }
+    var out = path.join2(arena, stem, suffix)
+    if len(out) == 0 {
+        return "a.out"
+    }
+    return out
+}
+
+pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
+    var prog_name: []u8 = "lunsoc"
+    if len(argv) > 0 {
+        prog_name = argv[0]
+    }
+
+    var mode = Mode.Tokens
+    var mode_count: i32 = 0
+    var path: []u8 = ""
+    var output: []u8 = ""
+    var std_dir: []u8 = ""
+    var nostdlib = false
+    var stop_options = false
+    var run_args_start: i64 = len(argv)
+    var objects: vec.Vec[[]u8]
+    var include_dirs: vec.Vec[[]u8]
+    if vec.init.[[]u8](&objects, arena, 4) < 0 || vec.init.[[]u8](&include_dirs, arena, 4) < 0 {
+        return 1
+    }
+
+    for var i: i64 = 1; i < len(argv); i += 1 {
+        var arg = argv[i]
+        if !stop_options && str.equals(arg, "--") {
+            stop_options = true
+            if mode == Mode.Run && len(path) > 0 {
+                run_args_start = i + 1
+                break
+            }
+            continue
+        }
+        if !stop_options && (str.equals(arg, "-h") || str.equals(arg, "--help")) {
+            print_help(prog_name)
+            return 0
+        }
+        if !stop_options && (str.equals(arg, "-V") || str.equals(arg, "--version")) {
+            io.println(VERSION)
+            return 0
+        }
+        if !stop_options && str.equals(arg, "--parse") {
+            mode = Mode.Parse
+            mode_count += 1
+        } else if !stop_options && str.equals(arg, "--check") {
+            mode = Mode.Check
+            mode_count += 1
+        } else if !stop_options && str.equals(arg, "--emit-ir") {
+            mode = Mode.EmitIr
+            mode_count += 1
+        } else if !stop_options && str.equals(arg, "--emit-qbe") {
+            mode = Mode.EmitQbe
+            mode_count += 1
+        } else if !stop_options && str.equals(arg, "--emit-asm") {
+            mode = Mode.EmitAsm
+            mode_count += 1
+        } else if !stop_options && (str.equals(arg, "-c") || str.equals(arg, "--emit-obj")) {
+            mode = Mode.EmitObj
+            mode_count += 1
+        } else if !stop_options && str.equals(arg, "--build") {
+            mode = Mode.Build
+            mode_count += 1
+        } else if !stop_options && str.equals(arg, "--run") {
+            mode = Mode.Run
+            mode_count += 1
+        } else if !stop_options && (str.equals(arg, "-nostdlib") || str.equals(arg, "--nostdlib")) {
+            nostdlib = true
+        } else if !stop_options && str.equals(arg, "--std") {
+            if i + 1 >= len(argv) || len(std_dir) > 0 {
+                io.eprintln("lunsoc: invalid --std option")
+                    return 1
+            }
+            i += 1
+            std_dir = argv[i]
+        } else if !stop_options && str.equals(arg, "-I") {
+            if i + 1 >= len(argv) {
+                io.eprintln("lunsoc: -I requires a directory")
+                    return 1
+            }
+            i += 1
+            vec.push_value.[[]u8](&include_dirs, argv[i])
+        } else if !stop_options && len(arg) > 2 && str.equals(arg[0..2], "-I") {
+            vec.push_value.[[]u8](&include_dirs, arg[2..len(arg)])
+        } else if !stop_options && len(arg) > 6 && str.equals(arg[0..6], "--std=") {
+            if len(std_dir) > 0 || len(arg) == 6 {
+                io.eprintln("lunsoc: invalid --std option")
+                    return 1
+            }
+            std_dir = arg[6..len(arg)]
+        } else if !stop_options && str.equals(arg, "-o") {
+            if i + 1 >= len(argv) || len(output) > 0 {
+                io.eprintln("lunsoc: invalid -o option")
+                    return 1
+            }
+            i += 1
+            output = argv[i]
+        } else if !stop_options && str.equals(arg, "--link") {
+            if i + 1 >= len(argv) {
+                io.eprintln("lunsoc: --link requires a path")
+                    return 1
+            }
+            i += 1
+            vec.push_value.[[]u8](&objects, argv[i])
+        } else if !stop_options && len(arg) > 1 && arg[0] == '-' {
+            io.eprint("unknown option: ")
+            io.eprintln(arg)
+            print_usage(2, prog_name)
+            return 1
+        } else if len(path) == 0 {
+            path = arg
+        } else {
+            io.eprint("unexpected argument: ")
+            io.eprintln(arg)
+            print_usage(2, prog_name)
+            return 1
+        }
+    }
+
+    if len(path) == 0 || mode_count > 1 {
+        print_usage(2, prog_name)
+        mem.deinit(&arena)
+        return 1
+    }
+
+    var allows_output = mode == Mode.Build || mode == Mode.EmitObj || mode == Mode.EmitAsm
+    var allows_link = mode == Mode.Build || mode == Mode.Run
+    if (len(output) > 0 && !allows_output) || (!allows_link && (objects.len > 0 || nostdlib)) {
+        io.eprintln("-o, --link, and -nostdlib require a compatible build/run mode")
+        mem.deinit(&arena)
+        return 1
+    }
+
+    var raw: file.Bytes
+    if file.read_all(path, arena, &raw) < 0 {
+        io.eprint(path)
+        io.eprintln(": could not read source")
+        return 1
+    }
+
+    var source = raw.ptr[0..raw.len]
+    var rc: i32 = 0
+    if mode == Mode.Tokens {
+        rc = dump_tokens(path, source, arena)
+    } else if mode == Mode.Parse {
+        rc = run_parse(path, source, arena)
+    } else {
+        if allows_output && len(output) == 0 {
+            output = default_output_name(arena, path, mode)
+        }
+        if allows_link && !nostdlib && objects.len == 0 {
+            var std_obj = resolve_std_obj(arena)
+            if len(std_obj) > 0 {
+                vec.push_value.[[]u8](&objects, std_obj)
+            }
+        }
+        var nkind = NativeKind.Exe
+        if mode == Mode.EmitAsm { nkind = NativeKind.Asm }
+        if mode == Mode.EmitObj { nkind = NativeKind.Obj }
+        var opts = NativeOptions {
+            kind: nkind,
+            nostdlib: nostdlib,
+            output: output,
+            objects: vec.as_slice.[[]u8](&objects),
+        }
+        var run_args = argv[run_args_start..len(argv)]
+        rc = run_compile(path, source, std_dir, vec.as_slice.[[]u8](&include_dirs), arena, mode, &opts, run_args)
+    }
+
+    return rc
+}

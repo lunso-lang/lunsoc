@@ -11,7 +11,7 @@ build/std-linux-x86_64.o: std/platform/linux_x86_64.s
 	mkdir -p build
 	$(CC) $(ASFLAGS) -c $< -o $@
 
-build/lunsoc: src/main.lunso src/lexer.lunso src/ast.lunso src/parser.lunso src/modules.lunso src/sema.lunso src/ir.lunso src/qbe.lunso src/native.lunso build/std-linux-x86_64.o
+build/lunsoc: src/main.lunso src/driver.lunso src/lexer.lunso src/ast.lunso src/parser.lunso src/modules.lunso src/sema.lunso src/ir.lunso src/qbe.lunso src/native.lunso build/std-linux-x86_64.o
 	mkdir -p build
 	LUNSO_STD_OBJ=$(CURDIR)/build/std-linux-x86_64.o $(LUNSO) --build --std $(CURDIR)/std src/main.lunso -o build/lunsoc
 
