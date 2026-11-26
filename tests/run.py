@@ -25,7 +25,19 @@ def main() -> int:
                     file=sys.stderr,
                 )
                 return 1
-    print(f"OK ({len(samples) * 2} differential lexer+parser checks)")
+    boot_pass = sorted((ROOT.parent / "lunso-boot" / "tests" / "pass").glob("*.lunso"))
+    for sample in boot_pass:
+        got = subprocess.run([str(LUNSOC), "--check", str(sample)], text=True, capture_output=True, check=False)
+        exp = subprocess.run([str(BOOT), "--check", str(sample)], text=True, capture_output=True, check=False)
+        if got.returncode != exp.returncode or got.stdout != exp.stdout:
+            print(
+                f"check mismatch on {sample.name}: rc {got.returncode} vs {exp.returncode}\n"
+                f"got: {got.stdout!r}\nexp: {exp.stdout!r}\nstderr: {got.stderr}",
+                file=sys.stderr,
+            )
+            return 1
+
+    print(f"OK ({len(samples) * 2} lexer+parser checks, {len(boot_pass)} --check checks)")
     return 0
 
 

@@ -8,6 +8,7 @@ import std.vec
 import ast { Ast }
 import lexer { Token, TokenKind, error_message, token_name, tokenize_all }
 import parser { ParseError, parse }
+import sema { Sema, SemaError, check }
 
 fun print_lexeme(bytes: []u8) {
     for var i: i64 = 0; i < len(bytes); i += 1 {
@@ -103,6 +104,48 @@ fun run_parse(path: []u8, source: []u8, arena: *mem.Arena): i32 {
     return 0
 }
 
+fun report_offset_error(path: []u8, source: []u8, offset: u32, msg: []u8): i32 {
+    var line: u64 = 1
+    var col: u64 = 1
+    var limit = offset as i64
+    if limit > len(source) {
+        limit = len(source)
+    }
+    for var i: i64 = 0; i < limit; i += 1 {
+        if source[i] == '\n' {
+            line += 1
+            col = 1
+        } else {
+            col += 1
+        }
+    }
+    io.eprint(path)
+    io.eprint(":")
+    fmt.print_u64(2, line)
+    io.eprint(":")
+    fmt.print_u64(2, col)
+    io.eprint(": ")
+    io.eprintln(msg)
+    return 1
+}
+
+fun run_check(path: []u8, source: []u8, arena: *mem.Arena): i32 {
+    var tree: Ast
+    var perr: ParseError
+    if !parse(arena, source, &tree, &perr) {
+        return report_error(path, perr.token, perr.message)
+    }
+    var sem: Sema
+    var serr: SemaError
+    if !check(arena, &tree, &sem, &serr) {
+        return report_offset_error(path, source, serr.offset, serr.message)
+    }
+    io.print("Checked ")
+    fmt.print_u64(1, tree.functions.len)
+    io.println(" function(s)")
+    return 0
+}
+
 fun main(): i32 {
     var arena: mem.Arena
     if mem.init(&arena, 65536) < 0 {
@@ -112,27 +155,30 @@ fun main(): i32 {
 
     var argv: [][]u8
     if args.load(&arena, &argv) < 0 {
-        io.eprintln("usage: lunsoc [--parse] <source.lunso>")
+        io.eprintln("usage: lunsoc [--parse | --check] <source.lunso>")
         mem.deinit(&arena)
         return 1
     }
 
     var parse_mode = false
+    var check_mode = false
     var path: []u8 = ""
     for var i: i64 = 1; i < len(argv); i += 1 {
         var arg = argv[i]
         if str.equals(arg, "--parse") {
             parse_mode = true
+        } else if str.equals(arg, "--check") {
+            check_mode = true
         } else if len(path) == 0 {
             path = arg
         } else {
-            io.eprintln("usage: lunsoc [--parse] <source.lunso>")
+            io.eprintln("usage: lunsoc [--parse | --check] <source.lunso>")
             mem.deinit(&arena)
             return 1
         }
     }
-    if len(path) == 0 {
-        io.eprintln("usage: lunsoc [--parse] <source.lunso>")
+    if len(path) == 0 || (parse_mode && check_mode) {
+        io.eprintln("usage: lunsoc [--parse | --check] <source.lunso>")
         mem.deinit(&arena)
         return 1
     }
@@ -147,7 +193,9 @@ fun main(): i32 {
 
     var source = raw.ptr[0..raw.len]
     var rc: i32 = 0
-    if parse_mode {
+    if check_mode {
+        rc = run_check(path, source, &arena)
+    } else if parse_mode {
         rc = run_parse(path, source, &arena)
     } else {
         rc = dump_tokens(path, source, &arena)

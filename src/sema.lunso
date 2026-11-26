@@ -1,0 +1,1694 @@
+import std.mem
+import std.str
+import std.vec
+import ast { Ast, AstConst, AstEnum, AstForHeader, AstFunction, AstIfBranches, AstKind, AstNode, AstStruct, AstVariable, NODE_NONE, NodeRange, Span }
+
+pub enum TypeKind : u8 {
+    Invalid,
+    Void,
+    Bool,
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+    F32,
+    F64,
+    Struct,
+    Array,
+    Slice,
+    Pointer,
+}
+
+pub struct SemaType {
+    kind: TypeKind
+    length: u32
+    element: TypeKind
+    element_type: u32
+    element_size: u32
+    record: u32
+    record_size: u32
+    pointee: u32
+    read_only: bool
+}
+
+pub enum SemaBuiltin : u8 {
+    None,
+    Len,
+    Data,
+    SizeOf,
+}
+
+pub struct SemaNode {
+    type_info: SemaType
+    binding: u32
+    builtin: SemaBuiltin
+    promotion: TypeKind
+    is_boolean_literal: bool
+    borrow_array: bool
+    falls_through: bool
+    is_enum_case: bool
+    is_const: bool
+}
+
+pub struct SemaFunction {
+    result: SemaType
+    slot_count: u32
+    declaration: u32
+    param_types: vec.Vec[SemaType]
+}
+
+pub struct SemaConstant {
+    type_info: SemaType
+    bits: u64
+    str_node: u32
+    state: u8
+}
+
+pub struct SemaRecord {
+    declaration: u32
+    size: u32
+    alignment: u32
+    state: u8
+    fields: vec.Vec[SemaNode]
+}
+
+pub struct Sema {
+    nodes: vec.Vec[SemaNode]
+    functions: vec.Vec[SemaFunction]
+    records: vec.Vec[SemaRecord]
+    constants: vec.Vec[SemaConstant]
+    pointees: vec.Vec[SemaType]
+    elements: vec.Vec[SemaType]
+    enum_values: vec.Vec[u64]
+}
+
+pub struct SemaError {
+    offset: u32
+    message: []u8
+}
+
+struct LocalVar {
+    name: Span
+    slot: u32
+    type_info: SemaType
+    is_const: bool
+    const_idx: u32
+    depth: u32
+}
+
+struct LoopEntry {
+    label: Span
+}
+
+struct Checker {
+    arena: *mem.Arena
+    tree: *Ast
+    sema: *Sema
+    err: SemaError
+    has_error: bool
+    locals: vec.Vec[LocalVar]
+    loops: vec.Vec[LoopEntry]
+    scope_depth: u32
+    slot_count: u32
+    current_return: SemaType
+    current_fn_idx: u32
+    recursion_depth: u32
+}
+
+pub fun empty_type(): SemaType {
+    return SemaType {
+        kind: TypeKind.Invalid,
+        length: 0,
+        element: TypeKind.Invalid,
+        element_type: 0,
+        element_size: 0,
+        record: 0,
+        record_size: 0,
+        pointee: 0,
+        read_only: false,
+    }
+}
+
+pub fun simple_type(k: TypeKind): SemaType {
+    var t = empty_type()
+    t.kind = k
+    return t
+}
+
+pub fun is_signed(k: TypeKind): bool {
+    return k == TypeKind.I8 || k == TypeKind.I16 || k == TypeKind.I32 || k == TypeKind.I64
+}
+
+pub fun is_unsigned(k: TypeKind): bool {
+    return k == TypeKind.U8 || k == TypeKind.U16 || k == TypeKind.U32 || k == TypeKind.U64
+}
+
+pub fun is_integer(k: TypeKind): bool {
+    return is_signed(k) || is_unsigned(k)
+}
+
+pub fun is_float(k: TypeKind): bool {
+    return k == TypeKind.F32 || k == TypeKind.F64
+}
+
+pub fun is_numeric(k: TypeKind): bool {
+    return is_integer(k) || is_float(k)
+}
+
+pub fun is_enum(t: SemaType): bool {
+    return is_integer(t.kind) && t.record != 0
+}
+
+pub fun scalar_size(k: TypeKind): u32 {
+    match k {
+        TypeKind.Bool, TypeKind.I8, TypeKind.U8 => return 1
+        TypeKind.I16, TypeKind.U16 => return 2
+        TypeKind.I32, TypeKind.U32, TypeKind.F32 => return 4
+        TypeKind.I64, TypeKind.U64, TypeKind.F64, TypeKind.Pointer => return 8
+        else => return 0
+    }
+}
+
+pub fun element_size(t: SemaType): u32 {
+    if t.kind == TypeKind.Array || t.kind == TypeKind.Slice {
+        return t.element_size
+    }
+    if t.kind == TypeKind.Struct {
+        return t.record_size
+    }
+    return scalar_size(t.kind)
+}
+
+pub fun storage_size(t: SemaType): u32 {
+    if t.kind == TypeKind.Array {
+        return t.length * t.element_size
+    }
+    if t.kind == TypeKind.Struct {
+        return t.record_size
+    }
+    if t.kind == TypeKind.Slice {
+        return 16
+    }
+    return scalar_size(t.kind)
+}
+
+fun type_alignment(c: *Checker, t: SemaType): u32 {
+    if t.kind == TypeKind.Array {
+        var elems = vec.as_slice.[SemaType](&c.sema.elements)
+        return type_alignment(c, elems[t.element_type as i64])
+    }
+    if t.kind == TypeKind.Struct {
+        var recs = c.sema.records.data
+        return recs[t.record as i64].alignment
+    }
+    if t.kind == TypeKind.Slice {
+        return 8
+    }
+    var sz = scalar_size(t.kind)
+    if sz == 0 {
+        return 1
+    }
+    return sz
+}
+
+fun span_bytes(tree: *Ast, s: Span): []u8 {
+    if s.length == 0 {
+        return ""
+    }
+    var start = s.offset as i64
+    var end = (s.offset + s.length) as i64
+    return tree.source[start..end]
+}
+
+fun node_span(tree: *Ast, id: u32, length: u32): Span {
+    var nodes = vec.as_slice.[AstNode](&tree.nodes)
+    return Span { offset: nodes[id as i64].pos, length: length }
+}
+
+fun same_span(tree: *Ast, a: Span, b: Span): bool {
+    return str.equals(span_bytes(tree, a), span_bytes(tree, b))
+}
+
+fun fail_at(c: *Checker, offset: u32, msg: []u8): SemaType {
+    if !c.has_error {
+        c.has_error = true
+        c.err = SemaError { offset: offset, message: msg }
+    }
+    return empty_type()
+}
+
+fun fail(c: *Checker, id: u32, msg: []u8): SemaType {
+    var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
+    return fail_at(c, nodes[id as i64].pos, msg)
+}
+
+fun add_pointee(c: *Checker, t: SemaType): u32 {
+    var idx = c.sema.pointees.len as u32
+    var copy_t = t
+    vec.push.[SemaType](&c.sema.pointees, &copy_t)
+    return idx
+}
+
+fun add_element(c: *Checker, t: SemaType): u32 {
+    var idx = c.sema.elements.len as u32
+    var copy_t = t
+    vec.push.[SemaType](&c.sema.elements, &copy_t)
+    return idx
+}
+
+fun same_type(c: *Checker, a: SemaType, b: SemaType): bool {
+    if a.kind != b.kind || a.record != b.record {
+        return false
+    }
+    if a.kind == TypeKind.Pointer {
+        if a.read_only != b.read_only {
+            return false
+        }
+        var pts = vec.as_slice.[SemaType](&c.sema.pointees)
+        return same_type(c, pts[a.pointee as i64], pts[b.pointee as i64])
+    }
+    if a.kind == TypeKind.Array || a.kind == TypeKind.Slice {
+        if a.kind == TypeKind.Array && a.length != b.length {
+            return false
+        }
+        var elems = vec.as_slice.[SemaType](&c.sema.elements)
+        return same_type(c, elems[a.element_type as i64], elems[b.element_type as i64])
+    }
+    return true
+}
+
+fun can_widen_num(src: TypeKind, dst: TypeKind): bool {
+    if src == dst { return true }
+    if is_signed(src) && is_signed(dst) {
+        return scalar_size(src) < scalar_size(dst)
+    }
+    if is_unsigned(src) && is_unsigned(dst) {
+        return scalar_size(src) < scalar_size(dst)
+    }
+    if is_unsigned(src) && is_signed(dst) {
+        return scalar_size(src) < scalar_size(dst)
+    }
+    return src == TypeKind.F32 && dst == TypeKind.F64
+}
+
+fun common_numeric_type(a: TypeKind, b: TypeKind): TypeKind {
+    if a == b { return a }
+    if is_float(a) && is_float(b) { return TypeKind.F64 }
+    if is_integer(a) && is_integer(b) {
+        if is_signed(a) == is_signed(b) {
+            if scalar_size(a) > scalar_size(b) { return a }
+            return b
+        }
+        var u = a
+        var s = b
+        if is_signed(a) {
+            u = b
+            s = a
+        }
+        if scalar_size(s) > scalar_size(u) { return s }
+        if scalar_size(u) < 8 {
+            if scalar_size(u) == 1 { return TypeKind.I16 }
+            if scalar_size(u) == 2 { return TypeKind.I32 }
+            return TypeKind.I64
+        }
+    }
+    return TypeKind.Invalid
+}
+
+fun find_struct_idx(c: *Checker, name: Span): u32 {
+    var list = vec.as_slice.[AstStruct](&c.tree.structs)
+    for var i: i64 = 0; i < len(list); i += 1 {
+        if same_span(c.tree, list[i].name, name) {
+            return i as u32
+        }
+    }
+    return ~0 as u32
+}
+
+fun find_enum_idx(c: *Checker, name: Span): u32 {
+    var list = vec.as_slice.[AstEnum](&c.tree.enums)
+    for var i: i64 = 0; i < len(list); i += 1 {
+        if same_span(c.tree, list[i].name, name) {
+            return i as u32
+        }
+    }
+    return ~0 as u32
+}
+
+fun find_const_idx(c: *Checker, name: Span): u32 {
+    var list = vec.as_slice.[AstConst](&c.tree.consts)
+    for var i: i64 = 0; i < len(list); i += 1 {
+        if !list[i].local && same_span(c.tree, list[i].name, name) {
+            return i as u32
+        }
+    }
+    return ~0 as u32
+}
+
+fun find_fn_idx(c: *Checker, name: Span): u32 {
+    var list = vec.as_slice.[AstFunction](&c.tree.functions)
+    for var i: i64 = 0; i < len(list); i += 1 {
+        if same_span(c.tree, list[i].name, name) {
+            return i as u32
+        }
+    }
+    return ~0 as u32
+}
+
+fun find_local(c: *Checker, name: Span, min_depth: u32): i64 {
+    var list = vec.as_slice.[LocalVar](&c.locals)
+    var i = len(list) - 1
+    for i >= 0 {
+        if list[i].depth < min_depth {
+            break
+        }
+        if same_span(c.tree, list[i].name, name) {
+            return i
+        }
+        i -= 1
+    }
+    return -1
+}
+
+fun is_hex_char(b: u8, out: *u64): bool {
+    if b >= '0' && b <= '9' { *out = (b - '0') as u64; return true }
+    if b >= 'a' && b <= 'f' { *out = (b - 'a' + 10) as u64; return true }
+    if b >= 'A' && b <= 'F' { *out = (b - 'A' + 10) as u64; return true }
+    return false
+}
+
+fun parse_int_literal(text: []u8, out: *u64): bool {
+    if len(text) == 0 {
+        if len(text) == 6 && text[2] == 'x' {
+            var h1: u64 = 0
+            var h2: u64 = 0
+            var c1 = text[3]
+            var c2 = text[4]
+            if !is_hex_char(c1, &h1) || !is_hex_char(c2, &h2) {
+                return false
+            }
+            *out = h1 * 16 + h2
+            return true
+        }
+        return false
+    }
+    if text[0] == '\'' {
+        if len(text) < 3 || text[len(text) - 1] != '\'' {
+            return false
+        }
+        if text[1] != '\\' {
+            if len(text) != 3 { return false }
+            *out = text[1] as u64
+            return true
+        }
+        if len(text) == 4 {
+            var esc = text[2]
+            if esc == '0' { *out = 0; return true }
+            if esc == 'n' { *out = 10; return true }
+            if esc == 'r' { *out = 13; return true }
+            if esc == 't' { *out = 9; return true }
+            if esc == '\\' { *out = 92; return true }
+            if esc == '"' { *out = 34; return true }
+            if esc == '\'' { *out = 39; return true }
+        }
+        if len(text) == 6 && text[2] == 'x' {
+            var h1: u64 = 0
+            var h2: u64 = 0
+            if !is_hex_char(text[3], &h1) || !is_hex_char(text[4], &h2) {
+                return false
+            }
+            *out = h1 * 16 + h2
+            return true
+        }
+        return false
+    }
+    var base: u64 = 10
+    var start: i64 = 0
+    if len(text) >= 2 && text[0] == '0' {
+        if text[1] == 'x' || text[1] == 'X' {
+            base = 16
+            start = 2
+        } else if text[1] == 'b' || text[1] == 'B' {
+            base = 2
+            start = 2
+        }
+    }
+    if start >= len(text) {
+        return false
+    }
+    var val: u64 = 0
+    var max: u64 = ~0
+    for var i = start; i < len(text); i += 1 {
+        var b = text[i]
+        var d: u64 = 0
+        if b >= '0' && b <= '9' {
+            d = (b - '0') as u64
+        } else if b >= 'a' && b <= 'f' {
+            d = (b - 'a' + 10) as u64
+        } else if b >= 'A' && b <= 'F' {
+            d = (b - 'A' + 10) as u64
+        } else {
+            return false
+        }
+        if d >= base || val > (max - d) / base {
+            return false
+        }
+        val = val * base + d
+    }
+    *out = val
+    return true
+}
+
+fun int_fits_type(bits: u64, negative: bool, kind: TypeKind): bool {
+    var sz = scalar_size(kind)
+    if is_unsigned(kind) {
+        if negative { return false }
+        if sz == 8 { return true }
+        var limit = ((1 as u64) << ((sz * 8) as u64)) - 1
+        return bits <= limit
+    }
+    if is_signed(kind) {
+        var shift = (sz * 8 - 1) as u64
+        var max_pos = ((1 as u64) << shift) - 1
+        if !negative {
+            return bits <= max_pos
+        }
+        return bits <= max_pos + 1
+    }
+    return false
+}
+
+fun resolve_primitive(name: []u8): TypeKind {
+    if str.equals(name, "bool") { return TypeKind.Bool }
+    if str.equals(name, "i8") { return TypeKind.I8 }
+    if str.equals(name, "i16") { return TypeKind.I16 }
+    if str.equals(name, "i32") { return TypeKind.I32 }
+    if str.equals(name, "i64") { return TypeKind.I64 }
+    if str.equals(name, "int") { return TypeKind.I64 }
+    if str.equals(name, "u8") { return TypeKind.U8 }
+    if str.equals(name, "u16") { return TypeKind.U16 }
+    if str.equals(name, "u32") { return TypeKind.U32 }
+    if str.equals(name, "u64") { return TypeKind.U64 }
+    if str.equals(name, "f32") { return TypeKind.F32 }
+    if str.equals(name, "f64") { return TypeKind.F64 }
+    return TypeKind.Invalid
+}
+
+fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
+    if id == NODE_NONE || c.has_error {
+        return simple_type(TypeKind.Void)
+    }
+    var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
+    var node = nodes[id as i64]
+    if node.kind == AstKind.TypeName {
+        var name = node_span(c.tree, id, node.a)
+        var text = span_bytes(c.tree, name)
+        var prim = resolve_primitive(text)
+        if prim != TypeKind.Invalid {
+            return simple_type(prim)
+        }
+        var si = find_struct_idx(c, name)
+        if si != (~0 as u32) {
+            if !allow_incomplete {
+                resolve_struct_layout(c, si)
+            }
+            var t = simple_type(TypeKind.Struct)
+            t.record = si
+            var recs = c.sema.records.data
+            t.record_size = recs[si as i64].size
+            return t
+        }
+        var ei = find_enum_idx(c, name)
+        if ei != (~0 as u32) {
+            var enums = vec.as_slice.[AstEnum](&c.tree.enums)
+            var backing = resolve_type_inner(c, enums[ei as i64].backing, false)
+            backing.record = ei + 1
+            return backing
+        }
+        return fail(c, id, "unknown type name")
+    }
+    if node.kind == AstKind.PointerType {
+        var pointee = resolve_type_inner(c, node.a, true)
+        if c.has_error { return empty_type() }
+        var t = simple_type(TypeKind.Pointer)
+        t.pointee = add_pointee(c, pointee)
+        t.read_only = node.b != 0
+        return t
+    }
+    if node.kind == AstKind.ArrayType {
+        var is_slice = node.b == NODE_NONE
+        var elem = resolve_type_inner(c, node.a, allow_incomplete || is_slice)
+        if c.has_error { return empty_type() }
+        if is_slice {
+            var t = simple_type(TypeKind.Slice)
+            t.element = elem.kind
+            t.element_type = add_element(c, elem)
+            t.element_size = element_size(elem)
+            t.record = elem.record
+            t.record_size = elem.record_size
+            t.pointee = elem.pointee
+            t.read_only = elem.read_only
+            return t
+        }
+        var len_node = nodes[node.b as i64]
+        var arr_len: u64 = 0
+        if len_node.kind == AstKind.Integer {
+            var text = span_bytes(c.tree, node_span(c.tree, node.b, len_node.a))
+            if !parse_int_literal(text, &arr_len) || arr_len > 2147483647 {
+                return fail(c, node.b, "invalid array length")
+            }
+        } else {
+            var cname = node_span(c.tree, node.b, len_node.a)
+            var ci = find_const_idx(c, cname)
+            if ci == (~0 as u32) {
+                var li = find_local(c, cname, 0)
+                if li >= 0 {
+                    var locals = vec.as_slice.[LocalVar](&c.locals)
+                    if locals[li].is_const {
+                        ci = locals[li].const_idx
+                    }
+                }
+            }
+            if ci == (~0 as u32) {
+                return fail(c, node.b, "array length must be a constant")
+            }
+            check_const_decl(c, ci)
+            if c.has_error { return empty_type() }
+            var consts = c.sema.constants.data
+            var sc = consts[ci as i64]
+            if !is_integer(sc.type_info.kind) || sc.bits == 0 || sc.bits > 2147483647 {
+                return fail(c, node.b, "invalid constant array length")
+            }
+            arr_len = sc.bits
+        }
+        var t = simple_type(TypeKind.Array)
+        t.length = arr_len as u32
+        t.element = elem.kind
+        t.element_type = add_element(c, elem)
+        t.element_size = storage_size(elem)
+        t.record = elem.record
+        t.record_size = elem.record_size
+        t.pointee = elem.pointee
+        t.read_only = elem.read_only
+        return t
+    }
+    return fail(c, id, "unsupported type")
+}
+
+fun resolve_type(c: *Checker, id: u32): SemaType {
+    return resolve_type_inner(c, id, false)
+}
+
+fun resolve_struct_layout(c: *Checker, rec_idx: u32) {
+    var recs = c.sema.records.data
+    if recs[rec_idx as i64].state == 2 {
+        return
+    }
+    if recs[rec_idx as i64].state == 1 {
+        fail_at(c, 0, "recursive struct definition")
+        return
+    }
+    recs[rec_idx as i64].state = 1
+    var decls = vec.as_slice.[AstStruct](&c.tree.structs)
+    var decl = decls[rec_idx as i64]
+    if decl.fields.count == 0 {
+        fail_at(c, decl.name.offset, "struct must have at least one field")
+        return
+    }
+
+    var offset: u32 = 0
+    var max_align: u32 = 1
+    var children = vec.as_slice.[u32](&c.tree.children)
+    var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
+    for var i: u32 = 0; i < decl.fields.count && !c.has_error; i += 1 {
+        var fid = children[(decl.fields.first + i) as i64]
+        var fnode = nodes[fid as i64]
+        var ft = resolve_type(c, fnode.b)
+        if c.has_error { return }
+        var align = type_alignment(c, ft)
+        var sz = storage_size(ft)
+        var rem = offset % align
+        if rem != 0 {
+            offset += align - rem
+        }
+        var sn = SemaNode {
+            type_info: ft,
+            binding: offset,
+            builtin: SemaBuiltin.None,
+            promotion: TypeKind.Invalid,
+            is_boolean_literal: false,
+            borrow_array: false,
+            falls_through: false,
+            is_enum_case: false,
+            is_const: false,
+        }
+        recs = c.sema.records.data
+        vec.push.[SemaNode](&recs[rec_idx as i64].fields, &sn)
+        offset += sz
+        if align > max_align {
+            max_align = align
+        }
+    }
+    var tail = offset % max_align
+    if tail != 0 {
+        offset += max_align - tail
+    }
+    recs = c.sema.records.data
+    recs[rec_idx as i64].size = offset
+    recs[rec_idx as i64].alignment = max_align
+    recs[rec_idx as i64].state = 2
+}
+
+fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, out_str: *u32): SemaType {
+    var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
+    var node = nodes[id as i64]
+    *out_str = NODE_NONE
+    if node.kind == AstKind.Integer {
+        var text = span_bytes(c.tree, node_span(c.tree, id, node.a))
+        var bits: u64 = 0
+        if !parse_int_literal(text, &bits) {
+            return fail(c, id, "invalid integer literal")
+        }
+        var kind = TypeKind.I32
+        if is_integer(expected.kind) {
+            kind = expected.kind
+        } else if bits > 2147483647 {
+            kind = TypeKind.I64
+        }
+        if !int_fits_type(bits, false, kind) {
+            return fail(c, id, "integer literal out of range")
+        }
+        *out_bits = bits
+        return simple_type(kind)
+    }
+    if node.kind == AstKind.Float {
+        var k = TypeKind.F64
+        if expected.kind == TypeKind.F32 {
+            k = TypeKind.F32
+        }
+        // Store integer part for simple float->int constant casts during --check.
+        var text = span_bytes(c.tree, node_span(c.tree, id, node.a))
+        var int_val: u64 = 0
+        for var i: i64 = 0; i < len(text); i += 1 {
+            if text[i] < '0' || text[i] > '9' {
+                break
+            }
+            int_val = int_val * 10 + ((text[i] - '0') as u64)
+        }
+        *out_bits = int_val
+        return simple_type(k)
+    }
+    if node.kind == AstKind.Positive || node.kind == AstKind.BitNot || node.kind == AstKind.LogicalNot {
+        var b: u64 = 0
+        var s: u32 = 0
+        var t = eval_const_expr(c, node.a, expected, &b, &s)
+        if node.kind == AstKind.BitNot {
+            *out_bits = ~b
+        } else if node.kind == AstKind.LogicalNot {
+            if b == 0 { *out_bits = 1 } else { *out_bits = 0 }
+            return simple_type(TypeKind.Bool)
+        } else {
+            *out_bits = b
+        }
+        return t
+    }
+    if node.kind == AstKind.Negate {
+        var inner = nodes[node.a as i64]
+        if inner.kind == AstKind.Integer {
+            var text = span_bytes(c.tree, node_span(c.tree, node.a, inner.a))
+            var bits: u64 = 0
+            if !parse_int_literal(text, &bits) {
+                return fail(c, node.a, "invalid integer literal")
+            }
+            var kind = TypeKind.I32
+            if is_integer(expected.kind) {
+                kind = expected.kind
+            } else if bits > 2147483648 {
+                kind = TypeKind.I64
+            }
+            if !int_fits_type(bits, true, kind) {
+                return fail(c, node.a, "integer literal out of range")
+            }
+            *out_bits = (0 as u64) - bits
+            return simple_type(kind)
+        }
+        var b: u64 = 0
+        var s: u32 = 0
+        var t = eval_const_expr(c, node.a, expected, &b, &s)
+        *out_bits = (0 as u64) - b
+        return t
+    }
+    if node.kind == AstKind.Identifier {
+        var name = node_span(c.tree, id, node.a)
+        var text = span_bytes(c.tree, name)
+        if str.equals(text, "true") {
+            *out_bits = 1
+            return simple_type(TypeKind.Bool)
+        }
+        if str.equals(text, "false") {
+            *out_bits = 0
+            return simple_type(TypeKind.Bool)
+        }
+        var ci = find_const_idx(c, name)
+        if ci == (~0 as u32) {
+            var li = find_local(c, name, 0)
+            if li >= 0 {
+                var locals = vec.as_slice.[LocalVar](&c.locals)
+                if locals[li].is_const {
+                    ci = locals[li].const_idx
+                }
+            }
+        }
+        if ci != (~0 as u32) {
+            check_const_decl(c, ci)
+            if c.has_error { return empty_type() }
+            var consts = c.sema.constants.data
+            *out_bits = consts[ci as i64].bits
+            *out_str = consts[ci as i64].str_node
+            return consts[ci as i64].type_info
+        }
+        return fail(c, id, "constant expression required")
+    }
+    if node.kind == AstKind.String {
+        *out_str = id
+        var arr = simple_type(TypeKind.Array)
+        arr.element = TypeKind.U8
+        arr.element_size = 1
+        var elem = simple_type(TypeKind.U8)
+        arr.element_type = add_element(c, elem)
+        arr.length = node.a - 2
+        return arr
+    }
+    if node.kind == AstKind.Member {
+        var base_node = nodes[node.a as i64]
+        if base_node.kind == AstKind.Identifier {
+            var ename = node_span(c.tree, node.a, base_node.a)
+            var ei = find_enum_idx(c, ename)
+            if ei != (~0 as u32) {
+                var mname = node_span(c.tree, id, node.b)
+                var enums = vec.as_slice.[AstEnum](&c.tree.enums)
+                var edecl = enums[ei as i64]
+                var children = vec.as_slice.[u32](&c.tree.children)
+                var sn = c.sema.nodes.data
+                var evals = vec.as_slice.[u64](&c.sema.enum_values)
+                for var i: u32 = 0; i < edecl.cases.count; i += 1 {
+                    var cid = children[(edecl.cases.first + i) as i64]
+                    var cn = nodes[cid as i64]
+                    if same_span(c.tree, mname, node_span(c.tree, cid, cn.a)) {
+                        *out_bits = evals[sn[cid as i64].binding as i64]
+                        var et = resolve_type(c, edecl.backing)
+                        et.record = ei + 1
+                        return et
+                    }
+                }
+            }
+        }
+        return fail(c, id, "constant expression required")
+    }
+    if node.kind == AstKind.Cast {
+        var dst = resolve_type(c, node.b)
+        if c.has_error { return empty_type() }
+        var b: u64 = 0
+        var s: u32 = 0
+        eval_const_expr(c, node.a, dst, &b, &s)
+        *out_bits = b
+        return dst
+    }
+    if node.kind >= AstKind.Add && node.kind <= AstKind.ShiftRight {
+        var lb: u64 = 0
+        var rb: u64 = 0
+        var ls: u32 = 0
+        var rs: u32 = 0
+        var lt = eval_const_expr(c, node.a, expected, &lb, &ls)
+        var rt = eval_const_expr(c, node.b, lt, &rb, &rs)
+        if c.has_error { return empty_type() }
+        if node.kind == AstKind.Add { *out_bits = lb + rb; return lt }
+        if node.kind == AstKind.Subtract { *out_bits = lb - rb; return lt }
+        if node.kind == AstKind.Multiply { *out_bits = lb * rb; return lt }
+        if node.kind == AstKind.BitAnd { *out_bits = lb & rb; return lt }
+        if node.kind == AstKind.BitOr { *out_bits = lb | rb; return lt }
+        if node.kind == AstKind.BitXor { *out_bits = lb ^ rb; return lt }
+        if node.kind == AstKind.ShiftLeft { *out_bits = lb << rb; return lt }
+        if node.kind == AstKind.ShiftRight { *out_bits = lb >> rb; return lt }
+        return lt
+    }
+    return fail(c, id, "constant expression required")
+}
+
+fun check_const_decl(c: *Checker, idx: u32) {
+    var consts = c.sema.constants.data
+    if consts[idx as i64].state == 2 {
+        return
+    }
+    if consts[idx as i64].state == 1 {
+        var decls = vec.as_slice.[AstConst](&c.tree.consts)
+        fail_at(c, decls[idx as i64].name.offset, "cyclic constant definition")
+        return
+    }
+    consts[idx as i64].state = 1
+    var decls = vec.as_slice.[AstConst](&c.tree.consts)
+    var decl = decls[idx as i64]
+    var expected = empty_type()
+    if decl.type_node != NODE_NONE {
+        expected = resolve_type(c, decl.type_node)
+        if c.has_error { return }
+    }
+    var bits: u64 = 0
+    var str_node: u32 = 0
+    var val_type = eval_const_expr(c, decl.value, expected, &bits, &str_node)
+    if c.has_error { return }
+    if decl.type_node != NODE_NONE && !same_type(c, val_type, expected) {
+        if expected.kind == TypeKind.Slice && val_type.kind == TypeKind.Array {
+            var elems = vec.as_slice.[SemaType](&c.sema.elements)
+            if same_type(c, elems[val_type.element_type as i64], elems[expected.element_type as i64]) {
+                val_type = expected
+            } else {
+                fail_at(c, decl.name.offset, "constant type mismatch")
+                return
+            }
+        } else if is_numeric(val_type.kind) && can_widen_num(val_type.kind, expected.kind) {
+            val_type = expected
+        } else {
+            fail_at(c, decl.name.offset, "constant type mismatch")
+            return
+        }
+    }
+    consts = c.sema.constants.data
+    consts[idx as i64].type_info = val_type
+    consts[idx as i64].bits = bits
+    consts[idx as i64].str_node = str_node
+    consts[idx as i64].state = 2
+}
+
+fun set_node_type(c: *Checker, id: u32, t: SemaType) {
+    var sn = c.sema.nodes.data
+    sn[id as i64].type_info = t
+}
+
+fun check_value(c: *Checker, id: u32, expected: SemaType): SemaType {
+    var t = check_expr(c, id, expected)
+    if c.has_error || expected.kind == TypeKind.Invalid {
+        return t
+    }
+    if same_type(c, t, expected) {
+        return t
+    }
+    if expected.kind == TypeKind.Slice && t.kind == TypeKind.Array {
+        var elems = vec.as_slice.[SemaType](&c.sema.elements)
+        if same_type(c, elems[t.element_type as i64], elems[expected.element_type as i64]) {
+            var sn = c.sema.nodes.data
+            sn[id as i64].borrow_array = true
+            return expected
+        }
+    }
+    if expected.kind == TypeKind.Pointer && t.kind == TypeKind.Pointer && expected.read_only && !t.read_only {
+        var pts = vec.as_slice.[SemaType](&c.sema.pointees)
+        if same_type(c, pts[t.pointee as i64], pts[expected.pointee as i64]) {
+            return expected
+        }
+    }
+    if !is_enum(t) && !is_enum(expected) && can_widen_num(t.kind, expected.kind) {
+        var sn = c.sema.nodes.data
+        sn[id as i64].promotion = expected.kind
+        return expected
+    }
+    return fail(c, id, "type mismatch")
+}
+
+fun is_writable_lvalue(c: *Checker, id: u32): bool {
+    var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
+    var cur = id
+    for nodes[cur as i64].kind == AstKind.Member || nodes[cur as i64].kind == AstKind.Index {
+        var base = nodes[cur as i64].a
+        var sn = c.sema.nodes.data
+        var bt = sn[base as i64].type_info
+        if bt.kind == TypeKind.Pointer {
+            return !bt.read_only
+        }
+        if nodes[cur as i64].kind == AstKind.Index && bt.kind == TypeKind.Slice {
+            return false
+        }
+        cur = base
+    }
+    if nodes[cur as i64].kind == AstKind.Dereference {
+        var sn = c.sema.nodes.data
+        var pt = sn[nodes[cur as i64].a as i64].type_info
+        return !pt.read_only
+    }
+    if nodes[cur as i64].kind == AstKind.Identifier {
+        var sn = c.sema.nodes.data
+        return !sn[cur as i64].is_const && !sn[cur as i64].is_boolean_literal
+    }
+    return false
+}
+
+fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
+    if id == NODE_NONE || c.has_error {
+        return empty_type()
+    }
+    if c.recursion_depth >= 256 {
+        return fail(c, id, "expression nesting limit exceeded")
+    }
+    c.recursion_depth += 1
+
+    var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
+    var node = nodes[id as i64]
+    var res = empty_type()
+
+    if node.kind == AstKind.Identifier {
+        var name = node_span(c.tree, id, node.a)
+        var text = span_bytes(c.tree, name)
+        if str.equals(text, "true") || str.equals(text, "false") {
+            var sn = c.sema.nodes.data
+            sn[id as i64].is_boolean_literal = true
+            res = simple_type(TypeKind.Bool)
+        } else {
+            var li = find_local(c, name, 0)
+            if li >= 0 {
+                var locals = vec.as_slice.[LocalVar](&c.locals)
+                var lv = locals[li]
+                var sn = c.sema.nodes.data
+                sn[id as i64].binding = lv.slot
+                sn[id as i64].is_const = lv.is_const
+                res = lv.type_info
+            } else {
+                var ci = find_const_idx(c, name)
+                if ci != (~0 as u32) {
+                    check_const_decl(c, ci)
+                    if !c.has_error {
+                        var consts = c.sema.constants.data
+                        var sn = c.sema.nodes.data
+                        sn[id as i64].binding = ci
+                        sn[id as i64].is_const = true
+                        res = consts[ci as i64].type_info
+                    }
+                } else {
+                    res = fail(c, id, "unknown identifier")
+                }
+            }
+        }
+    } else if node.kind == AstKind.Integer {
+        var text = span_bytes(c.tree, node_span(c.tree, id, node.a))
+        var bits: u64 = 0
+        if !parse_int_literal(text, &bits) {
+            res = fail(c, id, "invalid integer literal")
+        } else {
+            var k = TypeKind.I32
+            if text[0] == '\'' {
+                k = TypeKind.U8
+            } else if is_integer(expected.kind) && !is_enum(expected) {
+                k = expected.kind
+            } else if bits > 2147483647 {
+                k = TypeKind.I64
+            }
+            if !int_fits_type(bits, false, k) {
+                res = fail(c, id, "integer literal out of range")
+            } else {
+                res = simple_type(k)
+            }
+        }
+    } else if node.kind == AstKind.Float {
+        if expected.kind == TypeKind.F32 {
+            res = simple_type(TypeKind.F32)
+        } else {
+            res = simple_type(TypeKind.F64)
+        }
+    } else if node.kind == AstKind.String {
+        res = simple_type(TypeKind.Array)
+        res.element = TypeKind.U8
+        res.element_size = 1
+        res.element_type = add_element(c, simple_type(TypeKind.U8))
+        res.length = node.a - 2
+    } else if node.kind == AstKind.ArrayLiteral {
+        var children = vec.as_slice.[u32](&c.tree.children)
+        var elem_exp = empty_type()
+        if expected.kind == TypeKind.Array || expected.kind == TypeKind.Slice {
+            var elems = vec.as_slice.[SemaType](&c.sema.elements)
+            elem_exp = elems[expected.element_type as i64]
+        }
+        var elem_t = check_value(c, children[node.a as i64], elem_exp)
+        if !c.has_error {
+            for var i: u32 = 1; i < node.b && !c.has_error; i += 1 {
+                check_value(c, children[(node.a + i) as i64], elem_t)
+            }
+            if !c.has_error {
+                res = simple_type(TypeKind.Array)
+                res.length = node.b
+                res.element = elem_t.kind
+                res.element_type = add_element(c, elem_t)
+                res.element_size = storage_size(elem_t)
+                res.record = elem_t.record
+                res.record_size = elem_t.record_size
+                res.pointee = elem_t.pointee
+                res.read_only = elem_t.read_only
+            }
+        }
+    } else if node.kind == AstKind.StructLiteral {
+        var children = vec.as_slice.[u32](&c.tree.children)
+        var tid = children[node.a as i64]
+        var tnode = nodes[tid as i64]
+        var si = find_struct_idx(c, node_span(c.tree, tid, tnode.a))
+        if si == (~0 as u32) {
+            res = fail(c, tid, "unknown struct type")
+        } else {
+            resolve_struct_layout(c, si)
+            if !c.has_error {
+                var recs = c.sema.records.data
+                var sdecls = vec.as_slice.[AstStruct](&c.tree.structs)
+                var sdecl = sdecls[si as i64]
+                for var i: u32 = 1; i < node.b && !c.has_error; i += 1 {
+                    var init_id = children[(node.a + i) as i64]
+                    var init_node = nodes[init_id as i64]
+                    var fname = node_span(c.tree, init_id, init_node.a)
+                    var matched = false
+                    for var f: u32 = 0; f < sdecl.fields.count; f += 1 {
+                        var fid = children[(sdecl.fields.first + f) as i64]
+                        var fn_node = nodes[fid as i64]
+                        if same_span(c.tree, fname, node_span(c.tree, fid, fn_node.a)) {
+                            var fields = vec.as_slice.[SemaNode](&recs[si as i64].fields)
+                            check_value(c, init_node.b, fields[f as i64].type_info)
+                            matched = true
+                            break
+                        }
+                    }
+                    if !matched && !c.has_error {
+                        fail(c, init_id, "unknown struct field")
+                    }
+                }
+                if !c.has_error {
+                    res = simple_type(TypeKind.Struct)
+                    res.record = si
+                    res.record_size = recs[si as i64].size
+                }
+            }
+        }
+    } else if node.kind == AstKind.Call {
+        var children = vec.as_slice.[u32](&c.tree.children)
+        var callee = children[node.a as i64]
+        var cnode = nodes[callee as i64]
+        if cnode.kind != AstKind.Identifier {
+            res = fail(c, callee, "unsupported callee")
+        } else {
+            var cname = node_span(c.tree, callee, cnode.a)
+            var text = span_bytes(c.tree, cname)
+            if str.equals(text, "len") || str.equals(text, "data") || str.equals(text, "size_of") {
+                if node.b != 2 {
+                    res = fail(c, id, "builtin expects 1 argument")
+                } else {
+                    var arg = children[(node.a + 1) as i64]
+                    var at = check_expr(c, arg, empty_type())
+                    if !c.has_error {
+                        var sn = c.sema.nodes.data
+                        if str.equals(text, "len") {
+                            if at.kind != TypeKind.Array && at.kind != TypeKind.Slice {
+                                res = fail(c, arg, "len requires an array or slice")
+                            } else {
+                                sn[id as i64].builtin = SemaBuiltin.Len
+                                res = simple_type(TypeKind.I64)
+                            }
+                        } else if str.equals(text, "data") {
+                            if at.kind != TypeKind.Array && at.kind != TypeKind.Slice {
+                                res = fail(c, arg, "data requires an array or slice")
+                            } else {
+                                sn[id as i64].builtin = SemaBuiltin.Data
+                                var elems = vec.as_slice.[SemaType](&c.sema.elements)
+                                res = simple_type(TypeKind.Pointer)
+                                res.pointee = add_pointee(c, elems[at.element_type as i64])
+                                res.read_only = true
+                            }
+                        } else {
+                            sn[id as i64].builtin = SemaBuiltin.SizeOf
+                            sn[id as i64].binding = storage_size(at)
+                            res = simple_type(TypeKind.U64)
+                        }
+                    }
+                }
+            } else {
+                var fi = find_fn_idx(c, cname)
+                if fi == (~0 as u32) {
+                    res = fail(c, callee, "unknown function")
+                } else {
+                    var fns = vec.as_slice.[SemaFunction](&c.sema.functions)
+                    var sf = fns[fi as i64]
+                    if node.b - 1 != (sf.param_types.len as u32) {
+                        res = fail(c, id, "wrong number of function arguments")
+                    } else {
+                        var ptypes = vec.as_slice.[SemaType](&sf.param_types)
+                        for var i: u32 = 0; i < node.b - 1 && !c.has_error; i += 1 {
+                            check_value(c, children[(node.a + 1 + i) as i64], ptypes[i as i64])
+                        }
+                        if !c.has_error {
+                            var sn = c.sema.nodes.data
+                            sn[id as i64].binding = fi
+                            res = sf.result
+                        }
+                    }
+                }
+            }
+        }
+    } else if node.kind == AstKind.Index {
+        var bt = check_expr(c, node.a, empty_type())
+        if !c.has_error {
+            var it = check_expr(c, node.b, empty_type())
+            if !c.has_error && !is_integer(it.kind) {
+                res = fail(c, node.b, "index must be an integer")
+            } else if !c.has_error {
+                if bt.kind == TypeKind.Array || bt.kind == TypeKind.Slice {
+                    var elems = vec.as_slice.[SemaType](&c.sema.elements)
+                    res = elems[bt.element_type as i64]
+                } else if bt.kind == TypeKind.Pointer {
+                    var pts = vec.as_slice.[SemaType](&c.sema.pointees)
+                    res = pts[bt.pointee as i64]
+                } else {
+                    res = fail(c, node.a, "indexing requires an array, slice, or pointer")
+                }
+            }
+        }
+    } else if node.kind == AstKind.Slice {
+        var bt = check_expr(c, node.a, empty_type())
+        if !c.has_error {
+            var rnode = nodes[node.b as i64]
+            var st = check_expr(c, rnode.a, empty_type())
+            var et = check_expr(c, rnode.b, empty_type())
+            if !c.has_error && (!is_integer(st.kind) || !is_integer(et.kind)) {
+                res = fail(c, node.b, "slice bounds must be integers")
+            } else if !c.has_error {
+                var elem = empty_type()
+                if bt.kind == TypeKind.Array || bt.kind == TypeKind.Slice {
+                    var elems = vec.as_slice.[SemaType](&c.sema.elements)
+                    elem = elems[bt.element_type as i64]
+                } else if bt.kind == TypeKind.Pointer {
+                    var pts = vec.as_slice.[SemaType](&c.sema.pointees)
+                    elem = pts[bt.pointee as i64]
+                } else {
+                    return fail(c, node.a, "slicing requires an array, slice, or pointer")
+                }
+                res = simple_type(TypeKind.Slice)
+                res.element = elem.kind
+                res.element_type = add_element(c, elem)
+                res.element_size = element_size(elem)
+                res.record = elem.record
+                res.record_size = elem.record_size
+                res.pointee = elem.pointee
+                res.read_only = elem.read_only
+            }
+        }
+    } else if node.kind == AstKind.Member {
+        var mname = node_span(c.tree, id, node.b)
+        var base_node = nodes[node.a as i64]
+        var enum_hit = false
+        if base_node.kind == AstKind.Identifier {
+            var ename = node_span(c.tree, node.a, base_node.a)
+            if find_local(c, ename, 0) < 0 {
+                var ei = find_enum_idx(c, ename)
+                if ei != (~0 as u32) {
+                    enum_hit = true
+                    var enums = vec.as_slice.[AstEnum](&c.tree.enums)
+                    var edecl = enums[ei as i64]
+                    var children = vec.as_slice.[u32](&c.tree.children)
+                    var found = false
+                    for var i: u32 = 0; i < edecl.cases.count; i += 1 {
+                        var cid = children[(edecl.cases.first + i) as i64]
+                        var cn = nodes[cid as i64]
+                        if same_span(c.tree, mname, node_span(c.tree, cid, cn.a)) {
+                            var sn = c.sema.nodes.data
+                            sn[id as i64].is_enum_case = true
+                            sn[id as i64].binding = sn[cid as i64].binding
+                            res = resolve_type(c, edecl.backing)
+                            res.record = ei + 1
+                            found = true
+                            break
+                        }
+                    }
+                    if !found {
+                        res = fail(c, id, "unknown enum member")
+                    }
+                }
+            }
+        }
+        if !enum_hit {
+            var bt = check_expr(c, node.a, empty_type())
+            if !c.has_error {
+                if bt.kind == TypeKind.Pointer {
+                    var pts = vec.as_slice.[SemaType](&c.sema.pointees)
+                    bt = pts[bt.pointee as i64]
+                }
+                if bt.kind != TypeKind.Struct {
+                    res = fail(c, id, "member access requires a struct value")
+                } else {
+                    var recs = c.sema.records.data
+                    var sdecls = vec.as_slice.[AstStruct](&c.tree.structs)
+                    var sdecl = sdecls[bt.record as i64]
+                    var children = vec.as_slice.[u32](&c.tree.children)
+                    var found = false
+                    for var i: u32 = 0; i < sdecl.fields.count; i += 1 {
+                        var fid = children[(sdecl.fields.first + i) as i64]
+                        var fn_node = nodes[fid as i64]
+                        if same_span(c.tree, mname, node_span(c.tree, fid, fn_node.a)) {
+                            var fields = vec.as_slice.[SemaNode](&recs[bt.record as i64].fields)
+                            var sn = c.sema.nodes.data
+                            sn[id as i64].binding = fields[i as i64].binding
+                            res = fields[i as i64].type_info
+                            found = true
+                            break
+                        }
+                    }
+                    if !found {
+                        res = fail(c, id, "unknown struct field")
+                    }
+                }
+            }
+        }
+    } else if node.kind == AstKind.Cast {
+        var dst = resolve_type(c, node.b)
+        if !c.has_error {
+            var src = check_expr(c, node.a, dst)
+            if !c.has_error {
+                res = dst
+            }
+        }
+    } else if node.kind == AstKind.AddressOf {
+        var op = check_expr(c, node.a, empty_type())
+        if !c.has_error {
+            res = simple_type(TypeKind.Pointer)
+            res.pointee = add_pointee(c, op)
+            res.read_only = !is_writable_lvalue(c, node.a)
+        }
+    } else if node.kind == AstKind.Dereference {
+        var op = check_expr(c, node.a, empty_type())
+        if !c.has_error {
+            if op.kind != TypeKind.Pointer {
+                res = fail(c, id, "dereference requires a pointer")
+            } else {
+                var pts = vec.as_slice.[SemaType](&c.sema.pointees)
+                res = pts[op.pointee as i64]
+            }
+        }
+    } else if node.kind == AstKind.Positive || node.kind == AstKind.Negate {
+        var op = check_expr(c, node.a, expected)
+        if !c.has_error && !is_numeric(op.kind) {
+            res = fail(c, id, "unary sign requires a numeric operand")
+        } else if !c.has_error {
+            res = op
+        }
+    } else if node.kind == AstKind.LogicalNot {
+        check_value(c, node.a, simple_type(TypeKind.Bool))
+        res = simple_type(TypeKind.Bool)
+    } else if node.kind == AstKind.BitNot {
+        var op = check_expr(c, node.a, expected)
+        if !c.has_error && !is_integer(op.kind) {
+            res = fail(c, id, "bitwise not requires an integer operand")
+        } else if !c.has_error {
+            res = op
+        }
+    } else if node.kind == AstKind.LogicalAnd || node.kind == AstKind.LogicalOr {
+        check_value(c, node.a, simple_type(TypeKind.Bool))
+        check_value(c, node.b, simple_type(TypeKind.Bool))
+        res = simple_type(TypeKind.Bool)
+    } else if node.kind >= AstKind.Assign && node.kind <= AstKind.AssignShiftRight {
+        var lt = check_expr(c, node.a, empty_type())
+        if !c.has_error {
+            if !is_writable_lvalue(c, node.a) {
+                res = fail(c, node.a, "cannot assign to non-writable target")
+            } else {
+                check_value(c, node.b, lt)
+                res = lt
+            }
+        }
+    } else if node.kind >= AstKind.Equal && node.kind <= AstKind.GreaterEqual {
+        var lt = check_expr(c, node.a, empty_type())
+        var rt = check_expr(c, node.b, lt)
+        if !c.has_error {
+            if is_numeric(lt.kind) && is_numeric(rt.kind) && !is_enum(lt) && !is_enum(rt) {
+                var cm = common_numeric_type(lt.kind, rt.kind)
+                if cm == TypeKind.Invalid {
+                    res = fail(c, id, "incompatible comparison operands")
+                } else {
+                    var sn = c.sema.nodes.data
+                    if lt.kind != cm { sn[node.a as i64].promotion = cm }
+                    if rt.kind != cm { sn[node.b as i64].promotion = cm }
+                    res = simple_type(TypeKind.Bool)
+                }
+            } else if same_type(c, lt, rt) {
+                res = simple_type(TypeKind.Bool)
+            } else {
+                res = fail(c, id, "incompatible comparison operands")
+            }
+        }
+    } else if node.kind == AstKind.ShiftLeft || node.kind == AstKind.ShiftRight {
+        var lt = check_expr(c, node.a, expected)
+        var rt = check_expr(c, node.b, empty_type())
+        if !c.has_error && (!is_integer(lt.kind) || !is_integer(rt.kind)) {
+            res = fail(c, id, "shift requires integer operands")
+        } else if !c.has_error {
+            res = lt
+        }
+    } else {
+        // Binary arithmetic/bitwise
+        var lt = check_expr(c, node.a, expected)
+        var rt = check_expr(c, node.b, lt)
+        if !c.has_error {
+            var cm = common_numeric_type(lt.kind, rt.kind)
+            if cm == TypeKind.Invalid {
+                res = fail(c, id, "incompatible binary operands")
+            } else {
+                var sn = c.sema.nodes.data
+                if lt.kind != cm { sn[node.a as i64].promotion = cm }
+                if rt.kind != cm { sn[node.b as i64].promotion = cm }
+                res = simple_type(cm)
+            }
+        }
+    }
+
+    c.recursion_depth -= 1
+    if !c.has_error {
+        set_node_type(c, id, res)
+    }
+    return res
+}
+
+fun check_statement(c: *Checker, id: u32): bool {
+    if id == NODE_NONE || c.has_error {
+        return true
+    }
+    var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
+    var node = nodes[id as i64]
+    if node.kind == AstKind.Block {
+        return check_block(c, id)
+    }
+    if node.kind == AstKind.Return {
+        if node.a == NODE_NONE {
+            if c.current_return.kind != TypeKind.Void {
+                fail(c, id, "non-void function must return a value")
+            }
+        } else {
+            if c.current_return.kind == TypeKind.Void {
+                fail(c, id, "void function cannot return a value")
+            } else {
+                check_value(c, node.a, c.current_return)
+            }
+        }
+        return false
+    }
+    if node.kind == AstKind.Break || node.kind == AstKind.Continue {
+        if c.loops.len == 0 {
+            fail(c, id, "break or continue outside loop")
+        }
+        return false
+    }
+    if node.kind == AstKind.Var {
+        var vars = vec.as_slice.[AstVariable](&c.tree.variables)
+        var v = vars[node.a as i64]
+        var name = node_span(c.tree, id, v.name_length)
+        if find_local(c, name, c.scope_depth) >= 0 {
+            fail(c, id, "duplicate local variable")
+            return true
+        }
+        var vt = empty_type()
+        if v.type_node != NODE_NONE {
+            vt = resolve_type(c, v.type_node)
+            if c.has_error { return true }
+            if v.initializer != NODE_NONE {
+                check_value(c, v.initializer, vt)
+            }
+        } else {
+            vt = check_expr(c, v.initializer, empty_type())
+        }
+        if c.has_error { return true }
+        var slot = c.slot_count
+        c.slot_count += 1
+        var lv = LocalVar {
+            name: name,
+            slot: slot,
+            type_info: vt,
+            is_const: false,
+            const_idx: 0,
+            depth: c.scope_depth,
+        }
+        vec.push.[LocalVar](&c.locals, &lv)
+        var sn = c.sema.nodes.data
+        sn[id as i64].binding = slot
+        sn[id as i64].type_info = vt
+        return true
+    }
+    if node.kind == AstKind.Const {
+        var idx = node.a
+        check_const_decl(c, idx)
+        if c.has_error { return true }
+        var decls = vec.as_slice.[AstConst](&c.tree.consts)
+        var consts = c.sema.constants.data
+        var lv = LocalVar {
+            name: decls[idx as i64].name,
+            slot: idx,
+            type_info: consts[idx as i64].type_info,
+            is_const: true,
+            const_idx: idx,
+            depth: c.scope_depth,
+        }
+        vec.push.[LocalVar](&c.locals, &lv)
+        return true
+    }
+    if node.kind == AstKind.If {
+        check_value(c, node.a, simple_type(TypeKind.Bool))
+        var brs = vec.as_slice.[AstIfBranches](&c.tree.if_branches)
+        var br = brs[node.b as i64]
+        var then_falls = check_block(c, br.then_branch)
+        if br.else_branch == NODE_NONE {
+            return true
+        }
+        var else_falls = check_statement(c, br.else_branch)
+        return then_falls || else_falls
+    }
+    if node.kind == AstKind.Match {
+        var children = vec.as_slice.[u32](&c.tree.children)
+        var st = check_expr(c, children[node.a as i64], empty_type())
+        var has_else = false
+        var falls = false
+        var pattern_count: u32 = 0
+        for var i: u32 = 1; i < node.b && !c.has_error; i += 1 {
+            var arm_id = children[(node.a + i) as i64]
+            var arm = nodes[arm_id as i64]
+            if arm.b == 1 {
+                has_else = true
+            } else {
+                for var p: u32 = 0; p < arm.b - 1 && !c.has_error; p += 1 {
+                    check_value(c, children[(arm.a + p) as i64], st)
+                    pattern_count += 1
+                }
+            }
+            var body = children[(arm.a + arm.b - 1) as i64]
+            if check_statement(c, body) {
+                falls = true
+            }
+        }
+        if !has_else && is_enum(st) {
+            var enums = vec.as_slice.[AstEnum](&c.tree.enums)
+            if pattern_count >= enums[(st.record - 1) as i64].cases.count {
+                has_else = true
+            }
+        } else if !has_else && st.kind == TypeKind.Bool && pattern_count >= 2 {
+            has_else = true
+        }
+        return !has_else || falls
+    }
+    if node.kind == AstKind.For {
+        if node.a != NODE_NONE {
+            check_value(c, node.a, simple_type(TypeKind.Bool))
+        }
+        var le = LoopEntry { label: Span { offset: 0, length: 0 } }
+        vec.push.[LoopEntry](&c.loops, &le)
+        check_block(c, node.b)
+        var dummy: LoopEntry
+        vec.pop.[LoopEntry](&c.loops, &dummy)
+        return node.a != NODE_NONE
+    }
+    if node.kind == AstKind.ForCStyle {
+        var saved_locals = c.locals.len
+        c.scope_depth += 1
+        var headers = vec.as_slice.[AstForHeader](&c.tree.for_headers)
+        var h = headers[node.a as i64]
+        if h.initializer != NODE_NONE {
+            check_statement(c, h.initializer)
+        }
+        if h.condition != NODE_NONE {
+            check_value(c, h.condition, simple_type(TypeKind.Bool))
+        }
+        if h.step != NODE_NONE {
+            check_expr(c, h.step, empty_type())
+        }
+        var le = LoopEntry { label: h.label }
+        vec.push.[LoopEntry](&c.loops, &le)
+        check_block(c, node.b)
+        var dummy: LoopEntry
+        vec.pop.[LoopEntry](&c.loops, &dummy)
+        c.scope_depth -= 1
+        c.locals.len = saved_locals
+        return h.condition != NODE_NONE
+    }
+    check_expr(c, id, empty_type())
+    return true
+}
+
+fun check_block(c: *Checker, id: u32): bool {
+    var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
+    var blk = nodes[id as i64]
+    var children = vec.as_slice.[u32](&c.tree.children)
+    var saved_locals = c.locals.len
+    c.scope_depth += 1
+    var falls = true
+    for var i: u32 = 0; i < blk.b && !c.has_error; i += 1 {
+        falls = check_statement(c, children[(blk.a + i) as i64])
+    }
+    c.scope_depth -= 1
+    c.locals.len = saved_locals
+    return falls
+}
+
+pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool {
+    if vec.init.[SemaNode](&out.nodes, arena, tree.nodes.len + 1) < 0 { return false }
+    if vec.init.[SemaFunction](&out.functions, arena, tree.functions.len + 1) < 0 { return false }
+    if vec.init.[SemaRecord](&out.records, arena, tree.structs.len + 1) < 0 { return false }
+    if vec.init.[SemaConstant](&out.constants, arena, tree.consts.len + 1) < 0 { return false }
+    if vec.init.[SemaType](&out.pointees, arena, 32) < 0 { return false }
+    if vec.init.[SemaType](&out.elements, arena, 32) < 0 { return false }
+    if vec.init.[u64](&out.enum_values, arena, 32) < 0 { return false }
+
+    var empty_sn = SemaNode {
+        type_info: empty_type(),
+        binding: 0,
+        builtin: SemaBuiltin.None,
+        promotion: TypeKind.Invalid,
+        is_boolean_literal: false,
+        borrow_array: false,
+        falls_through: false,
+        is_enum_case: false,
+        is_const: false,
+    }
+    for var i: u64 = 0; i < tree.nodes.len; i += 1 {
+        vec.push.[SemaNode](&out.nodes, &empty_sn)
+    }
+
+    var c: Checker
+    c.arena = arena
+    c.tree = tree
+    c.sema = out
+    c.has_error = false
+    c.scope_depth = 0
+    c.slot_count = 0
+    c.recursion_depth = 0
+    vec.init.[LocalVar](&c.locals, arena, 64)
+    vec.init.[LoopEntry](&c.loops, arena, 8)
+
+    for var i: u64 = 0; i < tree.structs.len; i += 1 {
+        var sr = SemaRecord { declaration: i as u32, size: 0, alignment: 1, state: 0, fields: vec.Vec[SemaNode] {} }
+        vec.init.[SemaNode](&sr.fields, arena, 8)
+        vec.push.[SemaRecord](&out.records, &sr)
+    }
+    for var i: u64 = 0; i < tree.consts.len; i += 1 {
+        var sc = SemaConstant { type_info: empty_type(), bits: 0, str_node: NODE_NONE, state: 0 }
+        vec.push.[SemaConstant](&out.constants, &sc)
+    }
+
+    // Resolve enums
+    var enums = vec.as_slice.[AstEnum](&tree.enums)
+    var children = vec.as_slice.[u32](&tree.children)
+    var nodes = vec.as_slice.[AstNode](&tree.nodes)
+    for var i: i64 = 0; i < len(enums) && !c.has_error; i += 1 {
+        var edecl = enums[i]
+        var bt = resolve_type(&c, edecl.backing)
+        if !c.has_error && !is_integer(bt.kind) {
+            fail(&c, edecl.backing, "enum backing type must be an integer")
+            break
+        }
+        var next_val: u64 = 0
+        for var m: u32 = 0; m < edecl.cases.count && !c.has_error; m += 1 {
+            var cid = children[(edecl.cases.first + m) as i64]
+            var cn = nodes[cid as i64]
+            var val = next_val
+            if cn.b != NODE_NONE {
+                var dummy_str: u32 = 0
+                eval_const_expr(&c, cn.b, bt, &val, &dummy_str)
+            }
+            var ev_idx = out.enum_values.len as u32
+            vec.push_value.[u64](&out.enum_values, val)
+            var sn = out.nodes.data
+            sn[cid as i64].binding = ev_idx
+            next_val = val + 1
+        }
+    }
+
+    // Resolve structs and consts
+    for var i: u64 = 0; i < tree.structs.len && !c.has_error; i += 1 {
+        resolve_struct_layout(&c, i as u32)
+    }
+    for var i: u64 = 0; i < tree.consts.len && !c.has_error; i += 1 {
+        var consts = vec.as_slice.[AstConst](&tree.consts)
+        if !consts[i as i64].local {
+            check_const_decl(&c, i as u32)
+        }
+    }
+
+    // Register function signatures
+    var fns = vec.as_slice.[AstFunction](&tree.functions)
+    for var i: i64 = 0; i < len(fns) && !c.has_error; i += 1 {
+        var fdecl = fns[i]
+        var sf = SemaFunction {
+            result: resolve_type(&c, fdecl.return_type),
+            slot_count: 0,
+            declaration: i as u32,
+            param_types: vec.Vec[SemaType] {},
+        }
+        vec.init.[SemaType](&sf.param_types, arena, 8)
+        for var p: u32 = 0; p < fdecl.parameters.count && !c.has_error; p += 1 {
+            var pid = children[(fdecl.parameters.first + p) as i64]
+            var pn = nodes[pid as i64]
+            var pt = resolve_type(&c, pn.b)
+            vec.push.[SemaType](&sf.param_types, &pt)
+        }
+        vec.push.[SemaFunction](&out.functions, &sf)
+    }
+
+    // Check function bodies
+    for var i: i64 = 0; i < len(fns) && !c.has_error; i += 1 {
+        var fdecl = fns[i]
+        if fdecl.body == NODE_NONE {
+            continue
+        }
+        var sf_list = out.functions.data
+        c.current_return = sf_list[i].result
+        c.current_fn_idx = i as u32
+        c.locals.len = 0
+        c.loops.len = 0
+        c.scope_depth = 1
+        c.slot_count = 0
+
+        var ptypes = vec.as_slice.[SemaType](&sf_list[i].param_types)
+        for var p: u32 = 0; p < fdecl.parameters.count; p += 1 {
+            var pid = children[(fdecl.parameters.first + p) as i64]
+            var pn = nodes[pid as i64]
+            var lv = LocalVar {
+                name: node_span(tree, pid, pn.a),
+                slot: c.slot_count,
+                type_info: ptypes[p as i64],
+                is_const: false,
+                const_idx: 0,
+                depth: 1,
+            }
+            c.slot_count += 1
+            vec.push.[LocalVar](&c.locals, &lv)
+        }
+        var falls = check_block(&c, fdecl.body)
+        if !c.has_error && c.current_return.kind != TypeKind.Void && falls {
+            fail_at(&c, fdecl.name.offset, "non-void function may reach end without returning")
+        }
+        sf_list = out.functions.data
+        sf_list[i].slot_count = c.slot_count
+    }
+
+    *err = c.err
+    return !c.has_error
+}
