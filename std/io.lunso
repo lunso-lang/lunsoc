@@ -1,0 +1,93 @@
+ext fun lunso_sys_read(fd: i32, buffer: *u8, count: u64): i64
+ext fun lunso_sys_write(fd: i32, buffer: *const u8, count: u64): i64
+
+pub fun read_into(buffer: *u8, capacity: u64): i64 {
+    return lunso_sys_read(0, buffer, capacity)
+}
+
+pub fun read_line(buffer: *u8, capacity: u64, out: *[]u8): i64 {
+    if capacity == 0 || (buffer as u64) == 0 || (out as u64) == 0 {
+        return -22
+    }
+    var n: u64 = 0
+    for {
+        var b: u8 = 0
+        var r = lunso_sys_read(0, &b, 1)
+        for r == -4 {
+            r = lunso_sys_read(0, &b, 1)
+        }
+        if r < 0 {
+            return r
+        }
+        if r == 0 {
+            if n == 0 {
+                *out = buffer[0..0]
+                return 0
+            }
+            if n > 0 && buffer[n - 1] == '\r' {
+                n -= 1
+            }
+            *out = buffer[0..n]
+            return 1
+        }
+        if b == '\n' {
+            if n > 0 && buffer[n - 1] == '\r' {
+                n -= 1
+            }
+            *out = buffer[0..n]
+            return 1
+        }
+        if n >= capacity {
+            return -75
+        }
+        buffer[n] = b
+        n += 1
+    }
+}
+
+pub fun write_bytes(fd: i32, bytes: []u8): i64 {
+    return lunso_sys_write(fd, data(bytes), len(bytes) as u64)
+}
+
+fun write_all_fd(fd: i32, text: []u8): i64 {
+    var written: i64 = 0
+    for written < len(text) {
+        var count: i64 = write_bytes(fd, text[written..len(text)])
+        if count < 0 {
+            return count
+        }
+        if count == 0 {
+            return written
+        }
+        written += count
+    }
+    return written
+}
+
+fun writeln_fd(fd: i32, text: []u8): i64 {
+    var written: i64 = write_all_fd(fd, text)
+    if written != len(text) {
+        return written
+    }
+    var newline: i64 = write_all_fd(fd, "\n")
+    if newline < 0 {
+        return newline
+    }
+    return written + newline
+}
+
+pub fun print(text: []u8): i64 {
+    return write_all_fd(1, text)
+}
+
+pub fun println(text: []u8): i64 {
+    return writeln_fd(1, text)
+}
+
+pub fun eprint(text: []u8): i64 {
+    return write_all_fd(2, text)
+}
+
+pub fun eprintln(text: []u8): i64 {
+    return writeln_fd(2, text)
+}

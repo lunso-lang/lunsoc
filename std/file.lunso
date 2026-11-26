@@ -1,0 +1,186 @@
+import std.mem
+
+pub struct File {
+    fd: i32
+    active: bool
+}
+
+pub struct Bytes {
+    ptr: *u8
+    len: i64
+}
+
+ext fun lunso_sys_file_open(path: *const u8, writing: bool): i64
+ext fun lunso_sys_file_close(fd: i32): i64
+ext fun lunso_sys_read(fd: i32, buffer: *u8, count: u64): i64
+ext fun lunso_sys_write(fd: i32, buffer: *const u8, count: u64): i64
+
+fun open(path: []u8, out: *File, writing: bool): i64 {
+    if (*out).active {
+        return -16
+    }
+    var terminated: [4096]u8
+    if len(path) >= len(terminated) {
+        return -36
+    }
+    for var i = 0; i < len(path); i += 1 {
+        if path[i] == 0 {
+            return -22
+        }
+        terminated[i] = path[i]
+    }
+    terminated[len(path)] = 0
+
+    var fd = lunso_sys_file_open(data(terminated), writing)
+    for fd == -4 {
+        fd = lunso_sys_file_open(data(terminated), writing)
+    }
+    if fd < 0 {
+        return fd
+    }
+    (*out).fd = fd as i32
+    (*out).active = true
+    return 0
+}
+
+pub fun open_read(path: []u8, out: *File): i64 {
+    return open(path, out, false)
+}
+
+pub fun open_write(path: []u8, out: *File): i64 {
+    return open(path, out, true)
+}
+
+pub fun close(handle: *File): i64 {
+    if !(*handle).active {
+        return -9
+    }
+    // The descriptor can be reused immediately, even when close reports an error.
+    (*handle).active = false
+    return lunso_sys_file_close((*handle).fd)
+}
+
+pub fun read_into(handle: *File, buffer: *u8, capacity: u64): i64 {
+    if !(*handle).active {
+        return -9
+    }
+    var count = lunso_sys_read((*handle).fd, buffer, capacity)
+    for count == -4 {
+        count = lunso_sys_read((*handle).fd, buffer, capacity)
+    }
+    return count
+}
+
+pub fun write_to(handle: *File, bytes: []u8): i64 {
+    if !(*handle).active {
+        return -9
+    }
+    var ptr = data(bytes)
+    var size = len(bytes)
+    var written: i64 = 0
+    for written < size {
+        var remaining = (size - written) as u64
+        var start = &ptr[written]
+        var count = lunso_sys_write((*handle).fd, start, remaining)
+        for count == -4 {
+            count = lunso_sys_write((*handle).fd, start, remaining)
+        }
+        if count < 0 {
+            return count
+        }
+        if count == 0 {
+            return -5
+        }
+        written += count
+    }
+    return written
+}
+
+fun grow(arena: *mem.Arena, bytes: *Bytes, capacity: *i64): i64 {
+    var max: i64 = 9223372036854775807
+    if *capacity == max {
+        return -75
+    }
+    var next: i64 = 4096
+    if *capacity > max / 2 {
+        next = max
+    } else if *capacity != 0 {
+        next = *capacity * 2
+    }
+    var ptr: *u8
+    var status = mem.alloc(arena, next as u64, 1, &ptr)
+    if status < 0 {
+        return status
+    }
+    for var i: i64 = 0; i < (*bytes).len; i += 1 {
+        ptr[i] = (*bytes).ptr[i]
+    }
+    (*bytes).ptr = ptr
+    *capacity = next
+    return 0
+}
+
+fun read_contents(handle: *File, arena: *mem.Arena, bytes: *Bytes): i64 {
+    var capacity: i64 = 0
+    var count: i64 = 1
+    for count > 0 {
+        if (*bytes).len == capacity {
+            // Probe at the boundary so exact fits and empty files need no growth.
+            var byte: u8
+            count = read_into(handle, &byte, 1)
+            if count > 0 {
+                var status = grow(arena, bytes, &capacity)
+                if status < 0 {
+                    return status
+                }
+                (*bytes).ptr[(*bytes).len] = byte
+                (*bytes).len += 1
+            }
+        } else {
+            var buffer = &(*bytes).ptr[(*bytes).len]
+            count = read_into(handle, buffer, (capacity - (*bytes).len) as u64)
+            if count > 0 {
+                (*bytes).len += count
+            }
+        }
+    }
+    if count < 0 {
+        return count
+    }
+    return (*bytes).len
+}
+
+fun finish(handle: *File, count: i64): i64 {
+    var status = close(handle)
+    if count < 0 {
+        return count
+    }
+    if status < 0 {
+        return status
+    }
+    return count
+}
+
+pub fun read_all(path: []u8, arena: *mem.Arena, out: *Bytes): i64 {
+    var handle: File
+    var status = open_read(path, &handle)
+    if status < 0 {
+        return status
+    }
+    var bytes: Bytes
+    status = finish(&handle, read_contents(&handle, arena, &bytes))
+    if status < 0 {
+        return status
+    }
+    *out = bytes
+    return status
+}
+
+pub fun write_all(path: []u8, bytes: []u8): i64 {
+    var handle: File
+    var status = open_write(path, &handle)
+    if status < 0 {
+        return status
+    }
+    return finish(&handle, write_to(&handle, bytes))
+}

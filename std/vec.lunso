@@ -1,0 +1,163 @@
+import std.mem
+
+pub struct Vec[T] {
+    data: *T
+    len: u64
+    cap: u64
+    arena: *mem.Arena
+}
+
+fun elem_align(elem_size: u64): u64 {
+    if elem_size <= 1 {
+        return 1
+    }
+    if elem_size <= 2 {
+        return 2
+    }
+    if elem_size <= 4 {
+        return 4
+    }
+    if elem_size <= 8 {
+        return 8
+    }
+    return 16
+}
+
+pub fun init[T](vec: *Vec[T], arena: *mem.Arena, initial_cap: u64): i64 {
+    if (vec as u64) == 0 || (arena as u64) == 0 {
+        return -22
+    }
+    var empty: *T
+    (*vec).data = empty
+    (*vec).len = 0
+    (*vec).cap = 0
+    (*vec).arena = arena
+    if initial_cap == 0 {
+        return 0
+    }
+    return reserve.[T](vec, initial_cap)
+}
+
+pub fun reserve[T](vec: *Vec[T], min_cap: u64): i64 {
+    if (vec as u64) == 0 || ((*vec).arena as u64) == 0 {
+        return -22
+    }
+    if min_cap <= (*vec).cap {
+        return 0
+    }
+
+    var probe: T
+    var elem_size = size_of(probe)
+    if elem_size == 0 {
+        (*vec).cap = min_cap
+        return 0
+    }
+
+    var new_cap = (*vec).cap
+    if new_cap == 0 {
+        new_cap = 8
+    }
+    var max: u64 = ~0
+    for new_cap < min_cap {
+        if new_cap > max / 2 {
+            new_cap = min_cap
+            break
+        }
+        new_cap = new_cap * 2
+    }
+    if new_cap > max / elem_size {
+        return -75
+    }
+
+    var raw: *u8
+    var status = mem.alloc((*vec).arena, new_cap * elem_size, elem_align(elem_size), &raw)
+    if status < 0 {
+        return status
+    }
+
+    var new_data = raw as *T
+    for var i: u64 = 0; i < (*vec).len; i += 1 {
+        new_data[i] = (*vec).data[i]
+    }
+    (*vec).data = new_data
+    (*vec).cap = new_cap
+    return 0
+}
+
+pub fun alloc_slot[T](vec: *Vec[T], out: **T): i64 {
+    if (vec as u64) == 0 || (out as u64) == 0 {
+        return -22
+    }
+    if (*vec).len >= (*vec).cap {
+        var status = reserve.[T](vec, (*vec).len + 1)
+        if status < 0 {
+            return status
+        }
+    }
+    *out = &(*vec).data[(*vec).len]
+    (*vec).len += 1
+    return 0
+}
+
+pub fun push[T](vec: *Vec[T], value: *T): i64 {
+    if (vec as u64) == 0 || (value as u64) == 0 {
+        return -22
+    }
+    if (*vec).len >= (*vec).cap {
+        var status = reserve.[T](vec, (*vec).len + 1)
+        if status < 0 {
+            return status
+        }
+    }
+    (*vec).data[(*vec).len] = *value
+    (*vec).len += 1
+    return 0
+}
+
+pub fun push_value[T](vec: *Vec[T], value: T): i64 {
+    if (vec as u64) == 0 {
+        return -22
+    }
+    if (*vec).len >= (*vec).cap {
+        var status = reserve.[T](vec, (*vec).len + 1)
+        if status < 0 {
+            return status
+        }
+    }
+    (*vec).data[(*vec).len] = value
+    (*vec).len += 1
+    return 0
+}
+
+pub fun pop[T](vec: *Vec[T], out: *T): bool {
+    if (vec as u64) == 0 || (*vec).len == 0 {
+        return false
+    }
+    (*vec).len -= 1
+    if (out as u64) != 0 {
+        *out = (*vec).data[(*vec).len]
+    }
+    return true
+}
+
+pub fun get[T](vec: *Vec[T], index: u64, out: *T): bool {
+    if (vec as u64) == 0 || (out as u64) == 0 || index >= (*vec).len {
+        return false
+    }
+    *out = (*vec).data[index]
+    return true
+}
+
+pub fun clear[T](vec: *Vec[T]) {
+    if (vec as u64) != 0 {
+        (*vec).len = 0
+    }
+}
+
+pub fun as_slice[T](vec: *Vec[T]): []T {
+    if (vec as u64) == 0 || (*vec).len == 0 {
+        var empty: []T
+        return empty
+    }
+    return (*vec).data[0..(*vec).len]
+}

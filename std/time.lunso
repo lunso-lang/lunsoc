@@ -1,0 +1,59 @@
+pub const CLOCK_REALTIME: i32 = 0
+pub const CLOCK_MONOTONIC: i32 = 1
+
+pub struct Instant {
+    sec: i64
+    nsec: i64
+}
+
+ext fun lunso_sys_clock_gettime(clock_id: i32, out_sec: *i64, out_nsec: *i64): i64
+ext fun lunso_sys_nanosleep(sec: i64, nsec: i64): i64
+
+pub fun now(clock_id: i32, out: *Instant): i64 {
+    if (out as u64) == 0 {
+        return -22
+    }
+    var sec: i64 = 0
+    var nsec: i64 = 0
+    var status = lunso_sys_clock_gettime(clock_id, &sec, &nsec)
+    if status < 0 {
+        return status
+    }
+    out.sec = sec
+    out.nsec = nsec
+    return 0
+}
+
+pub fun now_realtime(out: *Instant): i64 {
+    return now(CLOCK_REALTIME, out)
+}
+
+pub fun now_monotonic(out: *Instant): i64 {
+    return now(CLOCK_MONOTONIC, out)
+}
+
+pub fun monotonic_ns(): i64 {
+    var t: Instant
+    if now_monotonic(&t) < 0 {
+        return 0
+    }
+    return t.sec * 1000000000 + t.nsec
+}
+
+pub fun monotonic_ms(): i64 {
+    var t: Instant
+    if now_monotonic(&t) < 0 {
+        return 0
+    }
+    return t.sec * 1000 + t.nsec / 1000000
+}
+
+pub fun sleep_ms(ms: u64): i64 {
+    var sec = (ms / 1000) as i64
+    var nsec = ((ms % 1000) * 1000000) as i64
+    var status = lunso_sys_nanosleep(sec, nsec)
+    for status == -4 {
+        status = lunso_sys_nanosleep(sec, nsec)
+    }
+    return status
+}

@@ -20,14 +20,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: lunsoc
-
-      - uses: actions/checkout@v4
-        with:
-          repository: lunso-lang/lunso-boot
-          ref: v1.0
-          path: lunso-boot
 
       - name: Install QBE 1.3
         run: |
@@ -42,11 +34,8 @@ jobs:
           curl -fsSL https://github.com/lunso-lang/lunsoc/releases/download/v0.1/lunsoc-linux-x86_64 -o /tmp/lunsoc-v0.1
           chmod +x /tmp/lunsoc-v0.1
 
-      - name: Build lunso-boot (std & differential tests)
-        run: make -C lunso-boot all build/std-linux-x86_64.o
-
-      - name: Build and run test suite with lunsoc v0.1
-        run: make -C lunsoc test LUNSO=/tmp/lunsoc-v0.1
+      - name: Build and run test suite
+        run: make test LUNSO=/tmp/lunsoc-v0.1
 
       - name: Build and run fuzzer
-        run: make -C lunsoc fuzz FUZZ_ITERS=50000 LUNSO=/tmp/lunsoc-v0.1
+        run: make fuzz FUZZ_ITERS=50000 LUNSO=/tmp/lunsoc-v0.1

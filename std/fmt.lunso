@@ -1,0 +1,202 @@
+import std.io
+import std.mem
+
+pub fun u64_to_buf(value: u64, buf: *u8, cap: i64): i64 {
+    if cap <= 0 {
+        return -22
+    }
+    var tmp: [32]u8
+    var n: i64 = 0
+    var v = value
+    if v == 0 {
+        tmp[0] = '0'
+        n = 1
+    } else {
+        for v > 0 {
+            tmp[n] = (('0' as u64) + (v % 10)) as u8
+            n += 1
+            v /= 10
+        }
+    }
+    if n > cap {
+        return -22
+    }
+    for var i: i64 = 0; i < n; i += 1 {
+        buf[i] = tmp[n - 1 - i]
+    }
+    return n
+}
+
+pub fun i64_to_buf(value: i64, buf: *u8, cap: i64): i64 {
+    if cap <= 0 {
+        return -22
+    }
+    if value < 0 {
+        buf[0] = '-'
+        var mag = (0 as u64) - (value as u64)
+        var n = u64_to_buf(mag, &buf[1], cap - 1)
+        if n < 0 {
+            return n
+        }
+        return n + 1
+    }
+    return u64_to_buf(value as u64, buf, cap)
+}
+
+pub fun hex_to_buf(value: u64, buf: *u8, cap: i64): i64 {
+    if cap <= 0 {
+        return -22
+    }
+    var digits = "0123456789abcdef"
+    var tmp: [16]u8
+    var n: i64 = 0
+    var v = value
+    if v == 0 {
+        tmp[0] = '0'
+        n = 1
+    } else {
+        for v > 0 {
+            tmp[n] = digits[(v & 15) as i64]
+            n += 1
+            v >>= 4
+        }
+    }
+    if n > cap {
+        return -22
+    }
+    for var i: i64 = 0; i < n; i += 1 {
+        buf[i] = tmp[n - 1 - i]
+    }
+    return n
+}
+
+pub fun format_u64(value: u64, arena: *mem.Arena): []u8 {
+    var tmp: [32]u8
+    var n = u64_to_buf(value, &tmp[0], 32)
+    var ptr: *u8
+    if n < 0 || mem.alloc(arena, n as u64, 1, &ptr) < 0 {
+        var empty: *u8
+        return empty[0..0]
+    }
+    for var i: i64 = 0; i < n; i += 1 {
+        ptr[i] = tmp[i]
+    }
+    return ptr[0..n]
+}
+
+pub fun format_i64(value: i64, arena: *mem.Arena): []u8 {
+    var tmp: [32]u8
+    var n = i64_to_buf(value, &tmp[0], 32)
+    var ptr: *u8
+    if n < 0 || mem.alloc(arena, n as u64, 1, &ptr) < 0 {
+        var empty: *u8
+        return empty[0..0]
+    }
+    for var i: i64 = 0; i < n; i += 1 {
+        ptr[i] = tmp[i]
+    }
+    return ptr[0..n]
+}
+
+pub fun print_u64(fd: i32, value: u64): i64 {
+    var buf: [32]u8
+    var n = u64_to_buf(value, &buf[0], 32)
+    if n < 0 {
+        return n
+    }
+    return io.write_bytes(fd, buf[0..n])
+}
+
+pub fun print_i64(fd: i32, value: i64): i64 {
+    var buf: [32]u8
+    var n = i64_to_buf(value, &buf[0], 32)
+    if n < 0 {
+        return n
+    }
+    return io.write_bytes(fd, buf[0..n])
+}
+
+fun is_ascii_space(b: u8): bool {
+    return b == ' ' || b == '\t' || b == '\r' || b == '\n'
+}
+
+pub fun parse_u64(text: []u8, out: *u64): bool {
+    var start: i64 = 0
+    var end = len(text)
+    for start < end && is_ascii_space(text[start]) {
+        start += 1
+    }
+    for end > start && is_ascii_space(text[end - 1]) {
+        end -= 1
+    }
+    if start >= end {
+        return false
+    }
+    if text[start] == '+' {
+        start += 1
+        if start >= end {
+            return false
+        }
+    }
+    var val: u64 = 0
+    var max: u64 = ~0
+    for var i = start; i < end; i += 1 {
+        var ch = text[i]
+        if ch < '0' || ch > '9' {
+            return false
+        }
+        var digit = (ch - '0') as u64
+        if val > (max - digit) / 10 {
+            return false
+        }
+        val = val * 10 + digit
+    }
+    *out = val
+    return true
+}
+
+pub fun parse_i64(text: []u8, out: *i64): bool {
+    var start: i64 = 0
+    var end = len(text)
+    for start < end && is_ascii_space(text[start]) {
+        start += 1
+    }
+    for end > start && is_ascii_space(text[end - 1]) {
+        end -= 1
+    }
+    if start >= end {
+        return false
+    }
+    var neg = false
+    if text[start] == '-' {
+        neg = true
+        start += 1
+    } else if text[start] == '+' {
+        start += 1
+    }
+    if start >= end {
+        return false
+    }
+    var limit: u64 = ((1 as u64) << 63) - 1
+    if neg {
+        limit = (1 as u64) << 63
+    }
+    var mag: u64 = 0
+    for var i = start; i < end; i += 1 {
+        var ch = text[i]
+        if ch < '0' || ch > '9' {
+            return false
+        }
+        var digit = (ch - '0') as u64
+        if mag > (limit - digit) / 10 {
+            return false
+        }
+        mag = mag * 10 + digit
+    }
+    if neg {
+        *out = ((0 as u64) - mag) as i64
+    } else {
+        *out = mag as i64
+    }
+    return true
+}

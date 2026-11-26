@@ -1,0 +1,50 @@
+import std.file
+import std.mem
+
+pub fun load(arena: *mem.Arena, out: *[][]u8): i64 {
+    var raw: file.Bytes
+    var status = file.read_all("/proc/self/cmdline", arena, &raw)
+    if status < 0 {
+        return status
+    }
+
+    var count: i64 = 0
+    for var i: i64 = 0; i < raw.len; i += 1 {
+        if raw.ptr[i] == '\0' {
+            count += 1
+        }
+    }
+    if raw.len > 0 && raw.ptr[raw.len - 1] != '\0' {
+        count += 1
+    }
+
+    if count == 0 {
+        var empty: *[]u8
+        *out = empty[0..0]
+        return 0
+    }
+
+    var sample: []u8
+    var mem_ptr: *u8
+    status = mem.alloc(arena, (count as u64) * size_of(sample), 8, &mem_ptr)
+    if status < 0 {
+        return status
+    }
+
+    var items = mem_ptr as *[]u8
+    var idx: i64 = 0
+    var start: i64 = 0
+    for var i: i64 = 0; i < raw.len; i += 1 {
+        if raw.ptr[i] == '\0' {
+            items[idx] = raw.ptr[start..i]
+            idx += 1
+            start = i + 1
+        }
+    }
+    if idx < count && start < raw.len {
+        items[idx] = raw.ptr[start..raw.len]
+    }
+
+    *out = items[0..count]
+    return count
+}
