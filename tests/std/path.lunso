@@ -1,0 +1,45 @@
+// expect-exit: 0
+import std.mem
+import std.path
+import std.str
+
+fun main(): i32 {
+    var arena: mem.Arena
+    if mem.init(&arena, 4096) < 0 {
+        return 1
+    }
+    defer mem.deinit(&arena)
+
+    if !str.equals(path.join(&arena, "/tmp", "a.lunso"), "/tmp/a.lunso") ||
+       !str.equals(path.join(&arena, "/tmp/", "a.lunso"), "/tmp/a.lunso") ||
+       !str.equals(path.dir_prefix("/a/b/c.lunso"), "/a/b/") ||
+       !str.equals(path.basename("/a/b/c.lunso"), "c.lunso") {
+        return 2
+    }
+
+    var decoded: []u8
+    if !path.from_file_uri(&arena, "file:///home/user/my%20project/main.lunso", &decoded) ||
+       !str.equals(decoded, "/home/user/my project/main.lunso") {
+        return 3
+    }
+    if !path.from_file_uri(&arena, "file://localhost/tmp/test.lunso", &decoded) ||
+       !str.equals(decoded, "/tmp/test.lunso") {
+        return 4
+    }
+
+    var encoded: []u8
+    if !path.to_file_uri(&arena, "/home/user/my project/main.lunso", &encoded) ||
+       !str.equals(encoded, "file:///home/user/my%20project/main.lunso") {
+        return 5
+    }
+
+    // Reject non-file, relative, or malformed percent-encoding.
+    if path.from_file_uri(&arena, "http://example.com/a", &decoded) ||
+       path.from_file_uri(&arena, "file://relative/path", &decoded) ||
+       path.from_file_uri(&arena, "file:///bad%2", &decoded) ||
+       path.to_file_uri(&arena, "relative/path", &encoded) {
+        return 6
+    }
+
+    return 0
+}

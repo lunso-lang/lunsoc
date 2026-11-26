@@ -1,5 +1,6 @@
 import std.mem
 import std.str
+import std.vec
 
 pub fun join(arena: *mem.Arena, dir: []u8, name: []u8): []u8 {
     if len(dir) == 0 { return name }
@@ -24,4 +25,83 @@ pub fun basename(p: []u8): []u8 {
         if p[i] == '/' { base_start = i + 1 }
     }
     return p[base_start..len(p)]
+}
+
+fun hex_val(ch: u8): i32 {
+    if ch >= '0' && ch <= '9' { return (ch - '0') as i32 }
+    if ch >= 'a' && ch <= 'f' { return 10 + ((ch - 'a') as i32) }
+    if ch >= 'A' && ch <= 'F' { return 10 + ((ch - 'A') as i32) }
+    return -1
+}
+
+fun is_uri_safe(ch: u8): bool {
+    if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
+        return true
+    }
+    return ch == '/' || ch == '-' || ch == '.' || ch == '_' || ch == '~'
+}
+
+pub fun from_file_uri(arena: *mem.Arena, uri: []u8, out: *[]u8): bool {
+    if (arena as u64) == 0 || (out as u64) == 0 || !str.starts_with(uri, "file://") {
+        return false
+    }
+    var rest = uri[7..len(uri)]
+    if str.starts_with(rest, "localhost/") {
+        rest = rest[9..len(rest)]
+    }
+    if len(rest) == 0 || rest[0] != '/' {
+        return false
+    }
+    var buf: vec.Vec[u8]
+    if vec.init.[u8](&buf, arena, len(rest) as u64) < 0 {
+        return false
+    }
+    for var i: i64 = 0; i < len(rest); i += 1 {
+        var ch = rest[i]
+        if ch == '%' {
+            if i + 2 >= len(rest) {
+                return false
+            }
+            var hi = hex_val(rest[i + 1])
+            var lo = hex_val(rest[i + 2])
+            if hi < 0 || lo < 0 {
+                return false
+            }
+            var byte = ((hi << 4) | lo) as u8
+            if byte == 0 {
+                return false
+            }
+            if vec.push_value.[u8](&buf, byte) < 0 { return false }
+            i += 2
+        } else {
+            if vec.push_value.[u8](&buf, ch) < 0 { return false }
+        }
+    }
+    *out = vec.as_slice.[u8](&buf)
+    return true
+}
+
+pub fun to_file_uri(arena: *mem.Arena, p: []u8, out: *[]u8): bool {
+    if (arena as u64) == 0 || (out as u64) == 0 || len(p) == 0 || p[0] != '/' {
+        return false
+    }
+    var buf: vec.Vec[u8]
+    if vec.init.[u8](&buf, arena, (len(p) + 8) as u64) < 0 {
+        return false
+    }
+    if vec.append_slice.[u8](&buf, "file://") < 0 {
+        return false
+    }
+    var hex = "0123456789ABCDEF"
+    for var i: i64 = 0; i < len(p); i += 1 {
+        var ch = p[i]
+        if is_uri_safe(ch) {
+            if vec.push_value.[u8](&buf, ch) < 0 { return false }
+        } else {
+            var esc: [3]u8 = ['%', hex[((ch >> 4) & 15) as i64], hex[(ch & 15) as i64]]
+            if vec.append_slice.[u8](&buf, esc[0..3]) < 0 { return false }
+        }
+    }
+    *out = vec.as_slice.[u8](&buf)
+    return true
 }
