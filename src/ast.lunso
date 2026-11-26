@@ -1,0 +1,223 @@
+import std.mem
+import std.vec
+
+pub const NODE_NONE: u32 = 0
+
+pub enum AstKind : u8 {
+    Invalid,
+    Function,
+    Struct,
+    Enum,
+    EnumCase,
+    Const,
+    Import,
+    ImportItem,
+    Field,
+    Parameter,
+    TypeName,
+    QualifiedType,
+    ArrayType,
+    PointerType,
+    GenericType,
+    Block,
+    Return,
+    If,
+    Match,
+    MatchArm,
+    For,
+    ForCStyle,
+    Break,
+    Continue,
+    Var,
+    Identifier,
+    Integer,
+    Float,
+    String,
+    ArrayLiteral,
+    StructLiteral,
+    StructFieldInit,
+    Call,
+    GenericCallee,
+    Index,
+    Slice,
+    SliceRange,
+    Member,
+    Cast,
+    AddressOf,
+    Dereference,
+    Positive,
+    Negate,
+    LogicalNot,
+    BitNot,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    LogicalAnd,
+    LogicalOr,
+    BitAnd,
+    BitOr,
+    BitXor,
+    ShiftLeft,
+    ShiftRight,
+    Assign,
+    AssignAdd,
+    AssignSubtract,
+    AssignMultiply,
+    AssignDivide,
+    AssignRemainder,
+    AssignBitAnd,
+    AssignBitOr,
+    AssignBitXor,
+    AssignShiftLeft,
+    AssignShiftRight,
+}
+
+pub struct Span {
+    offset: u32
+    length: u32
+}
+
+pub struct NodeRange {
+    first: u32
+    count: u32
+}
+
+pub struct AstNode {
+    kind: AstKind
+    a: u32
+    b: u32
+    pos: u32
+}
+
+pub struct AstFunction {
+    name: Span
+    parameters: NodeRange
+    type_parameters: NodeRange
+    nodes: NodeRange
+    return_type: u32
+    body: u32
+    module: u32
+    public: bool
+}
+
+pub struct AstStruct {
+    name: Span
+    fields: NodeRange
+    type_parameters: NodeRange
+    module: u32
+    public: bool
+}
+
+pub struct AstEnum {
+    name: Span
+    cases: NodeRange
+    backing: u32
+    module: u32
+    public: bool
+}
+
+pub struct AstConst {
+    name: Span
+    type_node: u32
+    value: u32
+    module: u32
+    public: bool
+    local: bool
+}
+
+pub enum ImportKind : u8 {
+    Module,
+    All,
+    Selected,
+}
+
+pub struct AstImport {
+    path: NodeRange
+    items: NodeRange
+    alias: Span
+    kind: ImportKind
+}
+
+pub struct AstIfBranches {
+    then_branch: u32
+    else_branch: u32
+}
+
+pub struct AstForHeader {
+    initializer: u32
+    condition: u32
+    step: u32
+    label: Span
+}
+
+pub struct AstVariable {
+    name_length: u32
+    type_node: u32
+    initializer: u32
+}
+
+pub struct Ast {
+    source: []u8
+    nodes: vec.Vec[AstNode]
+    children: vec.Vec[u32]
+    functions: vec.Vec[AstFunction]
+    structs: vec.Vec[AstStruct]
+    enums: vec.Vec[AstEnum]
+    consts: vec.Vec[AstConst]
+    imports: vec.Vec[AstImport]
+    if_branches: vec.Vec[AstIfBranches]
+    for_headers: vec.Vec[AstForHeader]
+    variables: vec.Vec[AstVariable]
+    declarations: NodeRange
+}
+
+pub fun init(arena: *mem.Arena, source: []u8, out: *Ast): bool {
+    out.source = source
+    out.declarations = NodeRange { first: 0, count: 0 }
+    if vec.init.[AstNode](&out.nodes, arena, 256) < 0 { return false }
+    if vec.init.[u32](&out.children, arena, 256) < 0 { return false }
+    if vec.init.[AstFunction](&out.functions, arena, 32) < 0 { return false }
+    if vec.init.[AstStruct](&out.structs, arena, 16) < 0 { return false }
+    if vec.init.[AstEnum](&out.enums, arena, 16) < 0 { return false }
+    if vec.init.[AstConst](&out.consts, arena, 16) < 0 { return false }
+    if vec.init.[AstImport](&out.imports, arena, 16) < 0 { return false }
+    if vec.init.[AstIfBranches](&out.if_branches, arena, 32) < 0 { return false }
+    if vec.init.[AstForHeader](&out.for_headers, arena, 16) < 0 { return false }
+    if vec.init.[AstVariable](&out.variables, arena, 32) < 0 { return false }
+    var zero = AstNode { kind: AstKind.Invalid, a: 0, b: 0, pos: 0 }
+    return vec.push.[AstNode](&out.nodes, &zero) >= 0
+}
+
+pub fun add_node(ast: *Ast, kind: AstKind, pos: u32, a: u32, b: u32): u32 {
+    var id = ast.nodes.len as u32
+    var node = AstNode { kind: kind, a: a, b: b, pos: pos }
+    if vec.push.[AstNode](&ast.nodes, &node) < 0 {
+        return NODE_NONE
+    }
+    return id
+}
+
+pub fun finish_children(ast: *Ast, pending: *vec.Vec[u32], mark: u64): NodeRange {
+    var count = pending.len - mark
+    if count == 0 {
+        return NodeRange { first: 0, count: 0 }
+    }
+    var first = ast.children.len as u32
+    var slice = vec.as_slice.[u32](pending)
+    for var i = mark as i64; i < len(slice); i += 1 {
+        if vec.push_value.[u32](&ast.children, slice[i]) < 0 {
+            pending.len = mark
+            return NodeRange { first: 0, count: 0 }
+        }
+    }
+    pending.len = mark
+    return NodeRange { first: first, count: count as u32 }
+}

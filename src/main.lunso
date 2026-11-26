@@ -3,8 +3,11 @@ import std.file
 import std.fmt
 import std.io
 import std.mem
+import std.str
 import std.vec
+import ast { Ast }
 import lexer { Token, TokenKind, error_message, token_name, tokenize_all }
+import parser { ParseError, parse }
 
 fun print_lexeme(bytes: []u8) {
     for var i: i64 = 0; i < len(bytes); i += 1 {
@@ -40,53 +43,27 @@ fun has_lexeme(kind: TokenKind): bool {
     }
 }
 
-fun report_error(path: []u8, source: []u8, tok: Token): i32 {
+fun report_error(path: []u8, tok: Token, msg: []u8): i32 {
     io.eprint(path)
     io.eprint(":")
     fmt.print_u64(2, tok.line)
     io.eprint(":")
     fmt.print_u64(2, tok.column)
     io.eprint(": ")
-    io.eprintln(error_message(tok.kind))
+    io.eprintln(msg)
     return 1
 }
 
-fun main(): i32 {
-    var arena: mem.Arena
-    if mem.init(&arena, 65536) < 0 {
-        io.eprintln("lunsoc: could not initialize arena")
-        return 1
-    }
-
-    var argv: [][]u8
-    if args.load(&arena, &argv) < 0 || len(argv) != 2 {
-        io.eprintln("usage: lunsoc <source.lunso>")
-        mem.deinit(&arena)
-        return 1
-    }
-
-    var path = argv[1]
-    var raw: file.Bytes
-    if file.read_all(path, &arena, &raw) < 0 {
-        io.eprint(path)
-        io.eprintln(": could not read source")
-        mem.deinit(&arena)
-        return 1
-    }
-
-    var source = raw.ptr[0..raw.len]
+fun dump_tokens(path: []u8, source: []u8, arena: *mem.Arena): i32 {
     var tokens: vec.Vec[Token]
-    if vec.init.[Token](&tokens, &arena, 128) < 0 {
+    if vec.init.[Token](&tokens, arena, 128) < 0 {
         io.eprintln("lunsoc: out of memory")
-        mem.deinit(&arena)
         return 1
     }
 
     var err_tok: Token
     if !tokenize_all(source, &tokens, &err_tok) {
-        var rc = report_error(path, source, err_tok)
-        mem.deinit(&arena)
-        return rc
+        return report_error(path, err_tok, error_message(err_tok.kind))
     }
 
     var slice = vec.as_slice.[Token](&tokens)
@@ -105,7 +82,77 @@ fun main(): i32 {
         }
         io.println("")
     }
+    return 0
+}
+
+fun run_parse(path: []u8, source: []u8, arena: *mem.Arena): i32 {
+    var tree: Ast
+    var err: ParseError
+    if !parse(arena, source, &tree, &err) {
+        return report_error(path, err.token, err.message)
+    }
+    var nodes: u64 = 0
+    if tree.nodes.len > 0 {
+        nodes = tree.nodes.len - 1
+    }
+    io.print("Parsed ")
+    fmt.print_u64(1, tree.functions.len)
+    io.print(" function(s), ")
+    fmt.print_u64(1, nodes)
+    io.println(" AST node(s)")
+    return 0
+}
+
+fun main(): i32 {
+    var arena: mem.Arena
+    if mem.init(&arena, 65536) < 0 {
+        io.eprintln("lunsoc: could not initialize arena")
+        return 1
+    }
+
+    var argv: [][]u8
+    if args.load(&arena, &argv) < 0 {
+        io.eprintln("usage: lunsoc [--parse] <source.lunso>")
+        mem.deinit(&arena)
+        return 1
+    }
+
+    var parse_mode = false
+    var path: []u8 = ""
+    for var i: i64 = 1; i < len(argv); i += 1 {
+        var arg = argv[i]
+        if str.equals(arg, "--parse") {
+            parse_mode = true
+        } else if len(path) == 0 {
+            path = arg
+        } else {
+            io.eprintln("usage: lunsoc [--parse] <source.lunso>")
+            mem.deinit(&arena)
+            return 1
+        }
+    }
+    if len(path) == 0 {
+        io.eprintln("usage: lunsoc [--parse] <source.lunso>")
+        mem.deinit(&arena)
+        return 1
+    }
+
+    var raw: file.Bytes
+    if file.read_all(path, &arena, &raw) < 0 {
+        io.eprint(path)
+        io.eprintln(": could not read source")
+        mem.deinit(&arena)
+        return 1
+    }
+
+    var source = raw.ptr[0..raw.len]
+    var rc: i32 = 0
+    if parse_mode {
+        rc = run_parse(path, source, &arena)
+    } else {
+        rc = dump_tokens(path, source, &arena)
+    }
 
     mem.deinit(&arena)
-    return 0
+    return rc
 }

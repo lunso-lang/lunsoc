@@ -1,0 +1,1047 @@
+import std.mem
+import std.vec
+import ast { Ast, AstConst, AstEnum, AstForHeader, AstFunction, AstIfBranches, AstImport, AstKind, AstNode, AstStruct, AstVariable, ImportKind, NODE_NONE, NodeRange, Span, add_node as ast_add_node, finish_children as ast_finish_children, init as ast_init }
+import lexer { Lexer, Token, TokenKind, error_message, init as lexer_init, next_token }
+
+const PREC_ASSIGNMENT: u32 = 1
+const PREC_LOGICAL_OR: u32 = 2
+const PREC_LOGICAL_AND: u32 = 3
+const PREC_BIT_OR: u32 = 4
+const PREC_BIT_XOR: u32 = 5
+const PREC_BIT_AND: u32 = 6
+const PREC_EQUALITY: u32 = 7
+const PREC_COMPARISON: u32 = 8
+const PREC_SHIFT: u32 = 9
+const PREC_SUM: u32 = 10
+const PREC_PRODUCT: u32 = 11
+const PREC_CAST: u32 = 12
+const PREC_PREFIX: u32 = 13
+const MAX_RECURSION_DEPTH: u32 = 256
+
+pub struct ParseError {
+    token: Token
+    message: []u8
+}
+
+struct Parser {
+    lex: Lexer
+    current: Token
+    error: ParseError
+    has_error: bool
+    tree: *Ast
+    pending: vec.Vec[u32]
+    source_base: u32
+    module: u32
+    group_depth: u32
+    recursion_depth: u32
+    disallow_struct_literal: bool
+}
+
+fun fail(p: *Parser, msg: []u8) {
+    if !p.has_error {
+        p.has_error = true
+        var lex_err = error_message(p.current.kind)
+        if len(lex_err) > 0 {
+            p.error = ParseError { token: p.current, message: lex_err }
+        } else {
+            p.error = ParseError { token: p.current, message: msg }
+        }
+    }
+}
+
+fun read_token(l: *Lexer, in_group: bool): Token {
+    for {
+        var tok = next_token(l)
+        if tok.kind == TokenKind.Comment {
+            if !in_group && l.line != tok.line {
+                for l.source[tok.offset as i64] != '\r' && l.source[tok.offset as i64] != '\n' {
+                    tok.offset += 1
+                    tok.column += 1
+                }
+                tok.kind = TokenKind.Newline
+                if (l.source[tok.offset as i64] == '\r' &&
+                    tok.offset + 1 < (len(l.source) as u64) &&
+                    l.source[(tok.offset + 1) as i64] == '\n') {
+                    tok.length = 2
+                } else {
+                    tok.length = 1
+                }
+                return tok
+            }
+            continue
+        }
+        if tok.kind != TokenKind.Newline || !in_group {
+            return tok
+        }
+    }
+}
+
+fun advance(p: *Parser) {
+    p.current = read_token(&p.lex, p.group_depth != 0)
+}
+
+fun match_tok(p: *Parser, kind: TokenKind): bool {
+    if p.has_error || p.current.kind != kind {
+        return false
+    }
+    advance(p)
+    return true
+}
+
+fun expect_tok(p: *Parser, kind: TokenKind, msg: []u8): Token {
+    var tok = p.current
+    if !match_tok(p, kind) {
+        fail(p, msg)
+    }
+    return tok
+}
+
+fun enter(p: *Parser): bool {
+    if p.has_error {
+        return false
+    }
+    if p.recursion_depth >= MAX_RECURSION_DEPTH {
+        fail(p, "syntax nesting limit exceeded")
+        return false
+    }
+    p.recursion_depth += 1
+    return true
+}
+
+fun add_node(p: *Parser, kind: AstKind, tok: Token, a: u32, b: u32): u32 {
+    if p.has_error {
+        return NODE_NONE
+    }
+    var id = ast_add_node(p.tree, kind, p.source_base + (tok.offset as u32), a, b)
+    if id == NODE_NONE {
+        fail(p, "could not allocate AST storage")
+    }
+    return id
+}
+
+fun push_child(p: *Parser, child: u32) {
+    if !p.has_error {
+        if vec.push_value.[u32](&p.pending, child) < 0 {
+            fail(p, "could not allocate AST storage")
+        }
+    }
+}
+
+fun finish_children(p: *Parser, mark: u64): NodeRange {
+    if p.has_error {
+        p.pending.len = mark
+        return NodeRange { first: 0, count: 0 }
+    }
+    var before = p.pending.len
+    var range = ast_finish_children(p.tree, &p.pending, mark)
+    if before > mark && range.count == 0 {
+        fail(p, "could not allocate AST storage")
+    }
+    return range
+}
+
+fun is_separator(kind: TokenKind): bool {
+    return kind == TokenKind.Newline || kind == TokenKind.Semicolon
+}
+
+fun finish_item(p: *Parser, end_kind: TokenKind, msg: []u8) {
+    if len(msg) > 0 && !p.has_error && p.current.kind != end_kind && !is_separator(p.current.kind) {
+        fail(p, msg)
+    }
+    for !p.has_error && is_separator(p.current.kind) {
+        advance(p)
+    }
+}
+
+fun open_group(p: *Parser) {
+    p.group_depth += 1
+    advance(p)
+}
+
+fun close_group(p: *Parser, kind: TokenKind, msg: []u8) {
+    p.group_depth -= 1
+    expect_tok(p, kind, msg)
+}
+
+fun source_span(p: *Parser, tok: Token): Span {
+    return Span { offset: p.source_base + (tok.offset as u32), length: tok.length as u32 }
+}
+
+fun infix_prec(kind: TokenKind): u32 {
+    match kind {
+        TokenKind.Equal, TokenKind.PlusEqual, TokenKind.MinusEqual, TokenKind.StarEqual, TokenKind.SlashEqual, TokenKind.PercentEqual, TokenKind.AmpersandEqual, TokenKind.PipeEqual, TokenKind.CaretEqual, TokenKind.ShiftLeftEqual, TokenKind.ShiftRightEqual => return PREC_ASSIGNMENT
+        TokenKind.PipePipe => return PREC_LOGICAL_OR
+        TokenKind.AmpersandAmpersand => return PREC_LOGICAL_AND
+        TokenKind.Pipe => return PREC_BIT_OR
+        TokenKind.Caret => return PREC_BIT_XOR
+        TokenKind.Ampersand => return PREC_BIT_AND
+        TokenKind.EqualEqual, TokenKind.BangEqual => return PREC_EQUALITY
+        TokenKind.Less, TokenKind.LessEqual, TokenKind.Greater, TokenKind.GreaterEqual => return PREC_COMPARISON
+        TokenKind.ShiftLeft, TokenKind.ShiftRight => return PREC_SHIFT
+        TokenKind.Plus, TokenKind.Minus => return PREC_SUM
+        TokenKind.Star, TokenKind.Slash, TokenKind.Percent => return PREC_PRODUCT
+        else => return 0
+    }
+}
+
+fun infix_kind(kind: TokenKind): AstKind {
+    match kind {
+        TokenKind.Equal => return AstKind.Assign
+        TokenKind.PlusEqual => return AstKind.AssignAdd
+        TokenKind.MinusEqual => return AstKind.AssignSubtract
+        TokenKind.StarEqual => return AstKind.AssignMultiply
+        TokenKind.SlashEqual => return AstKind.AssignDivide
+        TokenKind.PercentEqual => return AstKind.AssignRemainder
+        TokenKind.AmpersandEqual => return AstKind.AssignBitAnd
+        TokenKind.PipeEqual => return AstKind.AssignBitOr
+        TokenKind.CaretEqual => return AstKind.AssignBitXor
+        TokenKind.ShiftLeftEqual => return AstKind.AssignShiftLeft
+        TokenKind.ShiftRightEqual => return AstKind.AssignShiftRight
+        TokenKind.PipePipe => return AstKind.LogicalOr
+        TokenKind.AmpersandAmpersand => return AstKind.LogicalAnd
+        TokenKind.Pipe => return AstKind.BitOr
+        TokenKind.Caret => return AstKind.BitXor
+        TokenKind.Ampersand => return AstKind.BitAnd
+        TokenKind.EqualEqual => return AstKind.Equal
+        TokenKind.BangEqual => return AstKind.NotEqual
+        TokenKind.Less => return AstKind.Less
+        TokenKind.LessEqual => return AstKind.LessEqual
+        TokenKind.Greater => return AstKind.Greater
+        TokenKind.GreaterEqual => return AstKind.GreaterEqual
+        TokenKind.ShiftLeft => return AstKind.ShiftLeft
+        TokenKind.ShiftRight => return AstKind.ShiftRight
+        TokenKind.Plus => return AstKind.Add
+        TokenKind.Minus => return AstKind.Subtract
+        TokenKind.Star => return AstKind.Multiply
+        TokenKind.Slash => return AstKind.Divide
+        else => return AstKind.Remainder
+    }
+}
+
+fun parse_type_application(p: *Parser, kind: AstKind, base: u32): u32 {
+    var opening = p.current
+    var mark = p.pending.len
+    push_child(p, base)
+    open_group(p)
+    for {
+        push_child(p, parse_type(p))
+        if !match_tok(p, TokenKind.Comma) || p.current.kind == TokenKind.RightBracket {
+            break
+        }
+    }
+    close_group(p, TokenKind.RightBracket, "expected ']' after type arguments")
+    var items = finish_children(p, mark)
+    return add_node(p, kind, opening, items.first, items.count)
+}
+
+fun bracket_before_initializer(p: *Parser): bool {
+    var look = p.lex
+    var depth: u32 = 1
+    for depth > 0 {
+        var k = read_token(&look, true).kind
+        if k == TokenKind.Eof {
+            return false
+        }
+        if k == TokenKind.LeftBracket {
+            depth += 1
+        } else if k == TokenKind.RightBracket {
+            depth -= 1
+        }
+    }
+    return read_token(&look, p.group_depth != 0).kind == TokenKind.LeftBrace
+}
+
+fun parse_call(p: *Parser, callee: u32): u32 {
+    var opening = p.current
+    var mark = p.pending.len
+    push_child(p, callee)
+    open_group(p)
+    var saved = p.disallow_struct_literal
+    p.disallow_struct_literal = false
+    for !p.has_error && p.current.kind != TokenKind.RightParen && p.current.kind != TokenKind.Eof {
+        push_child(p, parse_expression(p, PREC_ASSIGNMENT))
+        if p.current.kind == TokenKind.RightParen || p.current.kind == TokenKind.Eof {
+            break
+        }
+        expect_tok(p, TokenKind.Comma, "expected ',' or ')' after argument")
+    }
+    p.disallow_struct_literal = saved
+    close_group(p, TokenKind.RightParen, "expected ')' after arguments")
+    var items = finish_children(p, mark)
+    return add_node(p, AstKind.Call, opening, items.first, items.count)
+}
+
+fun parse_struct_literal(p: *Parser, type_expr: u32): u32 {
+    var opening = p.current
+    var mark = p.pending.len
+    push_child(p, type_expr)
+    open_group(p)
+    var saved = p.disallow_struct_literal
+    p.disallow_struct_literal = false
+    for !p.has_error && p.current.kind != TokenKind.RightBrace && p.current.kind != TokenKind.Eof {
+        var field = expect_tok(p, TokenKind.Identifier, "expected field name in struct initializer")
+        expect_tok(p, TokenKind.Colon, "expected ':' after field name")
+        var val = parse_expression(p, PREC_ASSIGNMENT)
+        push_child(p, add_node(p, AstKind.StructFieldInit, field, field.length as u32, val))
+        if !match_tok(p, TokenKind.Comma) {
+            break
+        }
+    }
+    p.disallow_struct_literal = saved
+    close_group(p, TokenKind.RightBrace, "expected '}' after struct initializer")
+    var items = finish_children(p, mark)
+    return add_node(p, AstKind.StructLiteral, opening, items.first, items.count)
+}
+
+fun parse_array_literal(p: *Parser): u32 {
+    var opening = p.current
+    var mark = p.pending.len
+    open_group(p)
+    var saved = p.disallow_struct_literal
+    p.disallow_struct_literal = false
+    for !p.has_error && p.current.kind != TokenKind.RightBracket && p.current.kind != TokenKind.Eof {
+        push_child(p, parse_expression(p, PREC_ASSIGNMENT))
+        if !match_tok(p, TokenKind.Comma) {
+            break
+        }
+    }
+    p.disallow_struct_literal = saved
+    close_group(p, TokenKind.RightBracket, "expected ']' after array initializer")
+    var items = finish_children(p, mark)
+    if !p.has_error && items.count == 0 {
+        fail(p, "array initializer cannot be empty")
+    }
+    return add_node(p, AstKind.ArrayLiteral, opening, items.first, items.count)
+}
+
+fun parse_postfix(p: *Parser, base_in: u32): u32 {
+    var base = base_in
+    var nodes = vec.as_slice.[AstNode](&p.tree.nodes)
+    for !p.has_error {
+        var tok = p.current
+        if tok.kind == TokenKind.LeftParen {
+            base = parse_call(p, base)
+            nodes = vec.as_slice.[AstNode](&p.tree.nodes)
+        } else if tok.kind == TokenKind.LeftBrace {
+            var base_kind = AstKind.Invalid
+            if base != NODE_NONE {
+                base_kind = nodes[base as i64].kind
+            }
+            if (p.disallow_struct_literal ||
+               (base_kind != AstKind.Identifier && base_kind != AstKind.Member && base_kind != AstKind.GenericType)) {
+                return base
+            }
+            base = parse_struct_literal(p, base)
+            nodes = vec.as_slice.[AstNode](&p.tree.nodes)
+        } else if tok.kind == TokenKind.LeftBracket {
+            var base_kind = nodes[base as i64].kind
+            if (!p.disallow_struct_literal &&
+               (base_kind == AstKind.Identifier || base_kind == AstKind.Member) &&
+               bracket_before_initializer(p)) {
+                base = parse_type_application(p, AstKind.GenericType, base)
+                nodes = vec.as_slice.[AstNode](&p.tree.nodes)
+                continue
+            }
+            open_group(p)
+            var idx = parse_expression(p, PREC_ASSIGNMENT)
+            if p.current.kind == TokenKind.DotDot && !p.has_error {
+                var range_tok = p.current
+                advance(p)
+                var end_expr = parse_expression(p, PREC_ASSIGNMENT)
+                close_group(p, TokenKind.RightBracket, "expected ']' after slice range")
+                var bounds = add_node(p, AstKind.SliceRange, range_tok, idx, end_expr)
+                base = add_node(p, AstKind.Slice, tok, base, bounds)
+            } else {
+                close_group(p, TokenKind.RightBracket, "expected ']' after index")
+                base = add_node(p, AstKind.Index, tok, base, idx)
+            }
+            nodes = vec.as_slice.[AstNode](&p.tree.nodes)
+        } else if tok.kind == TokenKind.Dot {
+            advance(p)
+            if p.current.kind == TokenKind.LeftBracket {
+                base = parse_type_application(p, AstKind.GenericCallee, base)
+                if !p.has_error && p.current.kind != TokenKind.LeftParen {
+                    fail(p, "expected '(' after generic function type arguments")
+                }
+                if !p.has_error {
+                    base = parse_call(p, base)
+                }
+            } else {
+                var member = expect_tok(p, TokenKind.Identifier, "expected member name after '.'")
+                base = add_node(p, AstKind.Member, member, base, member.length as u32)
+            }
+            nodes = vec.as_slice.[AstNode](&p.tree.nodes)
+        } else {
+            return base
+        }
+    }
+    return NODE_NONE
+}
+
+fun parse_operand(p: *Parser): u32 {
+    var tok = p.current
+    var kind = AstKind.Invalid
+    if tok.kind == TokenKind.Plus {
+        kind = AstKind.Positive
+    } else if tok.kind == TokenKind.Minus {
+        kind = AstKind.Negate
+    } else if tok.kind == TokenKind.Bang {
+        kind = AstKind.LogicalNot
+    } else if tok.kind == TokenKind.Tilde {
+        kind = AstKind.BitNot
+    } else if tok.kind == TokenKind.Ampersand {
+        kind = AstKind.AddressOf
+    } else if tok.kind == TokenKind.Star {
+        kind = AstKind.Dereference
+    } else if tok.kind == TokenKind.LeftParen {
+        open_group(p)
+        var saved = p.disallow_struct_literal
+        p.disallow_struct_literal = false
+        var val = parse_expression(p, PREC_ASSIGNMENT)
+        p.disallow_struct_literal = saved
+        close_group(p, TokenKind.RightParen, "expected ')' after expression")
+        return parse_postfix(p, val)
+    } else if tok.kind == TokenKind.LeftBracket {
+        return parse_postfix(p, parse_array_literal(p))
+    } else if tok.kind == TokenKind.Identifier {
+        advance(p)
+        return parse_postfix(p, add_node(p, AstKind.Identifier, tok, tok.length as u32, 0))
+    } else if tok.kind == TokenKind.Integer || tok.kind == TokenKind.Char {
+        advance(p)
+        return parse_postfix(p, add_node(p, AstKind.Integer, tok, tok.length as u32, 0))
+    } else if tok.kind == TokenKind.Float {
+        advance(p)
+        return parse_postfix(p, add_node(p, AstKind.Float, tok, tok.length as u32, 0))
+    } else if tok.kind == TokenKind.String {
+        advance(p)
+        return parse_postfix(p, add_node(p, AstKind.String, tok, tok.length as u32, 0))
+    } else {
+        fail(p, "expected an expression")
+        return NODE_NONE
+    }
+
+    advance(p)
+    var operand = parse_expression(p, PREC_PREFIX)
+    return add_node(p, kind, tok, operand, 0)
+}
+
+fun parse_expression(p: *Parser, minimum: u32): u32 {
+    if !enter(p) {
+        return NODE_NONE
+    }
+    var left = parse_operand(p)
+    for !p.has_error {
+        var tok = p.current
+        if tok.kind == TokenKind.As && minimum <= PREC_CAST {
+            advance(p)
+            var t = parse_type(p)
+            left = add_node(p, AstKind.Cast, tok, left, t)
+            continue
+        }
+        var prec = infix_prec(tok.kind)
+        if prec < minimum {
+            break
+        }
+        var op_kind = infix_kind(tok.kind)
+        advance(p)
+        var next_min = prec
+        if prec != PREC_ASSIGNMENT {
+            next_min += 1
+        }
+        var right = parse_expression(p, next_min)
+        left = add_node(p, op_kind, tok, left, right)
+    }
+    p.recursion_depth -= 1
+    return left
+}
+
+fun parse_type_name(p: *Parser): u32 {
+    var t = expect_tok(p, TokenKind.Identifier, "expected a type name")
+    if !match_tok(p, TokenKind.Dot) {
+        return add_node(p, AstKind.TypeName, t, t.length as u32, 0)
+    }
+    var mark = p.pending.len
+    push_child(p, add_node(p, AstKind.Identifier, t, t.length as u32, 0))
+    for {
+        var part = expect_tok(p, TokenKind.Identifier, "expected a type path component")
+        push_child(p, add_node(p, AstKind.Identifier, part, part.length as u32, 0))
+        if !match_tok(p, TokenKind.Dot) {
+            break
+        }
+    }
+    var path = finish_children(p, mark)
+    return add_node(p, AstKind.QualifiedType, t, path.first, path.count)
+}
+
+fun parse_type(p: *Parser): u32 {
+    if !enter(p) {
+        return NODE_NONE
+    }
+    var opening = p.current
+    var res = NODE_NONE
+    if match_tok(p, TokenKind.Star) {
+        var read_only: u32 = 0
+        if match_tok(p, TokenKind.Const) {
+            read_only = 1
+        }
+        var pointee = parse_type(p)
+        res = add_node(p, AstKind.PointerType, opening, pointee, read_only)
+    } else if opening.kind != TokenKind.LeftBracket {
+        var base = parse_type_name(p)
+        if !p.has_error && p.current.kind == TokenKind.LeftBracket {
+            res = parse_type_application(p, AstKind.GenericType, base)
+        } else {
+            res = base
+        }
+    } else {
+        open_group(p)
+        var count = NODE_NONE
+        if p.current.kind != TokenKind.RightBracket {
+            var len_tok = p.current
+            if len_tok.kind == TokenKind.Identifier {
+                advance(p)
+                count = add_node(p, AstKind.Identifier, len_tok, len_tok.length as u32, 0)
+            } else {
+                len_tok = expect_tok(p, TokenKind.Integer, "expected an integer array length or ']'")
+                count = add_node(p, AstKind.Integer, len_tok, len_tok.length as u32, 0)
+            }
+        }
+        close_group(p, TokenKind.RightBracket, "expected ']' after array length")
+        var elem = parse_type(p)
+        res = add_node(p, AstKind.ArrayType, opening, elem, count)
+    }
+    p.recursion_depth -= 1
+    return res
+}
+
+fun match_else(p: *Parser): bool {
+    if match_tok(p, TokenKind.Else) {
+        return true
+    }
+    if p.has_error || p.current.kind != TokenKind.Newline {
+        return false
+    }
+    var look = p.lex
+    var tok = read_token(&look, false)
+    for tok.kind == TokenKind.Newline {
+        tok = read_token(&look, false)
+    }
+    if tok.kind != TokenKind.Else {
+        return false
+    }
+    p.lex = look
+    advance(p)
+    return true
+}
+
+fun parse_if(p: *Parser): u32 {
+    if !enter(p) {
+        return NODE_NONE
+    }
+    var kw = expect_tok(p, TokenKind.If, "expected 'if'")
+    var saved = p.disallow_struct_literal
+    p.disallow_struct_literal = true
+    var cond = parse_expression(p, PREC_ASSIGNMENT)
+    p.disallow_struct_literal = saved
+    var branches = AstIfBranches { then_branch: parse_block(p), else_branch: NODE_NONE }
+    if match_else(p) {
+        if p.current.kind == TokenKind.If {
+            branches.else_branch = parse_if(p)
+        } else {
+            branches.else_branch = parse_block(p)
+        }
+    }
+    var idx = p.tree.if_branches.len as u32
+    if !p.has_error && vec.push.[AstIfBranches](&p.tree.if_branches, &branches) < 0 {
+        fail(p, "could not allocate AST storage")
+    }
+    p.recursion_depth -= 1
+    return add_node(p, AstKind.If, kw, cond, idx)
+}
+
+fun parse_match(p: *Parser): u32 {
+    if !enter(p) {
+        return NODE_NONE
+    }
+    var kw = expect_tok(p, TokenKind.Match, "expected 'match'")
+    var saved = p.disallow_struct_literal
+    p.disallow_struct_literal = true
+    var scrutinee = parse_expression(p, PREC_ASSIGNMENT)
+    p.disallow_struct_literal = saved
+
+    expect_tok(p, TokenKind.LeftBrace, "expected '{' after match expression")
+    var mark = p.pending.len
+    push_child(p, scrutinee)
+    for !p.has_error && is_separator(p.current.kind) {
+        advance(p)
+    }
+    for !p.has_error && p.current.kind != TokenKind.RightBrace && p.current.kind != TokenKind.Eof {
+        var arm_tok = p.current
+        var arm_mark = p.pending.len
+        if !match_tok(p, TokenKind.Else) {
+            for {
+                push_child(p, parse_expression(p, PREC_ASSIGNMENT))
+                if !match_tok(p, TokenKind.Comma) {
+                    break
+                }
+            }
+        }
+        expect_tok(p, TokenKind.FatArrow, "expected '=>' after match pattern")
+        var body = NODE_NONE
+        if p.current.kind == TokenKind.LeftBrace {
+            body = parse_block(p)
+        } else {
+            body = parse_statement(p)
+        }
+        push_child(p, body)
+        var arm_items = finish_children(p, arm_mark)
+        push_child(p, add_node(p, AstKind.MatchArm, arm_tok, arm_items.first, arm_items.count))
+        if p.current.kind == TokenKind.Eof {
+            break
+        }
+        finish_item(p, TokenKind.RightBrace, "expected a newline, ';', or '}' after match arm")
+    }
+    expect_tok(p, TokenKind.RightBrace, "expected '}' after match")
+    var items = finish_children(p, mark)
+    p.recursion_depth -= 1
+    return add_node(p, AstKind.Match, kw, items.first, items.count)
+}
+
+fun parse_variable(p: *Parser): u32 {
+    advance(p)
+    var name = expect_tok(p, TokenKind.Identifier, "expected a variable name after 'var'")
+    var v = AstVariable { name_length: name.length as u32, type_node: NODE_NONE, initializer: NODE_NONE }
+    if match_tok(p, TokenKind.Colon) {
+        v.type_node = parse_type(p)
+    }
+    if match_tok(p, TokenKind.Equal) {
+        v.initializer = parse_expression(p, PREC_ASSIGNMENT)
+    } else if v.type_node == NODE_NONE {
+        fail(p, "expected ':' or '=' after variable name")
+    }
+    var idx = p.tree.variables.len as u32
+    if !p.has_error && vec.push.[AstVariable](&p.tree.variables, &v) < 0 {
+        fail(p, "could not allocate AST storage")
+    }
+    return add_node(p, AstKind.Var, name, idx, 0)
+}
+
+fun parse_for_with_label(p: *Parser, label: Span): u32 {
+    var kw = expect_tok(p, TokenKind.For, "expected 'for' after loop label")
+    if p.has_error {
+        return NODE_NONE
+    }
+    if p.current.kind == TokenKind.LeftBrace {
+        var body = parse_block(p)
+        if label.length == 0 {
+            return add_node(p, AstKind.For, kw, NODE_NONE, body)
+        }
+        var header = AstForHeader { initializer: NODE_NONE, condition: NODE_NONE, step: NODE_NONE, label: label }
+        var idx = p.tree.for_headers.len as u32
+        if !p.has_error && vec.push.[AstForHeader](&p.tree.for_headers, &header) < 0 {
+            fail(p, "could not allocate AST storage")
+        }
+        return add_node(p, AstKind.ForCStyle, kw, idx, body)
+    }
+
+    var declares_var = p.current.kind == TokenKind.Var
+    var saved = p.disallow_struct_literal
+    p.disallow_struct_literal = true
+    var first = NODE_NONE
+    if declares_var {
+        first = parse_variable(p)
+    } else if p.current.kind != TokenKind.Semicolon {
+        first = parse_expression(p, PREC_ASSIGNMENT)
+    }
+
+    if !match_tok(p, TokenKind.Semicolon) {
+        p.disallow_struct_literal = saved
+        if declares_var {
+            fail(p, "expected ';' after for initializer")
+        }
+        var body = parse_block(p)
+        if label.length == 0 {
+            return add_node(p, AstKind.For, kw, first, body)
+        }
+        var header = AstForHeader { initializer: NODE_NONE, condition: first, step: NODE_NONE, label: label }
+        var idx = p.tree.for_headers.len as u32
+        if !p.has_error && vec.push.[AstForHeader](&p.tree.for_headers, &header) < 0 {
+            fail(p, "could not allocate AST storage")
+        }
+        return add_node(p, AstKind.ForCStyle, kw, idx, body)
+    }
+
+    var header = AstForHeader { initializer: first, condition: NODE_NONE, step: NODE_NONE, label: label }
+    if p.current.kind != TokenKind.Semicolon {
+        header.condition = parse_expression(p, PREC_ASSIGNMENT)
+    }
+    expect_tok(p, TokenKind.Semicolon, "expected ';' after for condition")
+    if p.current.kind != TokenKind.LeftBrace {
+        header.step = parse_expression(p, PREC_ASSIGNMENT)
+    }
+    p.disallow_struct_literal = saved
+    var body = parse_block(p)
+    var idx = p.tree.for_headers.len as u32
+    if !p.has_error && vec.push.[AstForHeader](&p.tree.for_headers, &header) < 0 {
+        fail(p, "could not allocate AST storage")
+    }
+    return add_node(p, AstKind.ForCStyle, kw, idx, body)
+}
+
+fun parse_const(p: *Parser, public: bool, local: bool): u32 {
+    var kw = expect_tok(p, TokenKind.Const, "expected 'const'")
+    var name = expect_tok(p, TokenKind.Identifier, "expected a constant name")
+    var t = NODE_NONE
+    if match_tok(p, TokenKind.Colon) {
+        t = parse_type(p)
+    }
+    expect_tok(p, TokenKind.Equal, "expected '=' in constant declaration")
+    var val = parse_expression(p, PREC_ASSIGNMENT)
+    var c = AstConst {
+        name: source_span(p, name),
+        type_node: t,
+        value: val,
+        module: p.module,
+        public: public,
+        local: local,
+    }
+    var idx = p.tree.consts.len as u32
+    if !p.has_error && vec.push.[AstConst](&p.tree.consts, &c) < 0 {
+        fail(p, "could not allocate AST storage")
+    }
+    return add_node(p, AstKind.Const, kw, idx, 0)
+}
+
+fun parse_statement(p: *Parser): u32 {
+    var tok = p.current
+    if tok.kind == TokenKind.Identifier {
+        var saved_lex = p.lex
+        var next = read_token(&saved_lex, p.group_depth > 0)
+        if next.kind == TokenKind.Colon {
+            advance(p)
+            advance(p)
+            return parse_for_with_label(p, source_span(p, tok))
+        }
+    }
+    if tok.kind == TokenKind.If { return parse_if(p) }
+    if tok.kind == TokenKind.Match { return parse_match(p) }
+    if tok.kind == TokenKind.For { return parse_for_with_label(p, Span { offset: 0, length: 0 }) }
+    if tok.kind == TokenKind.Break || tok.kind == TokenKind.Continue {
+        advance(p)
+        var lbl = NODE_NONE
+        if p.current.kind == TokenKind.Identifier {
+            var target = p.current
+            advance(p)
+            lbl = add_node(p, AstKind.Identifier, target, target.length as u32, 0)
+        }
+        if tok.kind == TokenKind.Break {
+            return add_node(p, AstKind.Break, tok, lbl, 0)
+        }
+        return add_node(p, AstKind.Continue, tok, lbl, 0)
+    }
+    if tok.kind == TokenKind.Var { return parse_variable(p) }
+    if tok.kind == TokenKind.Const { return parse_const(p, false, true) }
+    if tok.kind == TokenKind.Return {
+        advance(p)
+        var nk = p.current.kind
+        var val = NODE_NONE
+        if !is_separator(nk) && nk != TokenKind.RightBrace && nk != TokenKind.Eof {
+            val = parse_expression(p, PREC_ASSIGNMENT)
+        }
+        return add_node(p, AstKind.Return, tok, val, 0)
+    }
+    return parse_expression(p, PREC_ASSIGNMENT)
+}
+
+fun parse_block(p: *Parser): u32 {
+    if !enter(p) {
+        return NODE_NONE
+    }
+    var opening = expect_tok(p, TokenKind.LeftBrace, "expected '{' to start block")
+    var mark = p.pending.len
+    for !p.has_error && is_separator(p.current.kind) {
+        advance(p)
+    }
+    for !p.has_error && p.current.kind != TokenKind.RightBrace && p.current.kind != TokenKind.Eof {
+        push_child(p, parse_statement(p))
+        if p.current.kind == TokenKind.Eof {
+            break
+        }
+        finish_item(p, TokenKind.RightBrace, "expected a newline, ';', or '}' after statement")
+    }
+    expect_tok(p, TokenKind.RightBrace, "expected '}' to end block")
+    var stmts = finish_children(p, mark)
+    p.recursion_depth -= 1
+    return add_node(p, AstKind.Block, opening, stmts.first, stmts.count)
+}
+
+fun parse_type_parameters(p: *Parser): NodeRange {
+    if p.current.kind != TokenKind.LeftBracket {
+        return NodeRange { first: 0, count: 0 }
+    }
+    var mark = p.pending.len
+    open_group(p)
+    for {
+        var name = expect_tok(p, TokenKind.Identifier, "expected a type parameter name")
+        push_child(p, add_node(p, AstKind.Identifier, name, name.length as u32, 0))
+        if !match_tok(p, TokenKind.Comma) || p.current.kind == TokenKind.RightBracket {
+            break
+        }
+    }
+    close_group(p, TokenKind.RightBracket, "expected ']' after type parameters")
+    return finish_children(p, mark)
+}
+
+fun parse_parameters(p: *Parser): NodeRange {
+    var mark = p.pending.len
+    if p.has_error {
+        return NodeRange { first: 0, count: 0 }
+    }
+    if p.current.kind != TokenKind.LeftParen {
+        fail(p, "expected '(' before parameters")
+        return NodeRange { first: 0, count: 0 }
+    }
+    open_group(p)
+    if p.current.kind != TokenKind.RightParen {
+        for {
+            var name = expect_tok(p, TokenKind.Identifier, "expected a parameter name")
+            expect_tok(p, TokenKind.Colon, "expected ':' after parameter name")
+            var t = parse_type(p)
+            push_child(p, add_node(p, AstKind.Parameter, name, name.length as u32, t))
+            if !match_tok(p, TokenKind.Comma) || p.current.kind == TokenKind.RightParen {
+                break
+            }
+        }
+    }
+    close_group(p, TokenKind.RightParen, "expected ')' after parameters")
+    return finish_children(p, mark)
+}
+
+fun parse_function(p: *Parser, public: bool): u32 {
+    var start = p.current
+    var external = match_tok(p, TokenKind.Ext)
+    if external {
+        expect_tok(p, TokenKind.Fun, "expected 'fun' after 'ext'")
+    } else {
+        expect_tok(p, TokenKind.Fun, "expected a function declaration")
+    }
+    var name = expect_tok(p, TokenKind.Identifier, "expected a function name")
+    var first_node = p.tree.nodes.len as u32
+    var type_params = parse_type_parameters(p)
+    var params = parse_parameters(p)
+    var ret_type = NODE_NONE
+    if match_tok(p, TokenKind.Colon) {
+        ret_type = parse_type(p)
+    }
+    var body = NODE_NONE
+    if !external {
+        body = parse_block(p)
+    } else if p.current.kind == TokenKind.LeftBrace {
+        fail(p, "an external function declaration cannot have a body")
+    }
+    var fn = AstFunction {
+        name: source_span(p, name),
+        parameters: params,
+        type_parameters: type_params,
+        nodes: NodeRange { first: first_node, count: (p.tree.nodes.len as u32) - first_node },
+        return_type: ret_type,
+        body: body,
+        module: p.module,
+        public: public,
+    }
+    var idx = p.tree.functions.len as u32
+    if !p.has_error && vec.push.[AstFunction](&p.tree.functions, &fn) < 0 {
+        fail(p, "could not allocate AST storage")
+    }
+    return add_node(p, AstKind.Function, start, idx, 0)
+}
+
+fun parse_struct(p: *Parser, public: bool): u32 {
+    var kw = expect_tok(p, TokenKind.Struct, "expected 'struct'")
+    var name = expect_tok(p, TokenKind.Identifier, "expected a struct name")
+    var type_params = parse_type_parameters(p)
+    expect_tok(p, TokenKind.LeftBrace, "expected '{' after struct name")
+    var mark = p.pending.len
+    for !p.has_error && is_separator(p.current.kind) {
+        advance(p)
+    }
+    for !p.has_error && p.current.kind != TokenKind.RightBrace && p.current.kind != TokenKind.Eof {
+        var field = expect_tok(p, TokenKind.Identifier, "expected a field name")
+        expect_tok(p, TokenKind.Colon, "expected ':' after field name")
+        var t = parse_type(p)
+        push_child(p, add_node(p, AstKind.Field, field, field.length as u32, t))
+        if p.current.kind == TokenKind.Eof {
+            break
+        }
+        finish_item(p, TokenKind.RightBrace, "expected a newline, ';', or '}' after field")
+    }
+    expect_tok(p, TokenKind.RightBrace, "expected '}' to end struct")
+    var rec = AstStruct {
+        name: source_span(p, name),
+        fields: finish_children(p, mark),
+        type_parameters: type_params,
+        module: p.module,
+        public: public,
+    }
+    var idx = p.tree.structs.len as u32
+    if !p.has_error && vec.push.[AstStruct](&p.tree.structs, &rec) < 0 {
+        fail(p, "could not allocate AST storage")
+    }
+    return add_node(p, AstKind.Struct, kw, idx, 0)
+}
+
+fun parse_enum(p: *Parser, public: bool): u32 {
+    var kw = expect_tok(p, TokenKind.Enum, "expected 'enum'")
+    var name = expect_tok(p, TokenKind.Identifier, "expected an enum name")
+    expect_tok(p, TokenKind.Colon, "expected ':' before enum backing type")
+    var t = expect_tok(p, TokenKind.Identifier, "expected an integer backing type")
+    var backing = add_node(p, AstKind.TypeName, t, t.length as u32, 0)
+    expect_tok(p, TokenKind.LeftBrace, "expected '{' after enum backing type")
+
+    var mark = p.pending.len
+    for !p.has_error && is_separator(p.current.kind) {
+        advance(p)
+    }
+    for !p.has_error && p.current.kind != TokenKind.RightBrace && p.current.kind != TokenKind.Eof {
+        var member = expect_tok(p, TokenKind.Identifier, "expected an enum member name")
+        var val = NODE_NONE
+        if match_tok(p, TokenKind.Equal) {
+            var sign = p.current
+            var neg = match_tok(p, TokenKind.Minus)
+            var lit = p.current
+            if lit.kind == TokenKind.Char {
+                advance(p)
+            } else {
+                lit = expect_tok(p, TokenKind.Integer, "expected an integer enum value")
+            }
+            val = add_node(p, AstKind.Integer, lit, lit.length as u32, 0)
+            if neg {
+                val = add_node(p, AstKind.Negate, sign, val, 0)
+            }
+        }
+        push_child(p, add_node(p, AstKind.EnumCase, member, member.length as u32, val))
+        if match_tok(p, TokenKind.Comma) {
+            finish_item(p, TokenKind.RightBrace, "")
+        } else {
+            finish_item(p, TokenKind.RightBrace, "expected ',', a newline, ';', or '}' after enum member")
+        }
+    }
+    expect_tok(p, TokenKind.RightBrace, "expected '}' after enum")
+    var en = AstEnum {
+        name: source_span(p, name),
+        cases: finish_children(p, mark),
+        backing: backing,
+        module: p.module,
+        public: public,
+    }
+    var idx = p.tree.enums.len as u32
+    if !p.has_error && vec.push.[AstEnum](&p.tree.enums, &en) < 0 {
+        fail(p, "could not allocate AST storage")
+    }
+    return add_node(p, AstKind.Enum, kw, idx, 0)
+}
+
+fun parse_import(p: *Parser): u32 {
+    var kw = expect_tok(p, TokenKind.Import, "expected 'import'")
+    var item = AstImport {
+        path: NodeRange { first: 0, count: 0 },
+        items: NodeRange { first: 0, count: 0 },
+        alias: Span { offset: 0, length: 0 },
+        kind: ImportKind.Module,
+    }
+    var mark = p.pending.len
+    for {
+        if p.pending.len != mark && match_tok(p, TokenKind.Star) {
+            item.kind = ImportKind.All
+            break
+        }
+        var part = expect_tok(p, TokenKind.Identifier, "expected a module path component")
+        push_child(p, add_node(p, AstKind.Identifier, part, part.length as u32, 0))
+        if !match_tok(p, TokenKind.Dot) {
+            break
+        }
+    }
+    item.path = finish_children(p, mark)
+
+    if item.kind == ImportKind.Module && match_tok(p, TokenKind.As) {
+        item.alias = source_span(p, expect_tok(p, TokenKind.Identifier, "expected an import alias"))
+    } else if item.kind == ImportKind.Module && p.current.kind == TokenKind.LeftBrace {
+        item.kind = ImportKind.Selected
+        open_group(p)
+        for {
+            var name = expect_tok(p, TokenKind.Identifier, "expected an imported name")
+            var alias_node = NODE_NONE
+            if match_tok(p, TokenKind.As) {
+                var tok = expect_tok(p, TokenKind.Identifier, "expected an import alias")
+                alias_node = add_node(p, AstKind.Identifier, tok, tok.length as u32, 0)
+            }
+            push_child(p, add_node(p, AstKind.ImportItem, name, name.length as u32, alias_node))
+            if !match_tok(p, TokenKind.Comma) || p.current.kind == TokenKind.RightBrace {
+                break
+            }
+        }
+        close_group(p, TokenKind.RightBrace, "expected '}' after imported names")
+        item.items = finish_children(p, mark)
+    }
+
+    var idx = p.tree.imports.len as u32
+    if !p.has_error && vec.push.[AstImport](&p.tree.imports, &item) < 0 {
+        fail(p, "could not allocate AST storage")
+    }
+    return add_node(p, AstKind.Import, kw, idx, 0)
+}
+
+pub fun parse(arena: *mem.Arena, source: []u8, out: *Ast, err: *ParseError): bool {
+    if !ast_init(arena, source, out) {
+        *err = ParseError { token: Token { kind: TokenKind.Eof, offset: 0, length: 0, line: 1, column: 1 }, message: "could not allocate AST storage" }
+        return false
+    }
+    var p: Parser
+    p.lex = lexer_init(source)
+    p.has_error = false
+    p.tree = out
+    p.source_base = 0
+    p.module = 0
+    p.group_depth = 0
+    p.recursion_depth = 0
+    p.disallow_struct_literal = false
+    if vec.init.[u32](&p.pending, arena, 64) < 0 {
+        *err = ParseError { token: Token { kind: TokenKind.Eof, offset: 0, length: 0, line: 1, column: 1 }, message: "could not allocate parser stack" }
+        return false
+    }
+
+    var mark = p.pending.len
+    advance(&p)
+    for is_separator(p.current.kind) {
+        advance(&p)
+    }
+    for !p.has_error && p.current.kind != TokenKind.Eof {
+        var msg: []u8 = ""
+        var decl = NODE_NONE
+        if p.current.kind == TokenKind.Import {
+            decl = parse_import(&p)
+            msg = "expected a newline or ';' after import"
+        } else {
+            var public = match_tok(&p, TokenKind.Pub)
+            if !public {
+                match_tok(&p, TokenKind.Priv)
+            }
+            if p.current.kind == TokenKind.Struct {
+                decl = parse_struct(&p, public)
+            } else if p.current.kind == TokenKind.Enum {
+                decl = parse_enum(&p, public)
+            } else if p.current.kind == TokenKind.Const {
+                decl = parse_const(&p, public, false)
+                msg = "expected a newline or ';' after constant"
+            } else {
+                decl = parse_function(&p, public)
+                msg = "expected a newline or ';' after function"
+            }
+        }
+        push_child(&p, decl)
+        finish_item(&p, TokenKind.Eof, msg)
+    }
+    out.declarations = finish_children(&p, mark)
+    *err = p.error
+    return !p.has_error
+}
