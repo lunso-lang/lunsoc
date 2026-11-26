@@ -1,0 +1,9 @@
+// expect-stderr: generic instantiated here
+fun add[T](a: T, b: T): T {
+    return a + b
+}
+
+fun main(): i32 {
+    add.[bool](true, false)
+    return 0
+}

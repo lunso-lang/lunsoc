@@ -1,0 +1,16 @@
+// expect-exit: 12
+fun fib(n: i32): i32 {
+    if n <= 1 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+fun main(): i32 {
+    var sum: i32 = 0
+    for var i: i32 = 0; i < 6; i += 1 {
+        sum += fib(i)
+    }
+    // 0 + 1 + 1 + 2 + 3 + 5 = 12
+    return sum
+}

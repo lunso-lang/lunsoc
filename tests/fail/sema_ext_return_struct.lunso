@@ -1,0 +1,10 @@
+// expect-stderr: external results must be scalar
+struct Pair {
+    a: i32
+}
+
+ext fun bad_ext(): Pair
+
+fun main(): i32 {
+    return 0
+}

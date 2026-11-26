@@ -1,0 +1,35 @@
+// expect-exit: 55
+const GREETING = "hello"
+const ALIAS = GREETING
+const VIEW: []u8 = "world"
+
+fun sum_slice(s: []u8): i32 {
+    var acc: i32 = 0
+    for var i: i64 = 0; i < len(s); i += 1 {
+        acc += (s[i] as i32) - ('a' as i32)
+    }
+    return acc
+}
+
+fun main(): i32 {
+    const N = 3
+    const M = N * 2
+    const LOCAL_STR = "abc"
+    var arr: [N]u8 = [10, 20, 5]
+
+    if GREETING[0] != 'h' || ALIAS[4] != 'o' || VIEW[0] != 'w' {
+        return 1
+    }
+    if len(GREETING) != 5 || len(VIEW) != 5 || len(LOCAL_STR) != 3 {
+        return 2
+    }
+
+    var scoped: i32 = 0
+    if true {
+        const INNER = 11
+        scoped = INNER
+    }
+
+    // arr(35) + M(6) + scoped(11) + sum_slice("abc")(0+1+2=3) = 55
+    return ((arr[0] + arr[1] + arr[2]) as i32) + M + scoped + sum_slice(LOCAL_STR)
+}

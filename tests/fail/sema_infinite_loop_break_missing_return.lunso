@@ -1,0 +1,6 @@
+// expect-stderr: function can finish without returning a value
+fun main(): i32 {
+    for {
+        break
+    }
+}

@@ -252,6 +252,21 @@ fun add_source(l: *Loader, path: []u8, source: []u8, offset: u32, out_base: *u32
     return true
 }
 
+pub fun format_unexpected_byte(arena: *mem.Arena, b: u8): []u8 {
+    var hex = "0123456789ABCDEF"
+    var buf: *u8
+    if mem.alloc(arena, 20, 1, &buf) < 0 {
+        return "unexpected byte"
+    }
+    var prefix = "unexpected byte 0x"
+    for var i: i64 = 0; i < 18; i += 1 {
+        buf[i] = prefix[i]
+    }
+    buf[18] = hex[((b >> 4) & 15) as i64]
+    buf[19] = hex[(b & 15) as i64]
+    return buf[0..20]
+}
+
 fun parse_file(l: *Loader, mod_id: u32, source: []u8, offset: u32): bool {
     var mods = vec.as_slice.[ModuleEntry](&l.modules)
     var base: u32 = 0
@@ -263,7 +278,8 @@ fun parse_file(l: *Loader, mod_id: u32, source: []u8, offset: u32): bool {
     var decls: NodeRange
     if !parse_append(l.arena, &l.program.tree, slice, base, mod_id, &decls, &perr) {
         if perr.token.kind == TokenKind.Invalid {
-            return err_at(l, base + (perr.token.offset as u32), "unexpected byte in source")
+            var byte = slice[perr.token.offset as i64]
+            return err_at(l, base + (perr.token.offset as u32), format_unexpected_byte(l.arena, byte))
         }
         return err_at(l, base + (perr.token.offset as u32), perr.message)
     }

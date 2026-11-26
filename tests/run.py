@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Tests for lunsoc (with optional differential checks against LUNSO_BOOT)."""
+"""Test runner for lunsoc (pass, fail, generics, modules, std, self-host, CLI)."""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -22,17 +23,27 @@ def find_boot() -> Path | None:
     return default if default.is_file() else None
 
 
-def find_pass_samples() -> list[Path]:
-    by_name: dict[str, Path] = {}
-    boot_pass = ROOT.parent / "lunso-boot" / "tests" / "pass"
-    if boot_pass.is_dir():
-        for p in sorted(boot_pass.glob("*.lunso")):
-            by_name[p.name] = p
-    local_pass = ROOT / "tests" / "pass"
-    if local_pass.is_dir():
-        for p in sorted(local_pass.glob("*.lunso")):
-            by_name[p.name] = p
-    return [by_name[k] for k in sorted(by_name)]
+def parse_directives(path: Path) -> dict[str, str]:
+    directives: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        if not line.startswith("//"):
+            break
+        body = line[2:].strip()
+        if ":" in body:
+            k, v = body.split(":", 1)
+            directives[k.strip()] = v.strip()
+    return directives
+
+
+def collect_run_tests() -> list[Path]:
+    files: list[Path] = []
+    files.extend(sorted((ROOT / "tests" / "pass").glob("*.lunso")))
+    for sub in ("generics", "modules"):
+        entry = ROOT / "tests" / sub / "main.lunso"
+        if entry.is_file():
+            files.append(entry)
+    files.extend(sorted((ROOT / "tests" / "std").glob("*.lunso")))
+    return files
 
 
 def main() -> int:
@@ -54,9 +65,9 @@ def main() -> int:
                     return 1
                 diff_count += 1
 
-    pass_samples = find_pass_samples()
+    pass_files = sorted((ROOT / "tests" / "pass").glob("*.lunso"))
     if boot is not None:
-        for sample in pass_samples:
+        for sample in pass_files:
             if "// lunsoc-only" in sample.read_text():
                 continue
             for flag in ("--check", "--emit-ir", "--emit-qbe"):
@@ -73,22 +84,43 @@ def main() -> int:
 
     built_count = 0
     with tempfile.TemporaryDirectory() as tmpdir:
-        for sample in pass_samples:
-            text = sample.read_text()
-            first = text.splitlines()[0] if text else ""
-            if not first.startswith("// expect-exit:"):
+        for idx, sample in enumerate(collect_run_tests()):
+            dirs = parse_directives(sample)
+            if "expect-exit" not in dirs and "expect-stdout" not in dirs:
                 continue
-            expected_rc = int(first.split(":", 1)[1].strip())
-            out_bin = Path(tmpdir) / sample.stem
+            expected_rc = int(dirs.get("expect-exit", "0"))
+            out_bin = Path(tmpdir) / f"test_{idx}_{sample.stem}"
             res = subprocess.run([str(LUNSOC), "--build", str(sample), "-o", str(out_bin)], cwd=ROOT, text=True, capture_output=True, check=False)
             if res.returncode != 0:
-                print(f"--build failed on {sample.name}: rc {res.returncode}\nstderr: {res.stderr}", file=sys.stderr)
+                print(f"--build failed on {sample}: rc {res.returncode}\nstderr: {res.stderr}", file=sys.stderr)
                 return 1
-            run_res = subprocess.run([str(out_bin)], check=False)
+            extra_args = shlex.split(dirs["args"]) if "args" in dirs else []
+            run_res = subprocess.run([str(out_bin), *extra_args], cwd=tmpdir, text=True, capture_output=True, check=False)
             if run_res.returncode != expected_rc:
-                print(f"runtime exit mismatch on {sample.name}: {run_res.returncode} vs {expected_rc}", file=sys.stderr)
+                print(f"runtime exit mismatch on {sample}: {run_res.returncode} vs {expected_rc}", file=sys.stderr)
                 return 1
+            if "expect-stdout" in dirs:
+                expected_out = dirs["expect-stdout"].replace("\\n", "\n")
+                if run_res.stdout != expected_out:
+                    print(f"runtime stdout mismatch on {sample}: {run_res.stdout!r} vs {expected_out!r}", file=sys.stderr)
+                    return 1
             built_count += 1
+
+        fail_files = sorted((ROOT / "tests" / "fail").glob("*.lunso"))
+        fail_count = 0
+        for sample in fail_files:
+            dirs = parse_directives(sample)
+            mode = dirs.get("mode", "check")
+            flags = [] if mode == "tokens" else ["--parse"] if mode == "parse" else ["--check"]
+            res = subprocess.run([str(LUNSOC), *flags, str(sample)], cwd=ROOT, text=True, capture_output=True, check=False)
+            if res.returncode == 0:
+                print(f"expected failure on {sample.name}, got rc 0", file=sys.stderr)
+                return 1
+            exp_err = dirs.get("expect-stderr", "")
+            if exp_err and exp_err not in res.stderr:
+                print(f"stderr mismatch on {sample.name}: expected {exp_err!r}, got:\n{res.stderr}", file=sys.stderr)
+                return 1
+            fail_count += 1
 
         stage2 = Path(tmpdir) / "lunsoc-stage2"
         stage3 = Path(tmpdir) / "lunsoc-stage3"
@@ -113,14 +145,16 @@ def main() -> int:
         if ver.returncode != 0 or "lunsoc " not in ver.stdout or hlp.returncode != 0 or "--run" not in hlp.stdout:
             print("CLI --version / --help check failed", file=sys.stderr)
             return 1
-        hello = Path(tmpdir) / "hello_run.lunso"
-        hello.write_text("fun main(): i32 { return 42 }\n")
-        run_res = subprocess.run([str(stage2), "--run", str(hello), "--", "arg1"], cwd=ROOT, check=False)
+        cli_run_file = ROOT / "tests" / "pass" / "cli_run.lunso"
+        run_res = subprocess.run([str(stage2), "--run", str(cli_run_file), "--", "arg1"], cwd=ROOT, check=False)
         if run_res.returncode != 42:
             print(f"CLI --run check failed: {run_res.returncode} vs 42", file=sys.stderr)
             return 1
 
-    print(f"OK ({diff_count} differential checks, {built_count} --build+run checks, self-host 3-stage + CLI OK)")
+    print(
+        f"OK ({diff_count} differential checks, {built_count} --build+run checks, "
+        f"{fail_count} negative checks, self-host 3-stage + CLI OK)"
+    )
     return 0
 
 

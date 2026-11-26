@@ -1,0 +1,59 @@
+import std.file
+import std.mem
+
+fun main(): i32 {
+    var arena: mem.Arena
+    if mem.init(&arena, 128) < 0 {
+        return 1
+    }
+
+    var payload = "alpha-beta-gamma"
+    if file.write_all("data.txt", payload) < 0 {
+        return 2
+    }
+
+    var bytes: file.Bytes
+    var n = file.read_all("data.txt", &arena, &bytes)
+    if n != 16 || bytes.len != 16 {
+        return 3
+    }
+
+    var out: file.File
+    if file.open_write("stream.txt", &out) < 0 {
+        return 4
+    }
+    if file.write_to(&out, bytes.ptr[0..bytes.len]) < 0 {
+        return 5
+    }
+    if file.close(&out) < 0 {
+        return 6
+    }
+
+    var inp: file.File
+    if file.open_read("stream.txt", &inp) < 0 {
+        return 7
+    }
+    var buf: [32]u8
+    var r = file.read_into(&inp, &buf[0], 32)
+    if r != 16 {
+        return 8
+    }
+    var eof = file.read_into(&inp, &buf[0], 32)
+    if eof != 0 {
+        return 9
+    }
+    if file.close(&inp) < 0 {
+        return 10
+    }
+
+    // Missing file must return negative error code.
+    var missing: file.Bytes
+    if file.read_all("does-not-exist.txt", &arena, &missing) >= 0 {
+        return 11
+    }
+
+    if mem.deinit(&arena) < 0 {
+        return 12
+    }
+    return 0
+}

@@ -1,0 +1,13 @@
+pub const OFFSET: i32 = 10
+
+pub fun sub(a: i32, b: i32): i32 {
+    return a - b
+}
+
+pub fun mul(a: i32, b: i32): i32 {
+    return a * b
+}
+
+priv fun hidden(): i32 {
+    return 99
+}

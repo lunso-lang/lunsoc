@@ -1,0 +1,42 @@
+// expect-exit: 100
+struct Packet {
+    tag: u8
+    data: [4]u8
+    pairs: [2]Pair
+}
+
+struct Pair {
+    a: i32
+    b: i32
+}
+
+fun sum_slice(view: []u8): i32 {
+    var acc: i32 = 0
+    for var i: i64 = 0; i < len(view); i += 1 {
+        acc += view[i] as i32
+    }
+    return acc
+}
+
+fun main(): i32 {
+    var pkt = Packet {
+        tag: 5,
+        data: [10, 20, 30, 40],
+        pairs: [Pair { a: 2, b: 3 }, Pair { a: 4, b: 5 }],
+    }
+    pkt.data[0] += 1
+    pkt.pairs[1].a += 6
+
+    var empty = Packet { tag: 1 }
+    if empty.data[0] != 0 || empty.pairs[1].b != 0 {
+        return 1
+    }
+
+    // 5 + 50 + (11+20+30+40 -> slice[1..3]=50) + (2+3+10+5=20) + 1 = ...
+    // Let's sum: tag(5) + sum_slice(pkt.data[1..3])(50) + pkt.data[0](11) +
+    //            (2+3+10+5)(20) + len(pkt.data)(4) + 10 = 100
+    var s = sum_slice(pkt.data[1..3])
+    var psum = pkt.pairs[0].a + pkt.pairs[0].b + pkt.pairs[1].a + pkt.pairs[1].b
+    var total = (pkt.tag as i32) + s + (pkt.data[0] as i32) + psum + (len(pkt.data) as i32) + 10
+    return total
+}

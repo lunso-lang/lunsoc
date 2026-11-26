@@ -1,0 +1,9 @@
+// expect-stderr: unknown struct field
+struct Pair {
+    a: i32
+}
+
+fun main(): i32 {
+    var p = Pair { z: 1 }
+    return p.a
+}

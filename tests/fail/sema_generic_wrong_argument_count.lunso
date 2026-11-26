@@ -1,0 +1,10 @@
+// expect-stderr: wrong number of type arguments
+struct Pair[A, B] {
+    left: A
+    right: B
+}
+
+fun main(): i32 {
+    var pair: Pair[i32]
+    return 0
+}

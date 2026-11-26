@@ -1,0 +1,48 @@
+// expect-exit: 68
+struct Pair {
+    a: i32
+    b: i32
+}
+
+struct Token {
+    kind: u8
+    text: []u8
+}
+
+fun make_pair(x: i32, y: i32): Pair {
+    return Pair { a: x, b: y }
+}
+
+fun make_array(base: i32): [3]i32 {
+    return [base, base + 1, base + 2]
+}
+
+fun slice_tail(s: []u8, start: i64): []u8 {
+    return s[start..len(s)]
+}
+
+fun make_token(kind: u8, text: []u8): Token {
+    return Token { kind: kind, text: text }
+}
+
+fun main(): i32 {
+    var p = make_pair(10, 20)
+    // p.a + p.b = 30
+    var direct_field = make_pair(3, 4).b
+    // direct_field = 4
+
+    var arr = make_array(5)
+    // arr = [5, 6, 7] -> sum = 18
+    var direct_elem = make_array(1)[2]
+    // direct_elem = 3
+
+    var tail = slice_tail("abcdef", 2)
+    // tail = "cdef", len = 4
+
+    var tok = make_token(5, tail)
+    // tok.kind(5) + len(tok.text)(4) = 9
+
+    // 30 + 4 + 18 + 3 + 4 + 9 = 68
+    return (p.a + p.b + direct_field + arr[0] + arr[1] + arr[2] + direct_elem +
+            (len(tail) as i32) + (tok.kind as i32) + (len(tok.text) as i32))
+}

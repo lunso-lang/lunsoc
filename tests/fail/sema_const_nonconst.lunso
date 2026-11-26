@@ -1,0 +1,10 @@
+// expect-stderr: constant expression required
+fun helper(): i32 {
+    return 1
+}
+
+const A = helper()
+
+fun main(): i32 {
+    return A
+}

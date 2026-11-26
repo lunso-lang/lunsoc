@@ -1,0 +1,7 @@
+// expect-stderr: unknown variable
+fun main(): i32 {
+    if true {
+        const X = 1
+    }
+    return X
+}

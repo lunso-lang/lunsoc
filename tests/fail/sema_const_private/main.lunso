@@ -1,0 +1,6 @@
+// expect-stderr: cannot access a private constant
+import helper
+
+fun main(): i32 {
+    return helper.SECRET
+}

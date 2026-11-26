@@ -1,0 +1,48 @@
+import std.mem
+
+fun main(): i32 {
+    var arena: mem.Arena
+    if mem.init(&arena, 64) != 0 {
+        return 1
+    }
+
+    var p1: *u8
+    if mem.alloc(&arena, 16, 8, &p1) != 0 {
+        return 2
+    }
+    if ((p1 as u64) & 7) != 0 {
+        return 3
+    }
+    p1[0] = 77
+
+    // Force growth past initial 64-byte block.
+    var p2: *u8
+    if mem.alloc(&arena, 256, 16, &p2) != 0 {
+        return 4
+    }
+    if ((p2 as u64) & 15) != 0 {
+        return 5
+    }
+    if p1[0] != 77 {
+        return 6
+    }
+
+    // Invalid alignment (not power of two) must fail and leave output untouched.
+    var p3: *u8 = p1
+    if mem.alloc(&arena, 8, 3, &p3) == 0 {
+        return 7
+    }
+    if p3 != p1 {
+        return 8
+    }
+
+    mem.reset(&arena)
+    if mem.alloc(&arena, 32, 8, &p3) != 0 {
+        return 9
+    }
+
+    if mem.deinit(&arena) != 0 {
+        return 10
+    }
+    return 0
+}

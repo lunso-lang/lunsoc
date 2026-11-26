@@ -1,0 +1,43 @@
+// expect-exit: 110
+struct Pair {
+    a: i32
+    b: i32
+}
+
+struct Box {
+    ptr: *Pair
+    tag: u8
+}
+
+fun sum_pairs(items: []Pair): i32 {
+    var total: i32 = 0
+    for var i: i64 = 0; i < len(items); i += 1 {
+        total += items[i].a + items[i].b
+    }
+    return total
+}
+
+fun main(): i32 {
+    var p = Pair { a: 10, b: 20 }
+    var partial = Pair { b: 5 }
+    var empty = Pair {}
+    var nested = Box {
+        ptr: &p,
+        tag: 4,
+    }
+
+    var flag = true
+    if flag {
+        p.a += 1
+    }
+
+    var nums = [1, 2, 3]
+    var bytes: [3]u8 = [4, 5, 6]
+
+    // 31 + 5 + 0 + (31 + 4) + (1 + 2 + 3) + (4 + 5 + 6) + 18 = 110
+    var total = ((p.a + p.b) + (partial.a + partial.b) + (empty.a + empty.b) +
+                 ((*nested.ptr).a + (*nested.ptr).b + (nested.tag as i32)) +
+                 (nums[0] + nums[1] + nums[2]) + ((bytes[0] + bytes[1] + bytes[2]) as i32) +
+                 sum_pairs([Pair { a: 7, b: 8 }, Pair { a: 1, b: 2 }]))
+    return total
+}

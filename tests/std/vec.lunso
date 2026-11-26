@@ -1,0 +1,85 @@
+import std.mem
+import std.vec
+
+struct Token {
+    kind: i32
+    offset: u64
+    size: u32
+}
+
+fun main(): i32 {
+    var arena: mem.Arena
+    if mem.init(&arena, 4096) < 0 {
+        return 1
+    }
+
+    var nums: vec.Vec[i32]
+    if vec.init.[i32](&nums, &arena, 0) < 0 {
+        mem.deinit(&arena)
+        return 2
+    }
+    if len(vec.as_slice.[i32](&nums)) != 0 {
+        mem.deinit(&arena)
+        return 3
+    }
+
+    for var i: i32 = 0; i < 25; i += 1 {
+        if vec.push_value.[i32](&nums, i * 3) < 0 {
+            mem.deinit(&arena)
+            return 4
+        }
+    }
+    if nums.len != 25 || nums.cap < 25 {
+        mem.deinit(&arena)
+        return 5
+    }
+
+    var slice = vec.as_slice.[i32](&nums)
+    if len(slice) != 25 || slice[0] != 0 || slice[24] != 72 {
+        mem.deinit(&arena)
+        return 6
+    }
+
+    var out: i32 = 0
+    if !vec.get.[i32](&nums, 10, &out) || out != 30 {
+        mem.deinit(&arena)
+        return 7
+    }
+    if vec.get.[i32](&nums, 25, &out) {
+        mem.deinit(&arena)
+        return 8
+    }
+
+    if !vec.pop.[i32](&nums, &out) || out != 72 || nums.len != 24 {
+        mem.deinit(&arena)
+        return 9
+    }
+
+    vec.clear.[i32](&nums)
+    if nums.len != 0 {
+        mem.deinit(&arena)
+        return 10
+    }
+
+    var tokens: vec.Vec[Token]
+    if vec.init.[Token](&tokens, &arena, 2) < 0 {
+        mem.deinit(&arena)
+        return 11
+    }
+    for var j: u64 = 0; j < 10; j += 1 {
+        if vec.push_value.[Token](&tokens, Token { kind: (j as i32) + 1, offset: j * 4, size: 2 }) < 0 {
+            mem.deinit(&arena)
+            return 12
+        }
+    }
+    var tok: Token
+    if !vec.get.[Token](&tokens, 9, &tok) || tok.kind != 10 || tok.offset != 36 || tok.size != 2 {
+        mem.deinit(&arena)
+        return 13
+    }
+
+    if mem.deinit(&arena) < 0 {
+        return 14
+    }
+    return 0
+}

@@ -1,0 +1,6 @@
+// mode: parse
+// expect-stderr: array initializer cannot be empty
+fun main(): i32 {
+    var a = []
+    return 0
+}

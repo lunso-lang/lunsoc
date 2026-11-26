@@ -9,7 +9,7 @@ import std.vec
 import ast { Ast }
 import ir { IrModule, lower as ir_lower, write as ir_write }
 import lexer { Token, TokenKind, error_message, token_name, tokenize_all }
-import modules { ModuleProgram, load as modules_load, print_caret, report as modules_report }
+import modules { ModuleProgram, format_unexpected_byte, load as modules_load, print_caret, report as modules_report }
 import native { NativeKind, NativeOptions, build as native_build, run_exe as native_run_exe }
 import parser { ParseError, parse }
 import qbe { write as qbe_write }
@@ -70,7 +70,11 @@ fun dump_tokens(path: []u8, source: []u8, arena: *mem.Arena): i32 {
 
     var err_tok: Token
     if !tokenize_all(source, &tokens, &err_tok) {
-        return report_error(path, source, err_tok, error_message(err_tok.kind))
+        var msg = error_message(err_tok.kind)
+        if err_tok.kind == TokenKind.Invalid && (err_tok.offset as i64) < len(source) {
+            msg = format_unexpected_byte(arena, source[err_tok.offset as i64])
+        }
+        return report_error(path, source, err_tok, msg)
     }
 
     var slice = vec.as_slice.[Token](&tokens)
@@ -96,7 +100,11 @@ fun run_parse(path: []u8, source: []u8, arena: *mem.Arena): i32 {
     var tree: Ast
     var err: ParseError
     if !parse(arena, source, &tree, &err) {
-        return report_error(path, source, err.token, err.message)
+        var msg = err.message
+        if err.token.kind == TokenKind.Invalid && (err.token.offset as i64) < len(source) {
+            msg = format_unexpected_byte(arena, source[err.token.offset as i64])
+        }
+        return report_error(path, source, err.token, msg)
     }
     var nodes: u64 = 0
     if tree.nodes.len > 0 {
@@ -193,6 +201,9 @@ fun run_compile(path: []u8, source: []u8, std_dir: []u8, arena: *mem.Arena, mode
     var serr: SemaError
     if !check(arena, &prog.tree, &sem, &serr) {
         modules_report(&prog, serr.offset, serr.message)
+        if serr.note_offset != 0 {
+            modules_report(&prog, serr.note_offset, serr.note_message)
+        }
         return 1
     }
     if mode == Mode.Check {

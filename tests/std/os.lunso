@@ -1,0 +1,60 @@
+import std.file
+import std.mem
+import std.os
+
+fun main(): i32 {
+    var arena: mem.Arena
+    if mem.init(&arena, 4096) < 0 {
+        return 1
+    }
+
+    var path_val: []u8
+    if os.getenv("PATH", &arena, &path_val) != 0 || len(path_val) == 0 {
+        mem.deinit(&arena)
+        return 2
+    }
+
+    var missing_val: []u8
+    if os.getenv("LUNSO_DEFINITELY_MISSING_VAR", &arena, &missing_val) >= 0 {
+        mem.deinit(&arena)
+        return 3
+    }
+
+    if os.mkdir("sub") != 0 {
+        mem.deinit(&arena)
+        return 4
+    }
+    if file.write_all("sub/test.txt", "ok\n") < 0 {
+        mem.deinit(&arena)
+        return 5
+    }
+    if os.remove("sub/test.txt") != 0 {
+        mem.deinit(&arena)
+        return 6
+    }
+    if os.rmdir("sub") != 0 {
+        mem.deinit(&arena)
+        return 7
+    }
+
+    // Run `true` and `false` via PATH lookup
+    if os.run("true", ["true"]) != 0 {
+        mem.deinit(&arena)
+        return 8
+    }
+    if os.run("false", ["false"]) != 1 {
+        mem.deinit(&arena)
+        return 9
+    }
+
+    // Non-existent program should fail with negative error code
+    if os.run("lunso-no-such-binary-xyz", ["lunso-no-such-binary-xyz"]) >= 0 {
+        mem.deinit(&arena)
+        return 10
+    }
+
+    if mem.deinit(&arena) < 0 {
+        return 11
+    }
+    return 0
+}

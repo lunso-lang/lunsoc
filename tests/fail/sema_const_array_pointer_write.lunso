@@ -1,0 +1,6 @@
+// expect-stderr: cannot write through a read-only pointer
+fun main(): i32 {
+    var p: *const [3]u8 = &"abc"
+    *p = ['x', 'y', 'z']
+    return 0
+}

@@ -1,0 +1,24 @@
+// expect-exit: 11
+enum Status : u8 {
+    Ok,
+    Warn = 10,
+    Err,
+    Max = 255
+}
+
+enum Flags : i32 { A = -2; B, C = 5 }
+
+fun main(): i32 {
+    var s = Status.Err
+    if s != Status.Err || s == Status.Ok {
+        return 1
+    }
+    if (Status.Ok as i32) != 0 || (Status.Max as i32) != 255 {
+        return 2
+    }
+    var f = Flags.B
+    if (f as i32) != -1 || (Flags.C as i32) != 5 {
+        return 3
+    }
+    return (s as i32)
+}

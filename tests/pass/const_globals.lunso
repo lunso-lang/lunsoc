@@ -1,0 +1,34 @@
+// expect-exit: 42
+enum Mode : u8 {
+    Slow = 1,
+    Fast = 3,
+}
+
+const BUF_LEN = 4
+const SHIFTED = (1 << 3) + 2
+const MASK: u8 = 0x0f
+const NEG = -5
+const FLAG = true
+const DEFAULT_MODE = Mode.Fast
+const SCALE: f64 = 2.0
+
+struct Packet {
+    items: [BUF_LEN]i32
+}
+
+fun main(): i32 {
+    if !FLAG {
+        return 1
+    }
+    var pkt = Packet { items: [10, 10, 10, 5] }
+    var arr: [BUF_LEN]u8 = [1, 2, 3, 4]
+    var sum = pkt.items[0] + pkt.items[1] + pkt.items[2] + pkt.items[3]
+    // sum = 35
+    // SHIFTED(10) + NEG(-5) + (MASK & 3)(3) + (DEFAULT_MODE as i32)(3) + arr[0](1) = 12
+    // 35 + 12 - 5 = 42
+    var extra = SHIFTED + NEG + ((MASK & 3) as i32) + (DEFAULT_MODE as i32) + (arr[0] as i32)
+    if SCALE * 2.5 != 5.0 {
+        return 2
+    }
+    return sum + extra - 5
+}

@@ -1,0 +1,7 @@
+// expect-stderr: cyclic constant definition
+const A = B + 1
+const B = A + 1
+
+fun main(): i32 {
+    return A
+}

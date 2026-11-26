@@ -1,0 +1,5 @@
+// expect-stderr: continue must be inside a loop
+fun main(): i32 {
+    continue
+    return 0
+}

@@ -1,0 +1,15 @@
+// expect-stderr: match does not cover all enum cases
+enum Color : u8 {
+    Red,
+    Green,
+    Blue,
+}
+
+fun main(): i32 {
+    var c = Color.Red
+    match c {
+        Color.Red => return 1
+        Color.Green => return 2
+    }
+    return 0
+}

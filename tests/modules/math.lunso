@@ -1,0 +1,5 @@
+pub const FACTOR: i32 = 2
+
+pub fun add(a: i32, b: i32): i32 {
+    return a + b
+}

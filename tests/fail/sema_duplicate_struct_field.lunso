@@ -1,0 +1,9 @@
+// expect-stderr: duplicate struct field
+struct Pair {
+    a: i32
+}
+
+fun main(): i32 {
+    var p = Pair { a: 1, a: 2 }
+    return p.a
+}

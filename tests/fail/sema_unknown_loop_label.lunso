@@ -1,0 +1,7 @@
+// expect-stderr: unknown loop label
+fun main(): i32 {
+    for {
+        break missing
+    }
+    return 0
+}

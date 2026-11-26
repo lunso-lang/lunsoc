@@ -1,0 +1,52 @@
+// expect-exit: 53
+enum Op : u8 {
+    Add,
+    Sub,
+    Mul,
+}
+
+const TEN = 10
+
+fun eval_op(op: Op, a: i32, b: i32): i32 {
+    match op {
+        Op.Add => return a + b
+        Op.Sub => {
+            return a - b
+        }
+        Op.Mul => return a * b
+    }
+}
+
+fun classify(n: i32): i32 {
+    var out: i32 = 0
+    match n {
+        0, 1 => out = 5
+        TEN => out = 20
+        else => out = 1
+    }
+    return out
+}
+
+fun main(): i32 {
+    // eval_op(Add, 4, 6)=10, eval_op(Mul, 3, 5)=15 -> 25
+    var total = eval_op(Op.Add, 4, 6) + eval_op(Op.Mul, 3, 5)
+
+    // classify(1)=5, classify(10)=20, classify(99)=1 -> +26 (total 51)
+    total += classify(1) + classify(10) + classify(99)
+
+    // match inside for loop: break/continue apply to the for loop
+    for var i: i32 = 0; i < 10; i += 1 {
+        match i {
+            0 => continue
+            2 => break
+            else => total += 2
+        }
+    }
+    // i=0 skipped, i=1 adds 2 (total 53), i=2 breaks
+
+    var flag = true
+    match flag {
+        false => return 0
+        true => return total
+    }
+}

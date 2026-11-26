@@ -1,0 +1,67 @@
+import helpers
+import helpers { Box, swap as exchange }
+
+struct Node[T] {
+    value: T
+    children: []Node[T]
+}
+
+struct Pair[A, B] {
+    left: A
+    right: B
+}
+
+struct Holder {
+    rows: [2]Box[[4]u8]
+}
+
+fun constant[T](value: T): T {
+    const add: T = 3 as T
+    return value + add
+}
+
+fun main(): i32 {
+    var a: i32 = 1
+    var b: i32 = 2
+    helpers.swap.[i32](&a, &b)
+    exchange.[int](&a, &b)
+    if a != 1 || b != 2 {
+        return 1
+    }
+
+    var x: [4]u8 = [1, 2, 3, 4]
+    var y: [4]u8 = [5, 6, 7, 8]
+    exchange.[[4]u8](&x, &y)
+    if x[3] != 8 || y[3] != 4 {
+        return 2
+    }
+
+    var rows: [2][4]u8 = [x, y]
+    var vec = helpers.Vec[[4]u8] { data: &rows[0], len: 2 }
+    if vec.data[1][3] != 4 || vec.len != 2 {
+        return 3
+    }
+
+    var holder: Holder
+    holder.rows[0] = Box[[4]u8] { value: x }
+    holder.rows[1] = Box[[4]u8] { value: helpers.recursive_read.[[4]u8](&y, 2) }
+    if holder.rows[0].value[3] != 8 || holder.rows[1].value[3] != 4 {
+        return 4
+    }
+
+    var children: [2]Node[u8]
+    children[1].value = 42
+    var node = Node[u8] { children: children }
+    if node.children[1].value != 42 {
+        return 5
+    }
+
+    var pair = Pair[Box[i32], []u8] { left: Box[int] { value: 13 }, right: "abc" }
+    if pair.left.value != 13 || len(pair.right) != 3 {
+        return 6
+    }
+    if constant.[u8](4) != 7 || constant.[i64](6) != 9 {
+        return 7
+    }
+    return 0
+}

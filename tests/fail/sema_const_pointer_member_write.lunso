@@ -1,0 +1,11 @@
+struct Box {
+    value: i32
+}
+
+fun write_const(b: *const Box) {
+    b.value = 10
+}
+
+fun main(): i32 {
+    return 0
+}

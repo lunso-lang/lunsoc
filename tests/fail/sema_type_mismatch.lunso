@@ -1,0 +1,4 @@
+fun main(): i32 {
+    var x: i32 = "hello"
+    return x
+}

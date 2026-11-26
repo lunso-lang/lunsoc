@@ -1,0 +1,32 @@
+struct Inner {
+    x: i32
+    y: i32
+}
+
+struct Outer {
+    inner: Inner
+    hp: i32
+}
+
+fun bump(o: *Outer) {
+    o.hp += 5
+    o.inner.x = o.inner.x + 10
+    var py = &o.inner.y
+    *py += 3
+}
+
+fun read_const(o: *const Outer): i32 {
+    return o.hp + o.inner.x + o.inner.y
+}
+
+fun main(): i32 {
+    var obj = Outer { inner: Inner { x: 2, y: 4 }, hp: 20 }
+    bump(&obj)
+    if obj.hp != 25 || obj.inner.x != 12 || obj.inner.y != 7 {
+        return 1
+    }
+    if read_const(&obj) != 44 {
+        return 2
+    }
+    return 0
+}

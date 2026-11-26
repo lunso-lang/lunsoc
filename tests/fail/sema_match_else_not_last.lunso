@@ -1,0 +1,8 @@
+// expect-stderr: else arm must be the last arm in match
+fun main(): i32 {
+    var x: i32 = 1
+    match x {
+        else => return 0
+        1 => return 10
+    }
+}

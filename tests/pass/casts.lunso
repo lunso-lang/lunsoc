@@ -1,0 +1,56 @@
+// expect-exit: 52
+const C_INT = 3.9 as i32
+const C_FLT = 10 as f64
+const C_BOOL_INT = true as i32
+const C_INT_BOOL = 7 as bool
+
+fun main(): i32 {
+    if C_INT != 3 || C_FLT != 10.0 || C_BOOL_INT != 1 || !C_INT_BOOL {
+        return 1
+    }
+
+    // int <-> float
+    var x: i32 = -7
+    var fx = x as f64
+    var y = (fx * -2.5) as i32
+    // fx = -7.0, fx * -2.5 = 17.5 -> y = 17
+
+    var u: u64 = 100
+    var fu = u as f32
+    var back_u = fu as u8
+    // back_u = 100
+
+    // f64 <-> f32
+    var d: f64 = 6.25
+    var s = d as f32
+    var d2 = s as f64
+    if d2 != 6.25 {
+        return 2
+    }
+
+    // bool <-> int / float
+    var b1 = (42 as bool)
+    var b2 = (0 as bool)
+    var b3 = (0.0 as bool)
+    var b4 = (2.5 as bool)
+    if !b1 || b2 || b3 || !b4 {
+        return 3
+    }
+    var bi = (b1 as i32) + (b2 as i32) + ((b4 as f64) as i32)
+    // bi = 1 + 0 + 1 = 2
+
+    // u64 <-> pointer
+    var null_p = 0 as *u8
+    if (null_p as u64) != 0 {
+        return 4
+    }
+    var byte: u8 = 30
+    var addr = (&byte) as u64
+    var p2 = addr as *u8
+    if *p2 != 30 {
+        return 5
+    }
+
+    // 17 + (100 - 100) + 2 + 30 + 3 = 52
+    return y + ((back_u as i32) - 100) + bi + (*p2 as i32) + C_INT
+}

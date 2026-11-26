@@ -1,0 +1,44 @@
+import std.fmt
+import std.io
+import std.str
+
+fun main(): i32 {
+    var u: u64 = 0
+    if !fmt.parse_u64("  42\n", &u) || u != 42 {
+        return 1
+    }
+    if fmt.parse_u64("-1", &u) || fmt.parse_u64("12a", &u) || fmt.parse_u64("   ", &u) {
+        return 2
+    }
+    if !fmt.parse_u64("18446744073709551615", &u) || u != ~0 {
+        return 3
+    }
+    if fmt.parse_u64("18446744073709551616", &u) {
+        return 4
+    }
+
+    var s: i64 = 0
+    if !fmt.parse_i64(" -12345 \t", &s) || s != -12345 {
+        return 5
+    }
+    if !fmt.parse_i64("+99", &s) || s != 99 {
+        return 6
+    }
+    if !fmt.parse_i64("-9223372036854775808", &s) || s != (-9223372036854775807 - 1) {
+        return 7
+    }
+    if fmt.parse_i64("9223372036854775808", &s) || fmt.parse_i64("-9223372036854775809", &s) {
+        return 8
+    }
+
+    // Verify read_line compiles and handles zero-capacity guard.
+    var small: [16]u8
+    var line: []u8
+    if io.read_line(&small[0], 0, &line) != -22 {
+        return 9
+    }
+    if str.equals("ok", "ok") == false {
+        return 10
+    }
+    return 0
+}

@@ -1,0 +1,5 @@
+import helper
+
+fun main(): i32 {
+    return helper.secret()
+}

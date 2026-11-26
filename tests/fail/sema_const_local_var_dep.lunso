@@ -1,0 +1,6 @@
+// expect-stderr: constant expression required
+fun main(): i32 {
+    var x: i32 = 1
+    const Y = x + 1
+    return Y
+}

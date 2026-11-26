@@ -1,0 +1,28 @@
+struct Point {
+    x: i32
+    y: i32
+}
+
+fun mutate_copy(p: Point): i32 {
+    p.x += 10
+    var ptr = &p
+    (*ptr).y += 5
+    return p.x + p.y
+}
+
+fun main(): i32 {
+    var origin = Point { x: 3, y: 4 }
+    var sum = mutate_copy(origin)
+    if sum != 22 {
+        return 1
+    }
+    // Mutating the parameter copy must not change the caller's struct.
+    if origin.x != 3 || origin.y != 4 {
+        return 2
+    }
+    // Struct literal directly inside an if condition call argument.
+    if mutate_copy(Point { x: 1, y: 2 }) != 18 {
+        return 3
+    }
+    return 0
+}

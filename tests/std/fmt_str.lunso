@@ -1,0 +1,65 @@
+// expect-stdout: num=-42\n
+import std.fmt
+import std.io
+import std.mem
+import std.str
+
+fun main(): i32 {
+    if !str.equals("hello", "hello") || str.equals("hello", "world") {
+        return 1
+    }
+    if !str.starts_with("lunso-boot", "lunso") || !str.ends_with("main.lunso", ".lunso") {
+        return 2
+    }
+    if str.index_of("a/b/c", '/') != 1 || str.last_index_of("a/b/c", '/') != 3 {
+        return 3
+    }
+    if str.index_of("abc", 'z') != -1 {
+        return 4
+    }
+    if !str.equals(str.trim("  \t hello \n "), "hello") {
+        return 5
+    }
+
+    var u: u64 = 0
+    if !str.parse_u64("12345", &u) || u != 12345 || str.parse_u64("12x", &u) {
+        return 6
+    }
+    var i: i64 = 0
+    if !str.parse_i64("-9223372036854775808", &i) || i != (-9223372036854775807 - 1) {
+        return 7
+    }
+    if str.parse_i64("9223372036854775808", &i) {
+        return 8
+    }
+
+    var arena: mem.Arena
+    if mem.init(&arena, 256) < 0 {
+        return 9
+    }
+
+    if !str.equals(fmt.format_u64(0, &arena), "0") {
+        mem.deinit(&arena)
+        return 10
+    }
+    if !str.equals(fmt.format_i64(-9223372036854775807 - 1, &arena), "-9223372036854775808") {
+        mem.deinit(&arena)
+        return 11
+    }
+
+    var hbuf: [16]u8
+    var hn = fmt.hex_to_buf(0xdeadbeef, &hbuf[0], 16)
+    if hn != 8 || !str.equals(hbuf[0..hn], "deadbeef") {
+        mem.deinit(&arena)
+        return 12
+    }
+
+    io.print("num=")
+    fmt.print_i64(1, -42)
+    io.print("\n")
+
+    if mem.deinit(&arena) < 0 {
+        return 13
+    }
+    return 0
+}

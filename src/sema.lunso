@@ -58,6 +58,7 @@ pub struct SemaFunction {
     result: SemaType
     slot_count: u32
     declaration: u32
+    instantiated_at: u32
     param_types: vec.Vec[SemaType]
     arguments: vec.Vec[SemaType]
     nodes: vec.Vec[SemaNode]
@@ -93,6 +94,8 @@ pub struct Sema {
 pub struct SemaError {
     offset: u32
     message: []u8
+    note_offset: u32
+    note_message: []u8
 }
 
 struct LocalVar {
@@ -840,6 +843,16 @@ fun resolve_struct_layout(c: *Checker, rec_idx: u32) {
     for var i: u32 = 0; i < decl.fields.count && !c.has_error; i += 1 {
         var fid = children[(decl.fields.first + i) as i64]
         var fnode = nodes[fid as i64]
+        var fname = node_span(c.tree, fid, fnode.a)
+        for var prev: u32 = 0; prev < i; prev += 1 {
+            var pfid = children[(decl.fields.first + prev) as i64]
+            var pfnode = nodes[pfid as i64]
+            if same_span(c.tree, fname, node_span(c.tree, pfid, pfnode.a)) {
+                leave_type_scope(c, saved)
+                fail(c, fid, "duplicate struct field")
+                return
+            }
+        }
         var ft = resolve_type(c, fnode.b)
         if c.has_error {
             leave_type_scope(c, saved)
@@ -888,6 +901,9 @@ fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, ou
         var text = span_bytes(c.tree, node_span(c.tree, id, node.a))
         var bits: u64 = 0
         if !parse_int_literal(text, &bits) {
+            if text[0] == '\'' {
+                return fail(c, id, "invalid character literal")
+            }
             return fail(c, id, "invalid integer literal")
         }
         var kind = TypeKind.I32
@@ -1297,6 +1313,7 @@ fun specialize_function(c: *Checker, app_id: u32, decl_idx: u32): u32 {
         result: empty_type(),
         slot_count: 0,
         declaration: decl_idx,
+        instantiated_at: app_id,
         param_types: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: c.arena },
         arguments: args,
         nodes: vec.Vec[SemaNode] { data: 0 as *SemaNode, len: 0, cap: 0, arena: c.arena },
@@ -1385,7 +1402,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                         res = consts[ci as i64].type_info
                     }
                 } else {
-                    res = fail(c, id, "unknown identifier")
+                    res = fail(c, id, "unknown variable")
                 }
             }
         }
@@ -1393,7 +1410,11 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         var text = span_bytes(c.tree, node_span(c.tree, id, node.a))
         var bits: u64 = 0
         if !parse_int_literal(text, &bits) {
-            res = fail(c, id, "invalid integer literal")
+            if text[0] == '\'' {
+                res = fail(c, id, "invalid character literal")
+            } else {
+                res = fail(c, id, "invalid integer literal")
+            }
         } else {
             var k = TypeKind.I32
             if is_integer(expected.kind) && !is_enum(expected) {
@@ -1420,27 +1441,31 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         res.element_type = add_element(c, simple_type(TypeKind.U8))
         res.length = decoded_string_len(span_bytes(c.tree, node_span(c.tree, id, node.a)))
     } else if node.kind == AstKind.ArrayLiteral {
-        var children = vec.as_slice.[u32](&c.tree.children)
-        var elem_exp = empty_type()
-        if expected.kind == TypeKind.Array || expected.kind == TypeKind.Slice {
-            var elems = vec.as_slice.[SemaType](&c.sema.elements)
-            elem_exp = elems[expected.element_type as i64]
-        }
-        var elem_t = check_value(c, children[node.a as i64], elem_exp)
-        if !c.has_error {
-            for var i: u32 = 1; i < node.b && !c.has_error; i += 1 {
-                check_value(c, children[(node.a + i) as i64], elem_t)
+        if expected.kind == TypeKind.Array && node.b != expected.length {
+            res = fail(c, id, "array initializer length mismatch")
+        } else {
+            var children = vec.as_slice.[u32](&c.tree.children)
+            var elem_exp = empty_type()
+            if expected.kind == TypeKind.Array || expected.kind == TypeKind.Slice {
+                var elems = vec.as_slice.[SemaType](&c.sema.elements)
+                elem_exp = elems[expected.element_type as i64]
             }
+            var elem_t = check_value(c, children[node.a as i64], elem_exp)
             if !c.has_error {
-                res = simple_type(TypeKind.Array)
-                res.length = node.b
-                res.element = elem_t.kind
-                res.element_type = add_element(c, elem_t)
-                res.element_size = storage_size(elem_t)
-                res.record = elem_t.record
-                res.record_size = elem_t.record_size
-                res.pointee = elem_t.pointee
-                res.read_only = elem_t.read_only
+                for var i: u32 = 1; i < node.b && !c.has_error; i += 1 {
+                    check_value(c, children[(node.a + i) as i64], elem_t)
+                }
+                if !c.has_error {
+                    res = simple_type(TypeKind.Array)
+                    res.length = node.b
+                    res.element = elem_t.kind
+                    res.element_type = add_element(c, elem_t)
+                    res.element_size = storage_size(elem_t)
+                    res.record = elem_t.record
+                    res.record_size = elem_t.record_size
+                    res.pointee = elem_t.pointee
+                    res.read_only = elem_t.read_only
+                }
             }
         }
     } else if node.kind == AstKind.StructLiteral {
@@ -1471,6 +1496,15 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                     var init_id = children[(node.a + i) as i64]
                     var init_node = nodes[init_id as i64]
                     var fname = node_span(c.tree, init_id, init_node.a)
+                    for var prev: u32 = 1; prev < i; prev += 1 {
+                        var pid = children[(node.a + prev) as i64]
+                        var pnode = nodes[pid as i64]
+                        if same_span(c.tree, fname, node_span(c.tree, pid, pnode.a)) {
+                            fail(c, init_id, "duplicate struct field")
+                            break
+                        }
+                    }
+                    if c.has_error { break }
                     var matched = false
                     for var f: u32 = 0; f < sdecl.fields.count; f += 1 {
                         var fid = children[(sdecl.fields.first + f) as i64]
@@ -1562,7 +1596,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                     var fdecls = vec.as_slice.[AstFunction](&c.tree.functions)
                     if fdecls[fi as i64].type_parameters.count > 0 {
                         if app == NODE_NONE {
-                            res = fail(c, callee, "generic function requires type arguments")
+                            res = fail(c, callee, "generic function requires explicit type arguments")
                         } else {
                             fi = specialize_function(c, app, fi)
                         }
@@ -1794,7 +1828,13 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         var lt = check_expr(c, node.a, empty_type())
         if !c.has_error {
             if !is_writable_lvalue(c, node.a) {
-                res = fail(c, node.a, "cannot assign to non-writable target")
+                var target_k = nodes[node.a as i64].kind
+                if (target_k == AstKind.Dereference ||
+                    (target_k == AstKind.Index && node_info(c, nodes[node.a as i64].a).type_info.kind == TypeKind.Pointer)) {
+                    res = fail(c, node.a, "cannot write through a read-only pointer")
+                } else {
+                    res = fail(c, node.a, "cannot assign to non-writable target")
+                }
             } else {
                 check_value(c, node.b, lt)
                 res = lt
@@ -1848,13 +1888,17 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
             rt = check_expr(c, node.b, lt)
         }
         if !c.has_error {
-            var cm = common_numeric_type(lt.kind, rt.kind)
-            if cm == TypeKind.Invalid {
+            if !is_numeric(lt.kind) || !is_numeric(rt.kind) || is_enum(lt) || is_enum(rt) {
                 res = fail(c, id, "incompatible binary operands")
             } else {
-                if lt.kind != cm { node_info(c, node.a).promotion = cm }
-                if rt.kind != cm { node_info(c, node.b).promotion = cm }
-                res = simple_type(cm)
+                var cm = common_numeric_type(lt.kind, rt.kind)
+                if cm == TypeKind.Invalid {
+                    res = fail(c, id, "incompatible binary operands")
+                } else {
+                    if lt.kind != cm { node_info(c, node.a).promotion = cm }
+                    if rt.kind != cm { node_info(c, node.b).promotion = cm }
+                    res = simple_type(cm)
+                }
             }
         }
     }
@@ -1890,7 +1934,11 @@ fun check_statement(c: *Checker, id: u32): bool {
         falls = false
     } else if node.kind == AstKind.Break || node.kind == AstKind.Continue {
         if c.loops.len == 0 {
-            fail(c, id, "break or continue outside loop")
+            if node.kind == AstKind.Break {
+                fail(c, id, "break must be inside a loop")
+            } else {
+                fail(c, id, "continue must be inside a loop")
+            }
         } else {
             var target = (c.loops.len - 1) as i64
             if node.a != NODE_NONE {
@@ -1985,10 +2033,14 @@ fun check_statement(c: *Checker, id: u32): bool {
         var has_else = false
         var arm_falls = false
         var pattern_count: u32 = 0
+        var match_start = c.sema.match_values.len
         for var i: u32 = 1; i < node.b && !c.has_error; i += 1 {
             var arm_id = children[(node.a + i) as i64]
             var arm = nodes[arm_id as i64]
             if arm.b == 1 {
+                if i + 1 < node.b {
+                    fail(c, arm_id, "else arm must be the last arm in match")
+                }
                 has_else = true
             } else {
                 for var p: u32 = 0; p < arm.b - 1 && !c.has_error; p += 1 {
@@ -2000,28 +2052,47 @@ fun check_statement(c: *Checker, id: u32): bool {
                         if !same_type(c, pt, st) && !(!is_enum(pt) && !is_enum(st) && can_widen_num(pt.kind, st.kind)) {
                             fail(c, pat_id, "match pattern type mismatch")
                         } else {
-                            var mv_idx = c.sema.match_values.len as u32
-                            vec.push_value.[u64](&c.sema.match_values, pbits)
-                            var sn = node_info(c, pat_id)
-                            sn.binding = mv_idx
-                            sn.type_info = st
+                            var mvals = vec.as_slice.[u64](&c.sema.match_values)
+                            for var prev = match_start as i64; prev < len(mvals); prev += 1 {
+                                if mvals[prev] == pbits {
+                                    fail(c, pat_id, "duplicate match pattern")
+                                    break
+                                }
+                            }
+                            if !c.has_error {
+                                var mv_idx = c.sema.match_values.len as u32
+                                vec.push_value.[u64](&c.sema.match_values, pbits)
+                                var sn = node_info(c, pat_id)
+                                sn.binding = mv_idx
+                                sn.type_info = st
+                            }
                         }
                     }
                     pattern_count += 1
                 }
             }
             var body = children[(arm.a + arm.b - 1) as i64]
-            if check_statement(c, body) {
+            if !c.has_error && check_statement(c, body) {
                 arm_falls = true
             }
         }
-        if !has_else && is_enum(st) {
-            var enums = vec.as_slice.[AstEnum](&c.tree.enums)
-            if pattern_count >= enums[(st.record - 1) as i64].cases.count {
-                has_else = true
+        if !c.has_error && !has_else {
+            if is_enum(st) {
+                var enums = vec.as_slice.[AstEnum](&c.tree.enums)
+                if pattern_count >= enums[(st.record - 1) as i64].cases.count {
+                    has_else = true
+                } else {
+                    fail(c, id, "match does not cover all enum cases")
+                }
+            } else if st.kind == TypeKind.Bool {
+                if pattern_count >= 2 {
+                    has_else = true
+                } else {
+                    fail(c, id, "bool match requires an else arm")
+                }
+            } else if is_integer(st.kind) {
+                fail(c, id, "integer match requires an else arm")
             }
-        } else if !has_else && st.kind == TypeKind.Bool && pattern_count >= 2 {
-            has_else = true
         }
         falls = !has_else || arm_falls
     } else if node.kind == AstKind.For {
@@ -2047,6 +2118,15 @@ fun check_statement(c: *Checker, id: u32): bool {
         }
         if h.step != NODE_NONE {
             check_expr(c, h.step, empty_type())
+        }
+        if h.label.length > 0 && !c.has_error {
+            var loops = vec.as_slice.[LoopEntry](&c.loops)
+            for var li: i64 = 0; li < len(loops); li += 1 {
+                if loops[li].label.length > 0 && same_span(c.tree, loops[li].label, h.label) {
+                    fail_at(c, h.label.offset, "duplicate loop label")
+                    break
+                }
+            }
         }
         var le = LoopEntry { label: h.label, has_break: false }
         vec.push.[LoopEntry](&c.loops, &le)
@@ -2109,6 +2189,8 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
     c.arena = arena
     c.tree = tree
     c.sema = out
+    c.err.note_offset = NODE_NONE
+    c.err.note_message = ""
     c.has_error = false
     c.scope_depth = 0
     c.slot_count = 0
@@ -2188,6 +2270,7 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
             result: empty_type(),
             slot_count: 0,
             declaration: i as u32,
+            instantiated_at: NODE_NONE,
             param_types: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: arena },
             arguments: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: arena },
             nodes: vec.Vec[SemaNode] { data: 0 as *SemaNode, len: 0, cap: 0, arena: arena },
@@ -2196,6 +2279,12 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
         vec.push.[SemaFunction](&out.functions, &sf)
         if fdecl.type_parameters.count == 0 {
             register_fn_sig(&c, i as u32)
+            if !c.has_error && fdecl.body == NODE_NONE {
+                var rk = out.functions.data[i].result.kind
+                if rk == TypeKind.Struct || rk == TypeKind.Array || rk == TypeKind.Slice {
+                    fail_at(&c, fdecl.name.offset, "external results must be scalar")
+                }
+            }
         }
     }
 
@@ -2234,9 +2323,13 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
         }
         var falls = check_block(&c, fdecl.body)
         if !c.has_error && c.current_return.kind != TypeKind.Void && falls {
-            fail_at(&c, fdecl.name.offset, "non-void function may reach end without returning")
+            fail_at(&c, fdecl.name.offset, "function can finish without returning a value")
         }
         sf_list = out.functions.data
+        if c.has_error && sf_list[i].instantiated_at != NODE_NONE {
+            c.err.note_offset = nodes[sf_list[i].instantiated_at as i64].pos
+            c.err.note_message = "generic instantiated here"
+        }
         sf_list[i].slot_count = c.slot_count
         leave_type_scope(&c, saved)
     }

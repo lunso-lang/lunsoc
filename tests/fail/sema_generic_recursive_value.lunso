@@ -1,0 +1,9 @@
+// expect-stderr: recursive struct definition
+struct Bad[T] {
+    value: Bad[T]
+}
+
+fun main(): i32 {
+    var bad: Bad[i32]
+    return 0
+}

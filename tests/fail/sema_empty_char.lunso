@@ -1,0 +1,5 @@
+// expect-stderr: invalid character literal
+fun main(): i32 {
+    var c: u8 = ''
+    return 0
+}

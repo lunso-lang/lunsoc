@@ -1,0 +1,9 @@
+// expect-stderr: duplicate loop label
+fun main(): i32 {
+    outer: for {
+        outer: for {
+            break
+        }
+    }
+    return 0
+}

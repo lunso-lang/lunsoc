@@ -1,0 +1,24 @@
+// expect-exit: 21
+struct Pair {
+    a: i32
+    b: i32
+}
+
+fun sum_pairs(items: []Pair): i32 {
+    var total: i32 = 0
+    for var i: i64 = 0; i < len(items); i += 1 {
+        total += items[i].a + items[i].b
+    }
+    return total
+}
+
+fun main(): i32 {
+    var pairs: [3]Pair
+    pairs[0].a = 1
+    pairs[0].b = 2
+    pairs[1].a = 3
+    pairs[1].b = 4
+    pairs[2].a = 5
+    pairs[2].b = 6
+    return sum_pairs(pairs)
+}

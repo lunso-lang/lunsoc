@@ -1,0 +1,25 @@
+pub struct Vec[T] {
+    data: *T
+    len: i64
+}
+
+pub struct Box[T] {
+    value: T
+}
+
+pub fun swap[T](left: *T, right: *T) {
+    var temp = *left
+    *left = *right
+    *right = temp
+}
+
+pub fun recursive_read[T](ptr: *T, depth: i32): T {
+    if depth == 0 {
+        return *ptr
+    }
+    return recursive_read.[T](ptr, depth - 1)
+}
+
+pub fun unused[T]() {
+    unknown_function()
+}

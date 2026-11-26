@@ -1,0 +1,53 @@
+// args: --check hello world
+import std.args
+import std.mem
+
+fun equals(a: []u8, b: []u8): bool {
+    if len(a) != len(b) {
+        return false
+    }
+    for var i: i64 = 0; i < len(a); i += 1 {
+        if a[i] != b[i] {
+            return false
+        }
+    }
+    return true
+}
+
+fun main(): i32 {
+    var arena: mem.Arena
+    if mem.init(&arena, 512) < 0 {
+        return 1
+    }
+
+    var argv: [][]u8
+    var n = args.load(&arena, &argv)
+    if n != 4 || len(argv) != 4 {
+        mem.deinit(&arena)
+        return 2
+    }
+
+    if !equals(argv[1], "--check") {
+        mem.deinit(&arena)
+        return 3
+    }
+    if !equals(argv[2], "hello") {
+        mem.deinit(&arena)
+        return 4
+    }
+    if !equals(argv[3], "world") {
+        mem.deinit(&arena)
+        return 5
+    }
+
+    var flags = argv[1..len(argv)]
+    if len(flags) != 3 || !equals(flags[0], "--check") {
+        mem.deinit(&arena)
+        return 6
+    }
+
+    if mem.deinit(&arena) < 0 {
+        return 7
+    }
+    return 0
+}

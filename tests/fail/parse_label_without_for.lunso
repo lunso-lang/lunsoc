@@ -1,0 +1,6 @@
+// mode: parse
+// expect-stderr: expected 'for' after loop label
+fun main(): i32 {
+    lbl: var x = 1
+    return 0
+}

@@ -1,0 +1,54 @@
+// expect-exit: 65
+struct Token {
+    text: []u8
+    kind: u8
+}
+
+fun sum_matrix(rows: [][3]i32): i32 {
+    var total: i32 = 0
+    for var r: i64 = 0; r < len(rows); r += 1 {
+        for var c: i64 = 0; c < len(rows[r]); c += 1 {
+            total += rows[r][c]
+        }
+    }
+    return total
+}
+
+fun sum_words(words: [][]u8): i32 {
+    var total: i32 = 0
+    for var i: i64 = 0; i < len(words); i += 1 {
+        total += len(words[i]) as i32
+    }
+    return total
+}
+
+fun set_slice(out: *[]u8, value: []u8) {
+    *out = value
+}
+
+fun main(): i32 {
+    var mat: [2][3]i32 = [[1, 2, 3], [4, 5, 6]]
+    mat[1][2] += 10
+    // sum_matrix = 1+2+3+4+5+16 = 31
+
+    var words: [3][]u8 = ["hi", "abc", "lunso"]
+    // sum_words = 2 + 3 + 5 = 10
+
+    var tok = Token { text: "return", kind: 7 }
+    // len(tok.text) + tok.kind = 6 + 7 = 13
+
+    var s: []u8
+    set_slice(&s, "test")
+    // len(s) = 4
+
+    var buf: [2][]u8
+    var p: *[]u8 = &buf[0]
+    p[0] = "ok"
+    p[1] = "yes!!"
+    var sub: [][]u8 = p[0..2]
+    // sum_words(sub) = 2 + 5 = 7
+
+    // 31 + 10 + 13 + 4 + 7 = 65
+    return (sum_matrix(mat) + sum_words(words) + (len(tok.text) as i32) + (tok.kind as i32) +
+            (len(s) as i32) + sum_words(sub))
+}

@@ -1,0 +1,14 @@
+// expect-exit: 41
+fun widen(v: u32): i64 {
+    return v
+}
+
+fun main(): i32 {
+    var a: u32 = 30
+    var b: i32 = -5
+    var sum = widen(a) + b
+    var shifted = (1 as u32) << (4 as u8)
+    var total = (sum as i32) + (shifted as i32)
+    // 25 + 16 = 41
+    return total
+}

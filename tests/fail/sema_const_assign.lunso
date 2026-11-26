@@ -1,0 +1,6 @@
+const A = 10
+
+fun main(): i32 {
+    A = 20
+    return A
+}

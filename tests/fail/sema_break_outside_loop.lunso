@@ -1,0 +1,5 @@
+// expect-stderr: break must be inside a loop
+fun main(): i32 {
+    break
+    return 0
+}

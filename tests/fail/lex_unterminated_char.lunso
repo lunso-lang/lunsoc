@@ -1,0 +1,3 @@
+// mode: tokens
+// expect-stderr: unterminated character literal
+fun main(): i32 { return 'a }

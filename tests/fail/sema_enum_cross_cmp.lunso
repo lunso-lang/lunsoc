@@ -1,0 +1,9 @@
+enum A : u8 { X }
+enum B : u8 { Y }
+
+fun main(): i32 {
+    if A.X == B.Y {
+        return 1
+    }
+    return 0
+}

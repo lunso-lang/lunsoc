@@ -1,0 +1,6 @@
+const MSG = "abc"
+
+fun main(): i32 {
+    MSG[0] = 'x'
+    return 0
+}

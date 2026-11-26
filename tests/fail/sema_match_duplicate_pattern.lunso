@@ -1,0 +1,9 @@
+// expect-stderr: duplicate match pattern
+fun main(): i32 {
+    var x: i32 = 1
+    match x {
+        1 => return 10
+        1 => return 20
+        else => return 0
+    }
+}

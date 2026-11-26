@@ -1,0 +1,12 @@
+// expect-stdout: hello world\n
+import std.io
+
+fun main(): i32 {
+    if io.print("hello ") < 0 {
+        return 1
+    }
+    if io.println("world") < 0 {
+        return 2
+    }
+    return 0
+}
