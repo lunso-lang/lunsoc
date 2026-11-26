@@ -1,0 +1,70 @@
+// expect-exit: 0
+import std.json
+import std.mem
+import std.str
+
+fun main(): i32 {
+    var arena: mem.Arena
+    if mem.init(&arena, 8192) < 0 {
+        return 1
+    }
+    defer mem.deinit(&arena)
+
+    var payload = "{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"textDocument/hover\",\"params\":{\"ok\":true,\"empty\":null,\"items\":[1,\"a\\nb\",{\"k\":\"\\u0041\"}]}}"
+    var root: json.JsonValue
+    if !json.parse(&arena, payload, &root) || root.kind != json.JsonKind.Object {
+        return 2
+    }
+
+    var rpc: []u8
+    var id: i64 = 0
+    var method: []u8
+    if !json.get_str(root, "jsonrpc", &rpc) || !str.equals(rpc, "2.0") {
+        return 3
+    }
+    if !json.get_i64(root, "id", &id) || id != 42 {
+        return 4
+    }
+    if !json.get_str(root, "method", &method) || !str.equals(method, "textDocument/hover") {
+        return 5
+    }
+
+    var params: json.JsonValue
+    var ok = false
+    var empty: json.JsonValue
+    if !json.get(root, "params", &params) ||
+       !json.get_bool(params, "ok", &ok) || !ok ||
+       !json.get(params, "empty", &empty) || empty.kind != json.JsonKind.Null {
+        return 6
+    }
+
+    var items: json.JsonValue
+    var elem0: json.JsonValue
+    var elem1: json.JsonValue
+    var elem2: json.JsonValue
+    var kstr: []u8
+    if !json.get(params, "items", &items) || json.len_of(items) != 3 ||
+       !json.at(items, 0, &elem0) || elem0.int_val != 1 ||
+       !json.at(items, 1, &elem1) || !str.equals(elem1.str_val, "a\nb") ||
+       !json.at(items, 2, &elem2) || !json.get_str(elem2, "k", &kstr) || !str.equals(kstr, "A") {
+        return 7
+    }
+
+    // Roundtrip stringify + invalid JSON rejection.
+    var serialized: []u8
+    if json.stringify(&arena, root, &serialized) < 0 {
+        return 8
+    }
+    var reparsed: json.JsonValue
+    var reparsed_id: i64 = 0
+    if !json.parse(&arena, serialized, &reparsed) || !json.get_i64(reparsed, "id", &reparsed_id) || reparsed_id != 42 {
+        return 9
+    }
+
+    var bad: json.JsonValue
+    if json.parse(&arena, "[1, 2,]", &bad) || json.parse(&arena, "{\"a\":1} trailing", &bad) || json.parse(&arena, "\"unterminated", &bad) {
+        return 10
+    }
+
+    return 0
+}

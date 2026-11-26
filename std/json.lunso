@@ -1,0 +1,741 @@
+import std.fmt
+import std.map
+import std.mem
+import std.str
+import std.vec
+
+pub enum JsonKind : u8 {
+    Null,
+    Bool,
+    Int,
+    Float,
+    String,
+    Array,
+    Object,
+}
+
+pub struct JsonValue {
+    kind: JsonKind
+    bool_val: bool
+    int_val: i64
+    float_val: f64
+    str_val: []u8
+    arr_val: *u8
+    obj_val: *u8
+    obj_keys: *vec.Vec[[]u8]
+}
+
+fun arr_ptr(v: JsonValue): *vec.Vec[JsonValue] {
+    return v.arr_val as *vec.Vec[JsonValue]
+}
+
+fun obj_ptr(v: JsonValue): *map.StrMap[JsonValue] {
+    return v.obj_val as *map.StrMap[JsonValue]
+}
+
+struct Parser {
+    arena: *mem.Arena
+    src: []u8
+    pos: i64
+    depth: u32
+}
+
+pub fun null_val(): JsonValue {
+    return JsonValue {
+        kind: JsonKind.Null,
+        bool_val: false,
+        int_val: 0,
+        float_val: 0.0,
+        str_val: "",
+        arr_val: 0 as *u8,
+        obj_val: 0 as *u8,
+        obj_keys: 0 as *vec.Vec[[]u8],
+    }
+}
+
+pub fun bool_val(v: bool): JsonValue {
+    var out = null_val()
+    out.kind = JsonKind.Bool
+    out.bool_val = v
+    return out
+}
+
+pub fun int_val(v: i64): JsonValue {
+    var out = null_val()
+    out.kind = JsonKind.Int
+    out.int_val = v
+    return out
+}
+
+pub fun float_val(v: f64): JsonValue {
+    var out = null_val()
+    out.kind = JsonKind.Float
+    out.float_val = v
+    return out
+}
+
+pub fun str_val(v: []u8): JsonValue {
+    var out = null_val()
+    out.kind = JsonKind.String
+    out.str_val = v
+    return out
+}
+
+pub fun array_val(arena: *mem.Arena, out: *JsonValue): i64 {
+    if (arena as u64) == 0 || (out as u64) == 0 {
+        return -22
+    }
+    var arr: *vec.Vec[JsonValue]
+    var status = mem.alloc_one.[vec.Vec[JsonValue]](arena, &arr)
+    if status < 0 {
+        return status
+    }
+    status = vec.init.[JsonValue](arr, arena, 4)
+    if status < 0 {
+        return status
+    }
+    var v = null_val()
+    v.kind = JsonKind.Array
+    v.arr_val = arr as *u8
+    *out = v
+    return 0
+}
+
+pub fun object_val(arena: *mem.Arena, out: *JsonValue): i64 {
+    if (arena as u64) == 0 || (out as u64) == 0 {
+        return -22
+    }
+    var obj: *map.StrMap[JsonValue]
+    var status = mem.alloc_one.[map.StrMap[JsonValue]](arena, &obj)
+    if status < 0 {
+        return status
+    }
+    status = map.init.[JsonValue](obj, arena, 16)
+    if status < 0 {
+        return status
+    }
+    var keys: *vec.Vec[[]u8]
+    status = mem.alloc_one.[vec.Vec[[]u8]](arena, &keys)
+    if status < 0 {
+        return status
+    }
+    status = vec.init.[[]u8](keys, arena, 4)
+    if status < 0 {
+        return status
+    }
+    var v = null_val()
+    v.kind = JsonKind.Object
+    v.obj_val = obj as *u8
+    v.obj_keys = keys
+    *out = v
+    return 0
+}
+
+pub fun push(arr: *JsonValue, val: JsonValue): i64 {
+    if (arr as u64) == 0 || arr.kind != JsonKind.Array || (arr.arr_val as u64) == 0 {
+        return -22
+    }
+    return vec.push.[JsonValue](arr_ptr(*arr), &val)
+}
+
+pub fun set(arena: *mem.Arena, obj: *JsonValue, key: []u8, val: JsonValue): i64 {
+    if (obj as u64) == 0 || obj.kind != JsonKind.Object || (obj.obj_val as u64) == 0 {
+        return -22
+    }
+    var op = obj_ptr(*obj)
+    var existed = map.has.[JsonValue](op, key)
+    var status = map.set.[JsonValue](op, key, val)
+    if status < 0 {
+        return status
+    }
+    if !existed && (obj.obj_keys as u64) != 0 {
+        var k = str.clone(arena, key)
+        if len(key) > 0 && len(k) == 0 {
+            return -12
+        }
+        status = vec.push_value.[[]u8](obj.obj_keys, k)
+        if status < 0 {
+            return status
+        }
+    }
+    return 0
+}
+
+pub fun get(obj: JsonValue, key: []u8, out: *JsonValue): bool {
+    if obj.kind != JsonKind.Object || (obj.obj_val as u64) == 0 {
+        return false
+    }
+    return map.get.[JsonValue](obj_ptr(obj), key, out)
+}
+
+pub fun get_str(obj: JsonValue, key: []u8, out: *[]u8): bool {
+    var v: JsonValue
+    if !get(obj, key, &v) || v.kind != JsonKind.String {
+        return false
+    }
+    *out = v.str_val
+    return true
+}
+
+pub fun get_i64(obj: JsonValue, key: []u8, out: *i64): bool {
+    var v: JsonValue
+    if !get(obj, key, &v) || v.kind != JsonKind.Int {
+        return false
+    }
+    *out = v.int_val
+    return true
+}
+
+pub fun get_bool(obj: JsonValue, key: []u8, out: *bool): bool {
+    var v: JsonValue
+    if !get(obj, key, &v) || v.kind != JsonKind.Bool {
+        return false
+    }
+    *out = v.bool_val
+    return true
+}
+
+pub fun at(arr: JsonValue, index: u64, out: *JsonValue): bool {
+    if arr.kind != JsonKind.Array || (arr.arr_val as u64) == 0 {
+        return false
+    }
+    return vec.get.[JsonValue](arr_ptr(arr), index, out)
+}
+
+pub fun len_of(v: JsonValue): u64 {
+    if v.kind == JsonKind.Array && (v.arr_val as u64) != 0 {
+        return arr_ptr(v).len
+    }
+    if v.kind == JsonKind.Object && (v.obj_val as u64) != 0 {
+        return obj_ptr(v).len
+    }
+    return 0
+}
+
+fun skip_ws(p: *Parser) {
+    for p.pos < len(p.src) {
+        var ch = p.src[p.pos]
+        if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' {
+            p.pos += 1
+        } else {
+            break
+        }
+    }
+}
+
+fun hex_digit(ch: u8): i32 {
+    if ch >= '0' && ch <= '9' { return (ch - '0') as i32 }
+    if ch >= 'a' && ch <= 'f' { return 10 + ((ch - 'a') as i32) }
+    if ch >= 'A' && ch <= 'F' { return 10 + ((ch - 'A') as i32) }
+    return -1
+}
+
+fun parse_hex4(p: *Parser, out: *u32): bool {
+    if p.pos + 4 > len(p.src) {
+        return false
+    }
+    var acc: u32 = 0
+    for var i: i64 = 0; i < 4; i += 1 {
+        var d = hex_digit(p.src[p.pos + i])
+        if d < 0 {
+            return false
+        }
+        acc = (acc << 4) | (d as u32)
+    }
+    p.pos += 4
+    *out = acc
+    return true
+}
+
+fun push_utf8(buf: *vec.Vec[u8], cp: u32): bool {
+    if cp <= 0x7f {
+        return vec.push_value.[u8](buf, cp as u8) >= 0
+    }
+    if cp <= 0x7ff {
+        var b0 = (0xc0 | (cp >> 6)) as u8
+        var b1 = (0x80 | (cp & 0x3f)) as u8
+        return vec.push_value.[u8](buf, b0) >= 0 && vec.push_value.[u8](buf, b1) >= 0
+    }
+    if cp <= 0xffff {
+        var b0 = (0xe0 | (cp >> 12)) as u8
+        var b1 = (0x80 | ((cp >> 6) & 0x3f)) as u8
+        var b2 = (0x80 | (cp & 0x3f)) as u8
+        return vec.push_value.[u8](buf, b0) >= 0 &&
+               vec.push_value.[u8](buf, b1) >= 0 &&
+               vec.push_value.[u8](buf, b2) >= 0
+    }
+    var b0 = (0xf0 | (cp >> 18)) as u8
+    var b1 = (0x80 | ((cp >> 12) & 0x3f)) as u8
+    var b2 = (0x80 | ((cp >> 6) & 0x3f)) as u8
+    var b3 = (0x80 | (cp & 0x3f)) as u8
+    return vec.push_value.[u8](buf, b0) >= 0 &&
+           vec.push_value.[u8](buf, b1) >= 0 &&
+           vec.push_value.[u8](buf, b2) >= 0 &&
+           vec.push_value.[u8](buf, b3) >= 0
+}
+
+fun parse_string(p: *Parser, out: *[]u8): bool {
+    if p.pos >= len(p.src) || p.src[p.pos] != '"' {
+        return false
+    }
+    p.pos += 1
+    var start = p.pos
+    var has_escape = false
+    for p.pos < len(p.src) {
+        var ch = p.src[p.pos]
+        if ch == '"' {
+            break
+        }
+        if ch < 0x20 {
+            return false
+        }
+        if ch == '\\' {
+            has_escape = true
+            p.pos += 2
+            continue
+        }
+        p.pos += 1
+    }
+    if p.pos >= len(p.src) || p.src[p.pos] != '"' {
+        return false
+    }
+    var end = p.pos
+    p.pos += 1
+
+    if !has_escape {
+        var raw = p.src[start..end]
+        var cloned = str.clone(p.arena, raw)
+        if len(raw) > 0 && len(cloned) == 0 {
+            return false
+        }
+        *out = cloned
+        return true
+    }
+
+    var buf: vec.Vec[u8]
+    if vec.init.[u8](&buf, p.arena, (end - start) as u64) < 0 {
+        return false
+    }
+    var saved = p.pos
+    p.pos = start
+    for p.pos < end {
+        var ch = p.src[p.pos]
+        p.pos += 1
+        if ch != '\\' {
+            if vec.push_value.[u8](&buf, ch) < 0 { return false }
+            continue
+        }
+        if p.pos >= end { return false }
+        var esc = p.src[p.pos]
+        p.pos += 1
+        if esc == '"' || esc == '\\' || esc == '/' {
+            if vec.push_value.[u8](&buf, esc) < 0 { return false }
+        } else if esc == 'b' {
+            if vec.push_value.[u8](&buf, 8 as u8) < 0 { return false }
+        } else if esc == 'f' {
+            if vec.push_value.[u8](&buf, 12 as u8) < 0 { return false }
+        } else if esc == 'n' {
+            if vec.push_value.[u8](&buf, '\n') < 0 { return false }
+        } else if esc == 'r' {
+            if vec.push_value.[u8](&buf, '\r') < 0 { return false }
+        } else if esc == 't' {
+            if vec.push_value.[u8](&buf, '\t') < 0 { return false }
+        } else if esc == 'u' {
+            var u1: u32 = 0
+            if !parse_hex4(p, &u1) { return false }
+            var cp = u1
+            if u1 >= 0xd800 && u1 <= 0xdbff {
+                if p.pos + 2 <= end && p.src[p.pos] == '\\' && p.src[p.pos + 1] == 'u' {
+                    p.pos += 2
+                    var u2: u32 = 0
+                    if !parse_hex4(p, &u2) || u2 < 0xdc00 || u2 > 0xdfff {
+                        return false
+                    }
+                    cp = 0x10000 + (((u1 - 0xd800) << 10) | (u2 - 0xdc00))
+                } else {
+                    return false
+                }
+            }
+            if !push_utf8(&buf, cp) { return false }
+        } else {
+            return false
+        }
+    }
+    p.pos = saved
+    *out = vec.as_slice.[u8](&buf)
+    return true
+}
+
+fun parse_float_slice(s: []u8, out: *f64): bool {
+    var i: i64 = 0
+    var neg = false
+    if i < len(s) && s[i] == '-' {
+        neg = true
+        i += 1
+    }
+    var val: f64 = 0.0
+    for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+        val = val * 10.0 + ((s[i] - '0') as f64)
+        i += 1
+    }
+    if i < len(s) && s[i] == '.' {
+        i += 1
+        var scale: f64 = 0.1
+        for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+            val += ((s[i] - '0') as f64) * scale
+            scale *= 0.1
+            i += 1
+        }
+    }
+    if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+        i += 1
+        var exp_neg = false
+        if i < len(s) && (s[i] == '+' || s[i] == '-') {
+            exp_neg = s[i] == '-'
+            i += 1
+        }
+        var exp: i32 = 0
+        for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+            if exp < 350 {
+                exp = exp * 10 + ((s[i] - '0') as i32)
+            }
+            i += 1
+        }
+        var pow10: f64 = 1.0
+        for var k: i32 = 0; k < exp; k += 1 {
+            pow10 *= 10.0
+        }
+        if exp_neg {
+            val /= pow10
+        } else {
+            val *= pow10
+        }
+    }
+    if neg {
+        val = -val
+    }
+    *out = val
+    return true
+}
+
+fun parse_number(p: *Parser, out: *JsonValue): bool {
+    var start = p.pos
+    if p.pos < len(p.src) && p.src[p.pos] == '-' {
+        p.pos += 1
+    }
+    if p.pos >= len(p.src) || p.src[p.pos] < '0' || p.src[p.pos] > '9' {
+        return false
+    }
+    if p.src[p.pos] == '0' {
+        p.pos += 1
+        if p.pos < len(p.src) && p.src[p.pos] >= '0' && p.src[p.pos] <= '9' {
+            return false
+        }
+    } else {
+        for p.pos < len(p.src) && p.src[p.pos] >= '0' && p.src[p.pos] <= '9' {
+            p.pos += 1
+        }
+    }
+
+    var is_float = false
+    if p.pos < len(p.src) && p.src[p.pos] == '.' {
+        is_float = true
+        p.pos += 1
+        if p.pos >= len(p.src) || p.src[p.pos] < '0' || p.src[p.pos] > '9' {
+            return false
+        }
+        for p.pos < len(p.src) && p.src[p.pos] >= '0' && p.src[p.pos] <= '9' {
+            p.pos += 1
+        }
+    }
+    if p.pos < len(p.src) && (p.src[p.pos] == 'e' || p.src[p.pos] == 'E') {
+        is_float = true
+        p.pos += 1
+        if p.pos < len(p.src) && (p.src[p.pos] == '+' || p.src[p.pos] == '-') {
+            p.pos += 1
+        }
+        if p.pos >= len(p.src) || p.src[p.pos] < '0' || p.src[p.pos] > '9' {
+            return false
+        }
+        for p.pos < len(p.src) && p.src[p.pos] >= '0' && p.src[p.pos] <= '9' {
+            p.pos += 1
+        }
+    }
+
+    var slice = p.src[start..p.pos]
+    if !is_float {
+        var iv: i64 = 0
+        if str.parse_i64(slice, &iv) {
+            *out = int_val(iv)
+            return true
+        }
+    }
+    var fv: f64 = 0.0
+    if !parse_float_slice(slice, &fv) {
+        return false
+    }
+    *out = float_val(fv)
+    return true
+}
+
+fun parse_value(p: *Parser, out: *JsonValue): bool {
+    if p.depth >= 128 {
+        return false
+    }
+    skip_ws(p)
+    if p.pos >= len(p.src) {
+        return false
+    }
+    var ch = p.src[p.pos]
+    if ch == 'n' {
+        if str.starts_with(p.src[p.pos..len(p.src)], "null") {
+            p.pos += 4
+            *out = null_val()
+            return true
+        }
+        return false
+    }
+    if ch == 't' {
+        if str.starts_with(p.src[p.pos..len(p.src)], "true") {
+            p.pos += 4
+            *out = bool_val(true)
+            return true
+        }
+        return false
+    }
+    if ch == 'f' {
+        if str.starts_with(p.src[p.pos..len(p.src)], "false") {
+            p.pos += 5
+            *out = bool_val(false)
+            return true
+        }
+        return false
+    }
+    if ch == '"' {
+        var s: []u8
+        if !parse_string(p, &s) {
+            return false
+        }
+        *out = str_val(s)
+        return true
+    }
+    if ch == '-' || (ch >= '0' && ch <= '9') {
+        return parse_number(p, out)
+    }
+    if ch == '[' {
+        p.pos += 1
+        p.depth += 1
+        var arr: JsonValue
+        if array_val(p.arena, &arr) < 0 {
+            p.depth -= 1
+            return false
+        }
+        skip_ws(p)
+        if p.pos < len(p.src) && p.src[p.pos] == ']' {
+            p.pos += 1
+            p.depth -= 1
+            *out = arr
+            return true
+        }
+        for {
+            var item: JsonValue
+            if !parse_value(p, &item) || push(&arr, item) < 0 {
+                p.depth -= 1
+                return false
+            }
+            skip_ws(p)
+            if p.pos >= len(p.src) {
+                p.depth -= 1
+                return false
+            }
+            if p.src[p.pos] == ']' {
+                p.pos += 1
+                p.depth -= 1
+                *out = arr
+                return true
+            }
+            if p.src[p.pos] != ',' {
+                p.depth -= 1
+                return false
+            }
+            p.pos += 1
+        }
+    }
+    if ch == '{' {
+        p.pos += 1
+        p.depth += 1
+        var obj: JsonValue
+        if object_val(p.arena, &obj) < 0 {
+            p.depth -= 1
+            return false
+        }
+        skip_ws(p)
+        if p.pos < len(p.src) && p.src[p.pos] == '}' {
+            p.pos += 1
+            p.depth -= 1
+            *out = obj
+            return true
+        }
+        for {
+            skip_ws(p)
+            var key: []u8
+            if !parse_string(p, &key) {
+                p.depth -= 1
+                return false
+            }
+            skip_ws(p)
+            if p.pos >= len(p.src) || p.src[p.pos] != ':' {
+                p.depth -= 1
+                return false
+            }
+            p.pos += 1
+            var val: JsonValue
+            if !parse_value(p, &val) || set(p.arena, &obj, key, val) < 0 {
+                p.depth -= 1
+                return false
+            }
+            skip_ws(p)
+            if p.pos >= len(p.src) {
+                p.depth -= 1
+                return false
+            }
+            if p.src[p.pos] == '}' {
+                p.pos += 1
+                p.depth -= 1
+                *out = obj
+                return true
+            }
+            if p.src[p.pos] != ',' {
+                p.depth -= 1
+                return false
+            }
+            p.pos += 1
+        }
+    }
+    return false
+}
+
+pub fun parse(arena: *mem.Arena, text: []u8, out: *JsonValue): bool {
+    if (arena as u64) == 0 || (out as u64) == 0 {
+        return false
+    }
+    var p = Parser { arena: arena, src: text, pos: 0, depth: 0 }
+    if !parse_value(&p, out) {
+        return false
+    }
+    skip_ws(&p)
+    return p.pos == len(p.src)
+}
+
+pub fun write_escaped_str(s: []u8, out: *vec.Vec[u8]): i64 {
+    if vec.push_value.[u8](out, '"') < 0 { return -12 }
+    var hex = "0123456789abcdef"
+    for var i: i64 = 0; i < len(s); i += 1 {
+        var ch = s[i]
+        if ch == '"' {
+            if vec.append_slice.[u8](out, "\\\"") < 0 { return -12 }
+        } else if ch == '\\' {
+            if vec.append_slice.[u8](out, "\\\\") < 0 { return -12 }
+        } else if ch == '\n' {
+            if vec.append_slice.[u8](out, "\\n") < 0 { return -12 }
+        } else if ch == '\r' {
+            if vec.append_slice.[u8](out, "\\r") < 0 { return -12 }
+        } else if ch == '\t' {
+            if vec.append_slice.[u8](out, "\\t") < 0 { return -12 }
+        } else if ch == 8 {
+            if vec.append_slice.[u8](out, "\\b") < 0 { return -12 }
+        } else if ch == 12 {
+            if vec.append_slice.[u8](out, "\\f") < 0 { return -12 }
+        } else if ch < 0x20 {
+            var esc: [6]u8 = ['\\', 'u', '0', '0', hex[((ch >> 4) & 15) as i64], hex[(ch & 15) as i64]]
+            if vec.append_slice.[u8](out, esc[0..6]) < 0 { return -12 }
+        } else {
+            if vec.push_value.[u8](out, ch) < 0 { return -12 }
+        }
+    }
+    if vec.push_value.[u8](out, '"') < 0 { return -12 }
+    return 0
+}
+
+pub fun write(v: JsonValue, out: *vec.Vec[u8]): i64 {
+    if (out as u64) == 0 {
+        return -22
+    }
+    if v.kind == JsonKind.Null {
+        return vec.append_slice.[u8](out, "null")
+    }
+    if v.kind == JsonKind.Bool {
+        if v.bool_val {
+            return vec.append_slice.[u8](out, "true")
+        }
+        return vec.append_slice.[u8](out, "false")
+    }
+    if v.kind == JsonKind.Int {
+        var buf: [32]u8
+        var n = fmt.i64_to_buf(v.int_val, &buf[0], 32)
+        if n < 0 { return n }
+        return vec.append_slice.[u8](out, buf[0..n])
+    }
+    if v.kind == JsonKind.Float {
+        var iv = v.float_val as i64
+        var buf: [32]u8
+        var n = fmt.i64_to_buf(iv, &buf[0], 32)
+        if n < 0 { return n }
+        return vec.append_slice.[u8](out, buf[0..n])
+    }
+    if v.kind == JsonKind.String {
+        return write_escaped_str(v.str_val, out)
+    }
+    if v.kind == JsonKind.Array {
+        if vec.push_value.[u8](out, '[') < 0 { return -12 }
+        if (v.arr_val as u64) != 0 {
+            var items = vec.as_slice.[JsonValue](arr_ptr(v))
+            for var i: i64 = 0; i < len(items); i += 1 {
+                if i > 0 && vec.push_value.[u8](out, ',') < 0 { return -12 }
+                var st = write(items[i], out)
+                if st < 0 { return st }
+            }
+        }
+        return vec.push_value.[u8](out, ']')
+    }
+    if v.kind == JsonKind.Object {
+        if vec.push_value.[u8](out, '{') < 0 { return -12 }
+        if (v.obj_keys as u64) != 0 && (v.obj_val as u64) != 0 {
+            var op = obj_ptr(v)
+            var keys = vec.as_slice.[[]u8](v.obj_keys)
+            for var i: i64 = 0; i < len(keys); i += 1 {
+                if i > 0 && vec.push_value.[u8](out, ',') < 0 { return -12 }
+                var st = write_escaped_str(keys[i], out)
+                if st < 0 { return st }
+                if vec.push_value.[u8](out, ':') < 0 { return -12 }
+                var val: JsonValue
+                if map.get.[JsonValue](op, keys[i], &val) {
+                    st = write(val, out)
+                    if st < 0 { return st }
+                } else {
+                    st = vec.append_slice.[u8](out, "null")
+                    if st < 0 { return st }
+                }
+            }
+        }
+        return vec.push_value.[u8](out, '}')
+    }
+    return -22
+}
+
+pub fun stringify(arena: *mem.Arena, v: JsonValue, out: *[]u8): i64 {
+    if (arena as u64) == 0 || (out as u64) == 0 {
+        return -22
+    }
+    var buf: vec.Vec[u8]
+    var status = vec.init.[u8](&buf, arena, 64)
+    if status < 0 {
+        return status
+    }
+    status = write(v, &buf)
+    if status < 0 {
+        return status
+    }
+    *out = vec.as_slice.[u8](&buf)
+    return 0
+}
