@@ -1,0 +1,111 @@
+import std.args
+import std.file
+import std.fmt
+import std.io
+import std.mem
+import std.vec
+import lexer { Token, TokenKind, error_message, token_name, tokenize_all }
+
+fun print_lexeme(bytes: []u8) {
+    for var i: i64 = 0; i < len(bytes); i += 1 {
+        var b = bytes[i]
+        if b == '\r' {
+            io.print("\\r")
+        } else if b == '\n' {
+            io.print("\\n")
+        } else if b == '\t' {
+            io.print("\\t")
+        } else if b == '\\' {
+            io.print("\\\\")
+        } else if b < ' ' || b == 127 {
+            var hex: [16]u8
+            var n = fmt.hex_to_buf(b as u64, &hex[0], 16)
+            io.print("\\x")
+            if n == 1 {
+                io.print("0")
+            }
+            if n > 0 {
+                io.print(hex[0..n])
+            }
+        } else {
+            io.write_bytes(1, bytes[i..(i + 1)])
+        }
+    }
+}
+
+fun has_lexeme(kind: TokenKind): bool {
+    match kind {
+        TokenKind.Identifier, TokenKind.Integer, TokenKind.Float, TokenKind.String, TokenKind.Char, TokenKind.Comment => return true
+        else => return false
+    }
+}
+
+fun report_error(path: []u8, source: []u8, tok: Token): i32 {
+    io.eprint(path)
+    io.eprint(":")
+    fmt.print_u64(2, tok.line)
+    io.eprint(":")
+    fmt.print_u64(2, tok.column)
+    io.eprint(": ")
+    io.eprintln(error_message(tok.kind))
+    return 1
+}
+
+fun main(): i32 {
+    var arena: mem.Arena
+    if mem.init(&arena, 65536) < 0 {
+        io.eprintln("lunsoc: could not initialize arena")
+        return 1
+    }
+
+    var argv: [][]u8
+    if args.load(&arena, &argv) < 0 || len(argv) != 2 {
+        io.eprintln("usage: lunsoc <source.lunso>")
+        mem.deinit(&arena)
+        return 1
+    }
+
+    var path = argv[1]
+    var raw: file.Bytes
+    if file.read_all(path, &arena, &raw) < 0 {
+        io.eprint(path)
+        io.eprintln(": could not read source")
+        mem.deinit(&arena)
+        return 1
+    }
+
+    var source = raw.ptr[0..raw.len]
+    var tokens: vec.Vec[Token]
+    if vec.init.[Token](&tokens, &arena, 128) < 0 {
+        io.eprintln("lunsoc: out of memory")
+        mem.deinit(&arena)
+        return 1
+    }
+
+    var err_tok: Token
+    if !tokenize_all(source, &tokens, &err_tok) {
+        var rc = report_error(path, source, err_tok)
+        mem.deinit(&arena)
+        return rc
+    }
+
+    var slice = vec.as_slice.[Token](&tokens)
+    for var i: i64 = 0; i < len(slice); i += 1 {
+        var tok = slice[i]
+        fmt.print_u64(1, tok.line)
+        io.print(":")
+        fmt.print_u64(1, tok.column)
+        io.print(" ")
+        io.print(token_name(tok.kind))
+        if has_lexeme(tok.kind) {
+            io.print(" ")
+            var start = tok.offset as i64
+            var end = (tok.offset + tok.length) as i64
+            print_lexeme(source[start..end])
+        }
+        io.println("")
+    }
+
+    mem.deinit(&arena)
+    return 0
+}

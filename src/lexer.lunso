@@ -1,0 +1,487 @@
+import std.str
+import std.vec
+
+pub enum TokenKind : u16 {
+    Fun,
+    Ext,
+    Struct,
+    Enum,
+    As,
+    Const,
+    Import,
+    Pub,
+    Priv,
+    Return,
+    If,
+    Else,
+    Match,
+    For,
+    Break,
+    Continue,
+    Var,
+    Identifier,
+    Integer,
+    Float,
+    String,
+    Char,
+    Comment,
+    LeftParen,
+    RightParen,
+    Colon,
+    Comma,
+    Semicolon,
+    Dot,
+    DotDot,
+    LeftBrace,
+    RightBrace,
+    LeftBracket,
+    RightBracket,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    Equal,
+    EqualEqual,
+    FatArrow,
+    Bang,
+    BangEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    Ampersand,
+    AmpersandAmpersand,
+    Pipe,
+    PipePipe,
+    Caret,
+    Tilde,
+    ShiftLeft,
+    ShiftRight,
+    PlusEqual,
+    MinusEqual,
+    StarEqual,
+    SlashEqual,
+    PercentEqual,
+    AmpersandEqual,
+    PipeEqual,
+    CaretEqual,
+    ShiftLeftEqual,
+    ShiftRightEqual,
+    Newline,
+    Eof,
+    Invalid,
+    InvalidNumber,
+    UnterminatedString,
+    UnterminatedChar,
+    UnterminatedComment,
+}
+
+pub struct Token {
+    kind: TokenKind
+    offset: u64
+    length: u64
+    line: u64
+    column: u64
+}
+
+pub struct Lexer {
+    source: []u8
+    offset: u64
+    line: u64
+    column: u64
+}
+
+pub fun init(source: []u8): Lexer {
+    return Lexer {
+        source: source,
+        offset: 0,
+        line: 1,
+        column: 1,
+    }
+}
+
+fun peek(l: *Lexer): u8 {
+    if l.offset >= (len(l.source) as u64) {
+        return 0
+    }
+    return l.source[l.offset as i64]
+}
+
+fun peek_next(l: *Lexer): u8 {
+    if l.offset + 1 >= (len(l.source) as u64) {
+        return 0
+    }
+    return l.source[(l.offset + 1) as i64]
+}
+
+fun advance(l: *Lexer): u8 {
+    var b = l.source[l.offset as i64]
+    l.offset += 1
+    l.column += 1
+    return b
+}
+
+fun match_byte(l: *Lexer, expected: u8): bool {
+    if l.offset >= (len(l.source) as u64) || l.source[l.offset as i64] != expected {
+        return false
+    }
+    advance(l)
+    return true
+}
+
+fun is_newline(b: u8): bool {
+    return b == '\n' || b == '\r'
+}
+
+fun finish_newline(l: *Lexer, first: u8) {
+    if first == '\r' {
+        match_byte(l, '\n')
+    }
+    l.line += 1
+    l.column = 1
+}
+
+fun is_digit(b: u8): bool {
+    return b >= '0' && b <= '9'
+}
+
+fun is_hex_digit(b: u8): bool {
+    return is_digit(b) || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')
+}
+
+fun is_bin_digit(b: u8): bool {
+    return b == '0' || b == '1'
+}
+
+fun is_ident_start(b: u8): bool {
+    return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '_'
+}
+
+fun is_ident_continue(b: u8): bool {
+    return is_ident_start(b) || is_digit(b)
+}
+
+fun keyword_or_ident(text: []u8): TokenKind {
+    if str.equals(text, "fun") { return TokenKind.Fun }
+    if str.equals(text, "ext") { return TokenKind.Ext }
+    if str.equals(text, "struct") { return TokenKind.Struct }
+    if str.equals(text, "enum") { return TokenKind.Enum }
+    if str.equals(text, "as") { return TokenKind.As }
+    if str.equals(text, "const") { return TokenKind.Const }
+    if str.equals(text, "import") { return TokenKind.Import }
+    if str.equals(text, "pub") { return TokenKind.Pub }
+    if str.equals(text, "priv") { return TokenKind.Priv }
+    if str.equals(text, "return") { return TokenKind.Return }
+    if str.equals(text, "if") { return TokenKind.If }
+    if str.equals(text, "else") { return TokenKind.Else }
+    if str.equals(text, "match") { return TokenKind.Match }
+    if str.equals(text, "for") { return TokenKind.For }
+    if str.equals(text, "break") { return TokenKind.Break }
+    if str.equals(text, "continue") { return TokenKind.Continue }
+    if str.equals(text, "var") { return TokenKind.Var }
+    return TokenKind.Identifier
+}
+
+fun scan_ident(l: *Lexer, start: u64): TokenKind {
+    for is_ident_continue(peek(l)) {
+        advance(l)
+    }
+    return keyword_or_ident(l.source[(start as i64)..(l.offset as i64)])
+}
+
+fun scan_digits(l: *Lexer) {
+    for is_digit(peek(l)) {
+        advance(l)
+    }
+}
+
+fun scan_number(l: *Lexer, first: u8): TokenKind {
+    if first == '0' && (match_byte(l, 'x') || match_byte(l, 'X')) {
+        if !is_hex_digit(peek(l)) {
+            return TokenKind.InvalidNumber
+        }
+        for is_hex_digit(peek(l)) {
+            advance(l)
+        }
+        return TokenKind.Integer
+    }
+    if first == '0' && (match_byte(l, 'b') || match_byte(l, 'B')) {
+        if !is_bin_digit(peek(l)) {
+            return TokenKind.InvalidNumber
+        }
+        for is_bin_digit(peek(l)) {
+            advance(l)
+        }
+        return TokenKind.Integer
+    }
+
+    scan_digits(l)
+    var kind = TokenKind.Integer
+    if peek(l) == '.' && is_digit(peek_next(l)) {
+        advance(l)
+        scan_digits(l)
+        kind = TokenKind.Float
+    }
+    if match_byte(l, 'e') || match_byte(l, 'E') {
+        if !match_byte(l, '+') {
+            match_byte(l, '-')
+        }
+        if !is_digit(peek(l)) {
+            return TokenKind.InvalidNumber
+        }
+        scan_digits(l)
+        kind = TokenKind.Float
+    }
+    return kind
+}
+
+fun scan_quoted(l: *Lexer, quote: u8, ok: TokenKind, unterminated: TokenKind): TokenKind {
+    for l.offset < (len(l.source) as u64) && !is_newline(peek(l)) {
+        var b = advance(l)
+        if b == quote {
+            return ok
+        }
+        if b == '\\' && l.offset < (len(l.source) as u64) && !is_newline(peek(l)) {
+            advance(l)
+        }
+    }
+    return unterminated
+}
+
+fun scan_slash(l: *Lexer): TokenKind {
+    if match_byte(l, '/') {
+        for l.offset < (len(l.source) as u64) && !is_newline(peek(l)) {
+            advance(l)
+        }
+        return TokenKind.Comment
+    }
+    if match_byte(l, '*') {
+        for l.offset < (len(l.source) as u64) {
+            var b = advance(l)
+            if b == '*' && match_byte(l, '/') {
+                return TokenKind.Comment
+            }
+            if is_newline(b) {
+                finish_newline(l, b)
+            }
+        }
+        return TokenKind.UnterminatedComment
+    }
+    if match_byte(l, '=') {
+        return TokenKind.SlashEqual
+    }
+    return TokenKind.Slash
+}
+
+fun scan_token(l: *Lexer): TokenKind {
+    if l.offset >= (len(l.source) as u64) {
+        return TokenKind.Eof
+    }
+    var start = l.offset
+    var b = advance(l)
+    if b == '(' { return TokenKind.LeftParen }
+    if b == ')' { return TokenKind.RightParen }
+    if b == ':' { return TokenKind.Colon }
+    if b == ',' { return TokenKind.Comma }
+    if b == ';' { return TokenKind.Semicolon }
+    if b == '.' {
+        if match_byte(l, '.') { return TokenKind.DotDot }
+        return TokenKind.Dot
+    }
+    if b == '{' { return TokenKind.LeftBrace }
+    if b == '}' { return TokenKind.RightBrace }
+    if b == '[' { return TokenKind.LeftBracket }
+    if b == ']' { return TokenKind.RightBracket }
+    if b == '+' {
+        if match_byte(l, '=') { return TokenKind.PlusEqual }
+        return TokenKind.Plus
+    }
+    if b == '-' {
+        if match_byte(l, '=') { return TokenKind.MinusEqual }
+        return TokenKind.Minus
+    }
+    if b == '*' {
+        if match_byte(l, '=') { return TokenKind.StarEqual }
+        return TokenKind.Star
+    }
+    if b == '/' { return scan_slash(l) }
+    if b == '%' {
+        if match_byte(l, '=') { return TokenKind.PercentEqual }
+        return TokenKind.Percent
+    }
+    if b == '=' {
+        if match_byte(l, '>') { return TokenKind.FatArrow }
+        if match_byte(l, '=') { return TokenKind.EqualEqual }
+        return TokenKind.Equal
+    }
+    if b == '!' {
+        if match_byte(l, '=') { return TokenKind.BangEqual }
+        return TokenKind.Bang
+    }
+    if b == '<' {
+        if match_byte(l, '<') {
+            if match_byte(l, '=') { return TokenKind.ShiftLeftEqual }
+            return TokenKind.ShiftLeft
+        }
+        if match_byte(l, '=') { return TokenKind.LessEqual }
+        return TokenKind.Less
+    }
+    if b == '>' {
+        if match_byte(l, '>') {
+            if match_byte(l, '=') { return TokenKind.ShiftRightEqual }
+            return TokenKind.ShiftRight
+        }
+        if match_byte(l, '=') { return TokenKind.GreaterEqual }
+        return TokenKind.Greater
+    }
+    if b == '&' {
+        if match_byte(l, '&') { return TokenKind.AmpersandAmpersand }
+        if match_byte(l, '=') { return TokenKind.AmpersandEqual }
+        return TokenKind.Ampersand
+    }
+    if b == '|' {
+        if match_byte(l, '|') { return TokenKind.PipePipe }
+        if match_byte(l, '=') { return TokenKind.PipeEqual }
+        return TokenKind.Pipe
+    }
+    if b == '^' {
+        if match_byte(l, '=') { return TokenKind.CaretEqual }
+        return TokenKind.Caret
+    }
+    if b == '~' { return TokenKind.Tilde }
+    if b == '"' {
+        return scan_quoted(l, '"', TokenKind.String, TokenKind.UnterminatedString)
+    }
+    if b == '\'' {
+        return scan_quoted(l, '\'', TokenKind.Char, TokenKind.UnterminatedChar)
+    }
+    if is_newline(b) {
+        finish_newline(l, b)
+        return TokenKind.Newline
+    }
+    if is_ident_start(b) {
+        return scan_ident(l, start)
+    }
+    if is_digit(b) {
+        return scan_number(l, b)
+    }
+    return TokenKind.Invalid
+}
+
+pub fun next_token(l: *Lexer): Token {
+    for peek(l) == ' ' || peek(l) == '\t' {
+        advance(l)
+    }
+    var tok: Token
+    tok.offset = l.offset
+    tok.line = l.line
+    tok.column = l.column
+    tok.kind = scan_token(l)
+    tok.length = l.offset - tok.offset
+    return tok
+}
+
+pub fun error_message(kind: TokenKind): []u8 {
+    match kind {
+        TokenKind.Invalid => return "unexpected byte"
+        TokenKind.InvalidNumber => return "invalid number literal"
+        TokenKind.UnterminatedString => return "unterminated string"
+        TokenKind.UnterminatedChar => return "unterminated character literal"
+        TokenKind.UnterminatedComment => return "unterminated block comment"
+        else => return ""
+    }
+}
+
+pub fun tokenize_all(source: []u8, out: *vec.Vec[Token], err_tok: *Token): bool {
+    var l = init(source)
+    for {
+        var tok = next_token(&l)
+        var err = error_message(tok.kind)
+        if len(err) > 0 {
+            *err_tok = tok
+            return false
+        }
+        if vec.push.[Token](out, &tok) < 0 {
+            *err_tok = tok
+            return false
+        }
+        if tok.kind == TokenKind.Eof {
+            return true
+        }
+    }
+}
+
+pub fun token_name(kind: TokenKind): []u8 {
+    match kind {
+        TokenKind.Fun => return "FUN"
+        TokenKind.Ext => return "EXT"
+        TokenKind.Struct => return "STRUCT"
+        TokenKind.Enum => return "ENUM"
+        TokenKind.As => return "AS"
+        TokenKind.Const => return "CONST"
+        TokenKind.Import => return "IMPORT"
+        TokenKind.Pub => return "PUB"
+        TokenKind.Priv => return "PRIV"
+        TokenKind.Return => return "RETURN"
+        TokenKind.If => return "IF"
+        TokenKind.Else => return "ELSE"
+        TokenKind.Match => return "MATCH"
+        TokenKind.For => return "FOR"
+        TokenKind.Break => return "BREAK"
+        TokenKind.Continue => return "CONTINUE"
+        TokenKind.Var => return "VAR"
+        TokenKind.Identifier => return "IDENTIFIER"
+        TokenKind.Integer => return "INTEGER"
+        TokenKind.Float => return "FLOAT"
+        TokenKind.String => return "STRING"
+        TokenKind.Char => return "CHAR"
+        TokenKind.Comment => return "COMMENT"
+        TokenKind.LeftParen => return "LEFT_PAREN"
+        TokenKind.RightParen => return "RIGHT_PAREN"
+        TokenKind.Colon => return "COLON"
+        TokenKind.Comma => return "COMMA"
+        TokenKind.Semicolon => return "SEMICOLON"
+        TokenKind.Dot => return "DOT"
+        TokenKind.DotDot => return "DOT_DOT"
+        TokenKind.LeftBrace => return "LEFT_BRACE"
+        TokenKind.RightBrace => return "RIGHT_BRACE"
+        TokenKind.LeftBracket => return "LEFT_BRACKET"
+        TokenKind.RightBracket => return "RIGHT_BRACKET"
+        TokenKind.Plus => return "PLUS"
+        TokenKind.Minus => return "MINUS"
+        TokenKind.Star => return "STAR"
+        TokenKind.Slash => return "SLASH"
+        TokenKind.Percent => return "PERCENT"
+        TokenKind.Equal => return "EQUAL"
+        TokenKind.EqualEqual => return "EQUAL_EQUAL"
+        TokenKind.FatArrow => return "FAT_ARROW"
+        TokenKind.Bang => return "BANG"
+        TokenKind.BangEqual => return "BANG_EQUAL"
+        TokenKind.Less => return "LESS"
+        TokenKind.LessEqual => return "LESS_EQUAL"
+        TokenKind.Greater => return "GREATER"
+        TokenKind.GreaterEqual => return "GREATER_EQUAL"
+        TokenKind.Ampersand => return "AMPERSAND"
+        TokenKind.AmpersandAmpersand => return "AMPERSAND_AMPERSAND"
+        TokenKind.Pipe => return "PIPE"
+        TokenKind.PipePipe => return "PIPE_PIPE"
+        TokenKind.Caret => return "CARET"
+        TokenKind.Tilde => return "TILDE"
+        TokenKind.ShiftLeft => return "SHIFT_LEFT"
+        TokenKind.ShiftRight => return "SHIFT_RIGHT"
+        TokenKind.PlusEqual => return "PLUS_EQUAL"
+        TokenKind.MinusEqual => return "MINUS_EQUAL"
+        TokenKind.StarEqual => return "STAR_EQUAL"
+        TokenKind.SlashEqual => return "SLASH_EQUAL"
+        TokenKind.PercentEqual => return "PERCENT_EQUAL"
+        TokenKind.AmpersandEqual => return "AMPERSAND_EQUAL"
+        TokenKind.PipeEqual => return "PIPE_EQUAL"
+        TokenKind.CaretEqual => return "CARET_EQUAL"
+        TokenKind.ShiftLeftEqual => return "SHIFT_LEFT_EQUAL"
+        TokenKind.ShiftRightEqual => return "SHIFT_RIGHT_EQUAL"
+        TokenKind.Newline => return "NEWLINE"
+        TokenKind.Eof => return "EOF"
+        else => return "INVALID"
+    }
+}
