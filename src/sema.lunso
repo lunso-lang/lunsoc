@@ -383,7 +383,7 @@ fun is_hex_char(b: u8, out: *u64): bool {
     return false
 }
 
-fun parse_int_literal(text: []u8, out: *u64): bool {
+pub fun parse_int_literal(text: []u8, out: *u64): bool {
     if len(text) == 0 {
         if len(text) == 6 && text[2] == 'x' {
             var h1: u64 = 0
@@ -549,7 +549,7 @@ fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
             var t = simple_type(TypeKind.Slice)
             t.element = elem.kind
             t.element_type = add_element(c, elem)
-            t.element_size = element_size(elem)
+            t.element_size = storage_size(elem)
             t.record = elem.record
             t.record_size = elem.record_size
             t.pointee = elem.pointee
@@ -868,6 +868,17 @@ fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, ou
             var d = (*ptr) as f64
             var dptr = ((&d) as u64) as *const u64
             b = *dptr
+        } else if dst.kind == TypeKind.Bool {
+            if src_t.kind == TypeKind.F64 {
+                var ptr = ((&b) as u64) as *const f64
+                if *ptr != 0.0 { b = 1 } else { b = 0 }
+            } else if src_t.kind == TypeKind.F32 {
+                var b32 = b as u32
+                var ptr = ((&b32) as u64) as *const f32
+                if *ptr != 0.0 { b = 1 } else { b = 0 }
+            } else {
+                if b != 0 { b = 1 } else { b = 0 }
+            }
         }
         *out_bits = b
         return dst
@@ -1250,7 +1261,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                 res = simple_type(TypeKind.Slice)
                 res.element = elem.kind
                 res.element_type = add_element(c, elem)
-                res.element_size = element_size(elem)
+                res.element_size = storage_size(elem)
                 res.record = elem.record
                 res.record_size = elem.record_size
                 res.pointee = elem.pointee

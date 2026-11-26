@@ -1,0 +1,168 @@
+import std.file
+import std.fmt
+import std.io
+import std.mem
+import std.os
+import std.str
+import std.time
+import std.vec
+import ir { IrFunction, IrModule }
+import qbe { write as qbe_write }
+import sema { TypeKind }
+
+pub enum NativeKind : u8 {
+    Exe,
+    Obj,
+    Asm,
+}
+
+pub struct NativeOptions {
+    kind: NativeKind
+    nostdlib: bool
+    output: []u8
+    objects: [][]u8
+}
+
+fun has_entry_point(mod: *IrModule): bool {
+    var fns = vec.as_slice.[IrFunction](&mod.functions)
+    for var i: i64 = 0; i < len(fns); i += 1 {
+        var f = fns[i]
+        var start = f.name.offset as i64
+        var end = (f.name.offset + f.name.length) as i64
+        var name = mod.source[start..end]
+        if !f.external && str.equals(name, "main") {
+            return f.result.kind == TypeKind.I32 && f.parameter_count == 0
+        }
+    }
+    return false
+}
+
+fun join_str(arena: *mem.Arena, a: []u8, b: []u8): []u8 {
+    var total = len(a) + len(b)
+    var buf: *u8
+    if mem.alloc(arena, total as u64, 1, &buf) < 0 {
+        return ""
+    }
+    for var i: i64 = 0; i < len(a); i += 1 {
+        buf[i] = a[i]
+    }
+    for var i: i64 = 0; i < len(b); i += 1 {
+        buf[len(a) + i] = b[i]
+    }
+    return buf[0..total]
+}
+
+fun make_temp_dir(arena: *mem.Arena): []u8 {
+    var ns = time.monotonic_ns() as u64
+    for var attempt: u64 = 0; attempt < 64; attempt += 1 {
+        var buf: [32]u8
+        var n = fmt.u64_to_buf(ns + attempt, &buf[0], 32)
+        var path = join_str(arena, "/tmp/.lunso-", buf[0..n])
+        if len(path) > 0 && os.mkdir(path) == 0 {
+            return path
+        }
+    }
+    return ""
+}
+
+fun run_tool(prog: []u8, argv: [][]u8): bool {
+    var status = os.run(prog, argv)
+    if status < 0 {
+        io.eprint(prog)
+        io.eprintln(": could not run tool")
+        return false
+    }
+    if status != 0 {
+        io.eprint(prog)
+        io.eprint(": exited with status ")
+        fmt.print_u64(2, status as u64)
+        io.eprintln("")
+        return false
+    }
+    return true
+}
+
+fun get_tool(arena: *mem.Arena, env_name: []u8, fallback: []u8): []u8 {
+    var val: []u8
+    if os.getenv(env_name, arena, &val) == 0 && len(val) > 0 {
+        return val
+    }
+    return fallback
+}
+
+pub fun build(arena: *mem.Arena, mod: *IrModule, source_path: []u8, opts: *NativeOptions): bool {
+    if opts.kind == NativeKind.Exe && !has_entry_point(mod) {
+        io.eprint(source_path)
+        io.eprintln(": expected entry point 'fun main(): i32'")
+        return false
+    }
+    if len(opts.output) == 0 {
+        io.eprintln("output path is empty")
+        return false
+    }
+    if str.equals(source_path, opts.output) {
+        io.eprint(opts.output)
+        io.eprintln(": output would overwrite the source file")
+        return false
+    }
+
+    var dir = make_temp_dir(arena)
+    if len(dir) == 0 {
+        io.eprintln("lunsoc: could not create temporary directory")
+        return false
+    }
+
+    var il_path = join_str(arena, dir, "/module.ssa")
+    var asm_path = join_str(arena, dir, "/module.s")
+
+    var qbe_buf: vec.Vec[u8]
+    var ok = qbe_write(arena, mod, &qbe_buf)
+    if !ok {
+        io.eprintln("lunsoc: could not generate QBE IL")
+    } else if file.write_all(il_path, vec.as_slice.[u8](&qbe_buf)) < 0 {
+        io.eprint(il_path)
+        io.eprintln(": could not write QBE IL")
+        ok = false
+    } else {
+        var qbe_bin = get_tool(arena, "QBE", "qbe")
+        var cc_bin = get_tool(arena, "CC", "cc")
+        var flag_o: []u8 = "-o"
+        var flag_c: []u8 = "-c"
+        if opts.kind == NativeKind.Asm {
+            var qbe_argv: [4][]u8 = [qbe_bin, flag_o, opts.output, il_path]
+            ok = run_tool(qbe_bin, qbe_argv[0..4])
+        } else {
+            var qbe_argv: [4][]u8 = [qbe_bin, flag_o, asm_path, il_path]
+            ok = run_tool(qbe_bin, qbe_argv[0..4])
+            if ok {
+                if opts.kind == NativeKind.Obj {
+                    var cc_argv: [5][]u8 = [cc_bin, flag_c, asm_path, flag_o, opts.output]
+                    ok = run_tool(cc_bin, cc_argv[0..5])
+                } else {
+                    var link_args: vec.Vec[[]u8]
+                    if vec.init.[[]u8](&link_args, arena, (8 + len(opts.objects) * 2) as u64) < 0 {
+                        ok = false
+                    } else {
+                        var flag_nostdlib: []u8 = "-nostdlib"
+                        vec.push_value.[[]u8](&link_args, cc_bin)
+                        if opts.nostdlib {
+                            vec.push_value.[[]u8](&link_args, flag_nostdlib)
+                        }
+                        vec.push_value.[[]u8](&link_args, asm_path)
+                        for var i: i64 = 0; i < len(opts.objects); i += 1 {
+                            vec.push_value.[[]u8](&link_args, opts.objects[i])
+                        }
+                        vec.push_value.[[]u8](&link_args, flag_o)
+                        vec.push_value.[[]u8](&link_args, opts.output)
+                        ok = run_tool(cc_bin, vec.as_slice.[[]u8](&link_args))
+                    }
+                }
+            }
+        }
+    }
+
+    os.remove(asm_path)
+    os.remove(il_path)
+    os.rmdir(dir)
+    return ok
+}
