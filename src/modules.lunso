@@ -160,15 +160,6 @@ fun join3(arena: *mem.Arena, a: []u8, b: []u8, c: []u8): []u8 {
     return buf[0..total]
 }
 
-fun file_exists(path: []u8): bool {
-    var f: file.File
-    if file.open_read(path, &f) < 0 {
-        return false
-    }
-    file.close(&f)
-    return true
-}
-
 fun is_std_module(name: []u8): bool {
     if str.equals(name, "std") { return true }
     return len(name) >= 4 && name[0] == 's' && name[1] == 't' && name[2] == 'd' && name[3] == '/'
@@ -205,12 +196,12 @@ fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
             var sub = name[4..len(name)]
             file_path = join3(l.arena, l.std_root, "/", sub)
             file_path = join2(l.arena, file_path, ".lunso")
-            if !file_exists(file_path) {
+            if !file.exists(file_path) {
                 file_path = ""
             }
         } else {
             file_path = join3(l.arena, l.root, name, ".lunso")
-            if !file_exists(file_path) {
+            if !file.exists(file_path) {
                 file_path = ""
                 for var k: i64 = 0; k < len(l.include_dirs); k += 1 {
                     var inc = l.include_dirs[k]
@@ -221,7 +212,7 @@ fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
                     } else {
                         cand = join3(l.arena, inc, "/", join2(l.arena, name, ".lunso"))
                     }
-                    if file_exists(cand) {
+                    if file.exists(cand) {
                         file_path = cand
                         break
                     }
@@ -763,8 +754,7 @@ fun select_std_root(arena: *mem.Arena, override: []u8): []u8 {
     if os.getenv("LUNSO_STD_DIR", arena, &env_val) == 0 && len(env_val) > 0 {
         return env_val
     }
-    if file_exists("std/io.lunso") { return "std" }
-    if file_exists("../lunso-boot/std/io.lunso") { return "../lunso-boot/std" }
+    if file.exists("std/io.lunso") { return "std" }
     return ""
 }
 

@@ -240,25 +240,13 @@ fun run_compile(path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, a
     return 0
 }
 
-fun file_exists_local(path: []u8): bool {
-    var f: file.File
-    if file.open_read(path, &f) < 0 {
-        return false
-    }
-    file.close(&f)
-    return true
-}
-
 fun resolve_std_obj(arena: *mem.Arena): []u8 {
     var env_val: []u8
     if os.getenv("LUNSO_STD_OBJ", arena, &env_val) == 0 && len(env_val) > 0 {
         return env_val
     }
-    if file_exists_local("build/std-linux-x86_64.o") {
+    if file.exists("build/std-linux-x86_64.o") {
         return "build/std-linux-x86_64.o"
-    }
-    if file_exists_local("../lunso-boot/build/std-linux-x86_64.o") {
-        return "../lunso-boot/build/std-linux-x86_64.o"
     }
     return ""
 }

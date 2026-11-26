@@ -47,6 +47,15 @@ pub fun open_read(path: []u8, out: *File): i64 {
     return open(path, out, false)
 }
 
+pub fun exists(path: []u8): bool {
+    var f: File
+    if open_read(path, &f) < 0 {
+        return false
+    }
+    close(&f)
+    return true
+}
+
 pub fun open_write(path: []u8, out: *File): i64 {
     return open(path, out, true)
 }
