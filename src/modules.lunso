@@ -41,6 +41,7 @@ struct Loader {
     source_buf: vec.Vec[u8]
     root: []u8
     std_root: []u8
+    include_dirs: [][]u8
     modules: vec.Vec[ModuleEntry]
     depth: u32
 }
@@ -203,12 +204,29 @@ fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
         if in_std {
             var sub = name[4..len(name)]
             file_path = join3(l.arena, l.std_root, "/", sub)
+            file_path = join2(l.arena, file_path, ".lunso")
+            if !file_exists(file_path) {
+                file_path = ""
+            }
         } else {
-            file_path = join2(l.arena, l.root, name)
-        }
-        file_path = join2(l.arena, file_path, ".lunso")
-        if !file_exists(file_path) {
-            file_path = ""
+            file_path = join3(l.arena, l.root, name, ".lunso")
+            if !file_exists(file_path) {
+                file_path = ""
+                for var k: i64 = 0; k < len(l.include_dirs); k += 1 {
+                    var inc = l.include_dirs[k]
+                    if len(inc) == 0 { continue }
+                    var cand: []u8 = ""
+                    if inc[len(inc) - 1] == '/' {
+                        cand = join3(l.arena, inc, name, ".lunso")
+                    } else {
+                        cand = join3(l.arena, inc, "/", join2(l.arena, name, ".lunso"))
+                    }
+                    if file_exists(cand) {
+                        file_path = cand
+                        break
+                    }
+                }
+            }
         }
     }
     if len(file_path) == 0 && !std_root_mod {
@@ -750,7 +768,7 @@ fun select_std_root(arena: *mem.Arena, override: []u8): []u8 {
     return ""
 }
 
-pub fun load(arena: *mem.Arena, path: []u8, source: []u8, std_dir: []u8, out: *ModuleProgram): bool {
+pub fun load(arena: *mem.Arena, path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, out: *ModuleProgram): bool {
     if !ast_init(arena, source, &out.tree) {
         return false
     }
@@ -763,6 +781,7 @@ pub fun load(arena: *mem.Arena, path: []u8, source: []u8, std_dir: []u8, out: *M
         source_buf: vec.Vec[u8] { data: 0 as *u8, len: 0, cap: 0, arena: arena },
         root: dir_prefix(path),
         std_root: select_std_root(arena, std_dir),
+        include_dirs: include_dirs,
         modules: vec.Vec[ModuleEntry] { data: 0 as *ModuleEntry, len: 0, cap: 0, arena: arena },
         depth: 1,
     }

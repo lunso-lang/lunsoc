@@ -184,6 +184,7 @@ fun print_help(prog: []u8) {
     io.println("Options:")
     io.println("  --std=<dir>      Override standard library directory")
     io.println("  --std <dir>      Override standard library directory")
+    io.println("  -I <dir>         Add module search directory")
     io.println("  -o <file>        Output path (with --build, -c/--emit-obj, --emit-asm)")
     io.println("  --link <obj>     Link an additional object or archive (with --build/--run)")
     io.println("  -nostdlib        Link without standard C runtime/libraries")
@@ -191,10 +192,10 @@ fun print_help(prog: []u8) {
     io.println("  -V, --version    Show compiler version and exit")
 }
 
-fun run_compile(path: []u8, source: []u8, std_dir: []u8, arena: *mem.Arena, mode: Mode,
+fun run_compile(path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, arena: *mem.Arena, mode: Mode,
                 opts: *NativeOptions, run_args: [][]u8): i32 {
     var prog: ModuleProgram
-    if !modules_load(arena, path, source, std_dir, &prog) {
+    if !modules_load(arena, path, source, std_dir, include_dirs, &prog) {
         return 1
     }
     var sem: Sema
@@ -319,7 +320,8 @@ fun main(): i32 {
     var stop_options = false
     var run_args_start: i64 = len(argv)
     var objects: vec.Vec[[]u8]
-    if vec.init.[[]u8](&objects, &arena, 4) < 0 {
+    var include_dirs: vec.Vec[[]u8]
+    if vec.init.[[]u8](&objects, &arena, 4) < 0 || vec.init.[[]u8](&include_dirs, &arena, 4) < 0 {
         mem.deinit(&arena)
         return 1
     }
@@ -378,6 +380,16 @@ fun main(): i32 {
             }
             i += 1
             std_dir = argv[i]
+        } else if !stop_options && str.equals(arg, "-I") {
+            if i + 1 >= len(argv) {
+                io.eprintln("lunsoc: -I requires a directory")
+                mem.deinit(&arena)
+                return 1
+            }
+            i += 1
+            vec.push_value.[[]u8](&include_dirs, argv[i])
+        } else if !stop_options && len(arg) > 2 && str.equals(arg[0..2], "-I") {
+            vec.push_value.[[]u8](&include_dirs, arg[2..len(arg)])
         } else if !stop_options && len(arg) > 6 && str.equals(arg[0..6], "--std=") {
             if len(std_dir) > 0 || len(arg) == 6 {
                 io.eprintln("lunsoc: invalid --std option")
@@ -466,7 +478,7 @@ fun main(): i32 {
             objects: vec.as_slice.[[]u8](&objects),
         }
         var run_args = argv[run_args_start..len(argv)]
-        rc = run_compile(path, source, std_dir, &arena, mode, &opts, run_args)
+        rc = run_compile(path, source, std_dir, vec.as_slice.[[]u8](&include_dirs), &arena, mode, &opts, run_args)
     }
 
     mem.deinit(&arena)
