@@ -18,8 +18,8 @@ build/lunsoc: src/main.lunso src/lexer.lunso src/ast.lunso src/parser.lunso src/
 test: all
 	python3 tests/run.py
 
-build/fuzz: all src/fuzz.lunso
-	LUNSO_STD_OBJ=$(CURDIR)/build/std-linux-x86_64.o ./build/lunsoc --build --std $(CURDIR)/std src/fuzz.lunso -o build/fuzz
+build/fuzz: all tests/fuzz.lunso
+	LUNSO_STD_OBJ=$(CURDIR)/build/std-linux-x86_64.o ./build/lunsoc --build -I $(CURDIR)/src --std $(CURDIR)/std tests/fuzz.lunso -o build/fuzz
 
 fuzz: build/fuzz
 	./build/fuzz --iters=$(FUZZ_ITERS) $(FUZZ_SEEDS)
