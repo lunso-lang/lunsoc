@@ -126,33 +126,30 @@ pub fun build(arena: *mem.Arena, mod: *IrModule, source_path: []u8, opts: *Nativ
     } else {
         var qbe_bin = get_tool(arena, "QBE", "qbe")
         var cc_bin = get_tool(arena, "CC", "cc")
-        var flag_o: []u8 = "-o"
-        var flag_c: []u8 = "-c"
         if opts.kind == NativeKind.Asm {
-            var qbe_argv: [4][]u8 = [qbe_bin, flag_o, opts.output, il_path]
+            var qbe_argv: [4][]u8 = [qbe_bin, "-o", opts.output, il_path]
             ok = run_tool(qbe_bin, qbe_argv[0..4])
         } else {
-            var qbe_argv: [4][]u8 = [qbe_bin, flag_o, asm_path, il_path]
+            var qbe_argv: [4][]u8 = [qbe_bin, "-o", asm_path, il_path]
             ok = run_tool(qbe_bin, qbe_argv[0..4])
             if ok {
                 if opts.kind == NativeKind.Obj {
-                    var cc_argv: [5][]u8 = [cc_bin, flag_c, asm_path, flag_o, opts.output]
+                    var cc_argv: [5][]u8 = [cc_bin, "-c", asm_path, "-o", opts.output]
                     ok = run_tool(cc_bin, cc_argv[0..5])
                 } else {
                     var link_args: vec.Vec[[]u8]
                     if vec.init.[[]u8](&link_args, arena, (8 + len(opts.objects) * 2) as u64) < 0 {
                         ok = false
                     } else {
-                        var flag_nostdlib: []u8 = "-nostdlib"
                         vec.push_value.[[]u8](&link_args, cc_bin)
                         if opts.nostdlib {
-                            vec.push_value.[[]u8](&link_args, flag_nostdlib)
+                            vec.push_value.[[]u8](&link_args, "-nostdlib")
                         }
                         vec.push_value.[[]u8](&link_args, asm_path)
                         for var i: i64 = 0; i < len(opts.objects); i += 1 {
                             vec.push_value.[[]u8](&link_args, opts.objects[i])
                         }
-                        vec.push_value.[[]u8](&link_args, flag_o)
+                        vec.push_value.[[]u8](&link_args, "-o")
                         vec.push_value.[[]u8](&link_args, opts.output)
                         ok = run_tool(cc_bin, vec.as_slice.[[]u8](&link_args))
                     }
