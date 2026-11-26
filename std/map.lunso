@@ -1,0 +1,214 @@
+import std.mem
+import std.str
+
+const SLOT_EMPTY: u8 = 0
+const SLOT_USED: u8 = 1
+const SLOT_TOMBSTONE: u8 = 2
+
+pub struct StrEntry[V] {
+    key: []u8
+    value: V
+    hash: u64
+    state: u8
+}
+
+pub struct StrMap[V] {
+    entries: *StrEntry[V]
+    len: u64
+    used: u64
+    cap: u64
+    arena: *mem.Arena
+}
+
+fun next_pow2(n: u64): u64 {
+    var cap: u64 = 16
+    var max: u64 = (~0 as u64) >> 1
+    for cap < n {
+        if cap > max {
+            return 0
+        }
+        cap *= 2
+    }
+    return cap
+}
+
+pub fun init[V](m: *StrMap[V], arena: *mem.Arena, initial_cap: u64): i64 {
+    if (m as u64) == 0 || (arena as u64) == 0 {
+        return -22
+    }
+    var empty: *StrEntry[V]
+    m.entries = empty
+    m.len = 0
+    m.used = 0
+    m.cap = 0
+    m.arena = arena
+    if initial_cap == 0 {
+        return 0
+    }
+    return reserve.[V](m, initial_cap)
+}
+
+pub fun reserve[V](m: *StrMap[V], min_cap: u64): i64 {
+    if (m as u64) == 0 || (m.arena as u64) == 0 {
+        return -22
+    }
+    var new_cap = next_pow2(min_cap)
+    if new_cap == 0 {
+        return -75
+    }
+    if new_cap <= m.cap && m.used == m.len {
+        return 0
+    }
+
+    var next_entries: *StrEntry[V]
+    var status = mem.alloc_many.[StrEntry[V]](m.arena, new_cap, &next_entries)
+    if status < 0 {
+        return status
+    }
+    for var i: u64 = 0; i < new_cap; i += 1 {
+        next_entries[i].state = SLOT_EMPTY
+    }
+
+    var mask = new_cap - 1
+    var old_entries = m.entries
+    var old_cap = m.cap
+    for var i: u64 = 0; i < old_cap; i += 1 {
+        if old_entries[i].state != SLOT_USED {
+            continue
+        }
+        var idx = old_entries[i].hash & mask
+        for next_entries[idx].state == SLOT_USED {
+            idx = (idx + 1) & mask
+        }
+        next_entries[idx] = old_entries[i]
+    }
+
+    m.entries = next_entries
+    m.cap = new_cap
+    m.used = m.len
+    return 0
+}
+
+fun find_index[V](m: *StrMap[V], key: []u8, h: u64): i64 {
+    if (m as u64) == 0 || m.cap == 0 || m.len == 0 {
+        return -1
+    }
+    var mask = m.cap - 1
+    var idx = h & mask
+    for var step: u64 = 0; step < m.cap; step += 1 {
+        var st = m.entries[idx].state
+        if st == SLOT_EMPTY {
+            return -1
+        }
+        if st == SLOT_USED && m.entries[idx].hash == h && str.equals(m.entries[idx].key, key) {
+            return idx as i64
+        }
+        idx = (idx + 1) & mask
+    }
+    return -1
+}
+
+pub fun set[V](m: *StrMap[V], key: []u8, value: V): i64 {
+    if (m as u64) == 0 || (m.arena as u64) == 0 {
+        return -22
+    }
+    if m.cap == 0 || (m.used + 1) * 10 >= m.cap * 7 {
+        var target = m.cap * 2
+        if target < 16 {
+            target = 16
+        }
+        // Rehash at the same capacity if tombstones alone pushed load over 70%.
+        if m.cap >= 16 && m.len * 4 <= m.cap {
+            target = m.cap
+        }
+        var status = reserve.[V](m, target)
+        if status < 0 {
+            return status
+        }
+    }
+
+    var h = str.hash(key)
+    var mask = m.cap - 1
+    var idx = h & mask
+    var first_tomb: i64 = -1
+    for var step: u64 = 0; step < m.cap; step += 1 {
+        var st = m.entries[idx].state
+        if st == SLOT_EMPTY {
+            var dst = idx
+            if first_tomb >= 0 {
+                dst = first_tomb as u64
+            } else {
+                m.used += 1
+            }
+            var stored_key = str.clone(m.arena, key)
+            if len(key) > 0 && len(stored_key) == 0 {
+                return -12
+            }
+            m.entries[dst].key = stored_key
+            m.entries[dst].value = value
+            m.entries[dst].hash = h
+            m.entries[dst].state = SLOT_USED
+            m.len += 1
+            return 0
+        }
+        if st == SLOT_TOMBSTONE {
+            if first_tomb < 0 {
+                first_tomb = idx as i64
+            }
+        } else if m.entries[idx].hash == h && str.equals(m.entries[idx].key, key) {
+            m.entries[idx].value = value
+            return 0
+        }
+        idx = (idx + 1) & mask
+    }
+    return -12
+}
+
+pub fun get_ptr[V](m: *StrMap[V], key: []u8, out: **V): bool {
+    if (out as u64) == 0 {
+        return false
+    }
+    var idx = find_index.[V](m, key, str.hash(key))
+    if idx < 0 {
+        return false
+    }
+    *out = &m.entries[idx as u64].value
+    return true
+}
+
+pub fun get[V](m: *StrMap[V], key: []u8, out: *V): bool {
+    if (out as u64) == 0 {
+        return false
+    }
+    var idx = find_index.[V](m, key, str.hash(key))
+    if idx < 0 {
+        return false
+    }
+    *out = m.entries[idx as u64].value
+    return true
+}
+
+pub fun has[V](m: *StrMap[V], key: []u8): bool {
+    return find_index.[V](m, key, str.hash(key)) >= 0
+}
+
+pub fun remove[V](m: *StrMap[V], key: []u8): bool {
+    var idx = find_index.[V](m, key, str.hash(key))
+    if idx < 0 {
+        return false
+    }
+    m.entries[idx as u64].state = SLOT_TOMBSTONE
+    m.len -= 1
+    return true
+}
+
+pub fun clear[V](m: *StrMap[V]) {
+    if (m as u64) == 0 {
+        return
+    }
+    for var i: u64 = 0; i < m.cap; i += 1 {
+        m.entries[i].state = SLOT_EMPTY
+    }
+    m.len = 0
+    m.used = 0
+}
