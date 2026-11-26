@@ -1,0 +1,7 @@
+// expect-stderr: cannot break or continue out of defer
+fun main(): i32 {
+    for {
+        defer break
+    }
+    return 0
+}

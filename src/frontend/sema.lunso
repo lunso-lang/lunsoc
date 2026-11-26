@@ -129,6 +129,8 @@ struct Checker {
     type_parameters: NodeRange
     type_arguments: []SemaType
     instantiation_depth: u32
+    in_defer: bool
+    defer_loop_base: u64
 }
 
 struct TypeScope {
@@ -1921,7 +1923,19 @@ fun check_statement(c: *Checker, id: u32): bool {
     var falls = true
     if node.kind == AstKind.Block {
         falls = check_block(c, id)
+    } else if node.kind == AstKind.Defer {
+        var saved_in_defer = c.in_defer
+        var saved_loop_base = c.defer_loop_base
+        c.in_defer = true
+        c.defer_loop_base = c.loops.len
+        check_statement(c, node.a)
+        c.in_defer = saved_in_defer
+        c.defer_loop_base = saved_loop_base
+        falls = true
     } else if node.kind == AstKind.Return {
+        if c.in_defer {
+            fail(c, id, "cannot return from defer")
+        }
         if node.a == NODE_NONE {
             if c.current_return.kind != TypeKind.Void {
                 fail(c, id, "non-void function must return a value")
@@ -1960,6 +1974,9 @@ fun check_statement(c: *Checker, id: u32): bool {
                     fail(c, node.a, "unknown loop label")
                     target = 0
                 }
+            }
+            if c.in_defer && (target as u64) < c.defer_loop_base {
+                fail(c, id, "cannot break or continue out of defer")
             }
             node_info(c, id).binding = target as u32
             if node.kind == AstKind.Break {

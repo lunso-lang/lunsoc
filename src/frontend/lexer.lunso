@@ -18,6 +18,7 @@ pub enum TokenKind : u16 {
     For,
     Break,
     Continue,
+    Defer,
     Var,
     Identifier,
     Integer,
@@ -179,6 +180,7 @@ fun keyword_or_ident(text: []u8): TokenKind {
     if str.equals(text, "for") { return TokenKind.For }
     if str.equals(text, "break") { return TokenKind.Break }
     if str.equals(text, "continue") { return TokenKind.Continue }
+    if str.equals(text, "defer") { return TokenKind.Defer }
     if str.equals(text, "var") { return TokenKind.Var }
     return TokenKind.Identifier
 }
@@ -430,6 +432,7 @@ pub fun token_name(kind: TokenKind): []u8 {
         TokenKind.For => return "FOR"
         TokenKind.Break => return "BREAK"
         TokenKind.Continue => return "CONTINUE"
+        TokenKind.Defer => return "DEFER"
         TokenKind.Var => return "VAR"
         TokenKind.Identifier => return "IDENTIFIER"
         TokenKind.Integer => return "INTEGER"

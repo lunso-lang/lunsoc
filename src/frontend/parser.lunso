@@ -742,6 +742,16 @@ fun parse_statement(p: *Parser): u32 {
         }
         return add_node(p, ast.AstKind.Continue, tok, lbl, 0)
     }
+    if tok.kind == lexer.TokenKind.Defer {
+        advance(p)
+        var body: u32 = ast.NODE_NONE
+        if p.current.kind == lexer.TokenKind.LeftBrace {
+            body = parse_block(p)
+        } else {
+            body = parse_statement(p)
+        }
+        return add_node(p, ast.AstKind.Defer, tok, body, 0)
+    }
     if tok.kind == lexer.TokenKind.Var { return parse_variable(p) }
     if tok.kind == lexer.TokenKind.Const { return parse_const(p, false, true) }
     if tok.kind == lexer.TokenKind.Return {

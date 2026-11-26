@@ -1,0 +1,5 @@
+// expect-stderr: cannot return from defer
+fun main(): i32 {
+    defer return 1
+    return 0
+}

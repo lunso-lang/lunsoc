@@ -92,6 +92,7 @@ pub struct IrModule {
 struct IrLoop {
     break_label: u32
     continue_label: u32
+    defer_base: u64
 }
 
 struct Lowering {
@@ -102,6 +103,7 @@ struct Lowering {
     next_label: u32
     current_fn: u32
     loops: vec.Vec[IrLoop]
+    defers: vec.Vec[u32]
     failed: bool
 }
 
@@ -591,7 +593,7 @@ fun lower_loop(l: *Lowering, id: u32) {
         emit_branch(l, cond, body, end)
         emit_label(l, body)
     }
-    var le = IrLoop { break_label: end, continue_label: cont }
+    var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
     vec.push.[IrLoop](&l.loops, &le)
     lower_statement(l, node.b)
     var dummy: IrLoop
@@ -608,24 +610,47 @@ fun lower_loop(l: *Lowering, id: u32) {
     }
 }
 
+fun emit_defers(l: *Lowering, base: u64) {
+    var i = l.defers.len
+    for i > base && !l.failed {
+        i -= 1
+        var top = l.defers.len
+        lower_statement(l, l.defers.data[i as i64])
+        if l.defers.len > top {
+            emit_defers(l, top)
+            l.defers.len = top
+        }
+    }
+}
+
 fun lower_statement(l: *Lowering, id: u32) {
     if l.failed || id == NODE_NONE { return }
     var nodes = vec.as_slice.[AstNode](&l.tree.nodes)
     var node = nodes[id as i64]
     var children = vec.as_slice.[u32](&l.tree.children)
     if node.kind == AstKind.Block {
+        var defer_base = l.defers.len
+        var fell = true
         for var i: u32 = 0; i < node.b && !l.failed; i += 1 {
             var ch = children[(node.a + i) as i64]
             lower_statement(l, ch)
             if !lower_node(l, ch).falls_through {
+                fell = false
                 break
             }
         }
+        if fell {
+            emit_defers(l, defer_base)
+        }
+        l.defers.len = defer_base
+    } else if node.kind == AstKind.Defer {
+        vec.push_value.[u32](&l.defers, node.a)
     } else if node.kind == AstKind.Return {
         var val: u32 = 0
         if node.a != NODE_NONE {
             val = lower_expression(l, node.a)
         }
+        emit_defers(l, 0)
         emit(l, IrInstruction { op: IrOp.Return, type_info: empty_type(), result: 0, a: val, b: 0, c: 0 })
     } else if node.kind == AstKind.If {
         lower_if(l, id)
@@ -635,10 +660,14 @@ fun lower_statement(l: *Lowering, id: u32) {
         lower_loop(l, id)
     } else if node.kind == AstKind.Break {
         var loops = vec.as_slice.[IrLoop](&l.loops)
-        emit_jump(l, loops[lower_node(l, id).binding as i64].break_label)
+        var target = loops[lower_node(l, id).binding as i64]
+        emit_defers(l, target.defer_base)
+        emit_jump(l, target.break_label)
     } else if node.kind == AstKind.Continue {
         var loops = vec.as_slice.[IrLoop](&l.loops)
-        emit_jump(l, loops[lower_node(l, id).binding as i64].continue_label)
+        var target = loops[lower_node(l, id).binding as i64]
+        emit_defers(l, target.defer_base)
+        emit_jump(l, target.continue_label)
     } else if node.kind == AstKind.Const {
         return
     } else if node.kind == AstKind.Var {
@@ -694,6 +723,7 @@ pub fun lower(arena: *mem.Arena, tree: *Ast, sem: *Sema, out: *IrModule): bool {
     l.current_fn = ~0 as u32
     l.failed = false
     vec.init.[IrLoop](&l.loops, arena, 16)
+    vec.init.[u32](&l.defers, arena, 16)
 
     var ast_fns = vec.as_slice.[AstFunction](&tree.functions)
     var sema_fns = vec.as_slice.[SemaFunction](&sem.functions)

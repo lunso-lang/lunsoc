@@ -28,6 +28,7 @@ pub enum AstKind : u8 {
     ForCStyle,
     Break,
     Continue,
+    Defer,
     Var,
     Identifier,
     Integer,

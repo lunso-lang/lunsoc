@@ -1,0 +1,74 @@
+// lunsoc-only
+// expect-exit: 0
+// expect-stdout: cba|ret:10->20|loop:0d,1d,b|d,lbl:0d,D|bd,D|inner:done|
+
+import std.io
+
+fun test_return(out: *i32): i32 {
+    var x: i32 = 10
+    defer {
+        *out = x
+        io.print("ret:10->20|")
+    }
+    defer x = 20
+    return x
+}
+
+fun test_loops() {
+    io.print("loop:")
+    for var i: i32 = 0; i < 3; i += 1 {
+        defer io.print("d,")
+        if i == 0 {
+            io.print("0")
+            continue
+        }
+        if i == 1 {
+            io.print("1")
+        }
+        if i == 2 {
+            io.print("b|")
+            break
+        }
+    }
+
+    io.print("lbl:")
+    outer: for var i: i32 = 0; i < 2; i += 1 {
+        defer io.print("D|")
+        for var j: i32 = 0; j < 2; j += 1 {
+            defer io.print("d,")
+            if i == 0 {
+                io.print("0")
+                continue outer
+            }
+            io.print("b")
+            break outer
+        }
+    }
+}
+
+fun test_inner_loop_in_defer() {
+    defer {
+        for var i: i32 = 0; i < 3; i += 1 {
+            if i == 1 {
+                break
+            }
+        }
+        io.print("inner:done|")
+    }
+}
+
+fun main(): i32 {
+    if true {
+        defer io.print("a|")
+        defer io.print("b")
+        defer io.print("c")
+    }
+    var updated: i32 = 0
+    var rv = test_return(&updated)
+    if rv != 10 || updated != 20 {
+        return 1
+    }
+    test_loops()
+    test_inner_loop_in_defer()
+    return 0
+}
