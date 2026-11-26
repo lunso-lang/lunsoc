@@ -1,7 +1,7 @@
 import std.mem
 import std.vec
-import frontend.ast { Ast, AstConst, AstEnum, AstForHeader, AstFunction, AstIfBranches, AstImport, AstKind, AstNode, AstStruct, AstVariable, ImportKind, NODE_NONE, NodeRange, Span, add_node as ast_add_node, finish_children as ast_finish_children, init as ast_init }
-import frontend.lexer { Lexer, Token, TokenKind, error_message, init as lexer_init, next_token }
+import frontend.ast
+import frontend.lexer
 
 const PREC_ASSIGNMENT: u32 = 1
 const PREC_LOGICAL_OR: u32 = 2
@@ -19,16 +19,16 @@ const PREC_PREFIX: u32 = 13
 const MAX_RECURSION_DEPTH: u32 = 256
 
 pub struct ParseError {
-    token: Token
+    token: lexer.Token
     message: []u8
 }
 
 struct Parser {
-    lex: Lexer
-    current: Token
+    lex: lexer.Lexer
+    current: lexer.Token
     error: ParseError
     has_error: bool
-    tree: *Ast
+    tree: *ast.Ast
     pending: vec.Vec[u32]
     source_base: u32
     module: u32
@@ -40,7 +40,7 @@ struct Parser {
 fun fail(p: *Parser, msg: []u8) {
     if !p.has_error {
         p.has_error = true
-        var lex_err = error_message(p.current.kind)
+        var lex_err = lexer.error_message(p.current.kind)
         if len(lex_err) > 0 {
             p.error = ParseError { token: p.current, message: lex_err }
         } else {
@@ -49,16 +49,16 @@ fun fail(p: *Parser, msg: []u8) {
     }
 }
 
-fun read_token(l: *Lexer, in_group: bool): Token {
+fun read_token(l: *lexer.Lexer, in_group: bool): lexer.Token {
     for {
-        var tok = next_token(l)
-        if tok.kind == TokenKind.Comment {
+        var tok = lexer.next_token(l)
+        if tok.kind == lexer.TokenKind.Comment {
             if !in_group && l.line != tok.line {
                 for l.source[tok.offset as i64] != '\r' && l.source[tok.offset as i64] != '\n' {
                     tok.offset += 1
                     tok.column += 1
                 }
-                tok.kind = TokenKind.Newline
+                tok.kind = lexer.TokenKind.Newline
                 if l.source[tok.offset as i64] == '\r' &&
                    tok.offset + 1 < (len(l.source) as u64) &&
                    l.source[(tok.offset + 1) as i64] == '\n' {
@@ -70,7 +70,7 @@ fun read_token(l: *Lexer, in_group: bool): Token {
             }
             continue
         }
-        if tok.kind != TokenKind.Newline || !in_group {
+        if tok.kind != lexer.TokenKind.Newline || !in_group {
             return tok
         }
     }
@@ -80,7 +80,7 @@ fun advance(p: *Parser) {
     p.current = read_token(&p.lex, p.group_depth != 0)
 }
 
-fun match_tok(p: *Parser, kind: TokenKind): bool {
+fun match_tok(p: *Parser, kind: lexer.TokenKind): bool {
     if p.has_error || p.current.kind != kind {
         return false
     }
@@ -88,7 +88,7 @@ fun match_tok(p: *Parser, kind: TokenKind): bool {
     return true
 }
 
-fun expect_tok(p: *Parser, kind: TokenKind, msg: []u8): Token {
+fun expect_tok(p: *Parser, kind: lexer.TokenKind, msg: []u8): lexer.Token {
     var tok = p.current
     if !match_tok(p, kind) {
         fail(p, msg)
@@ -108,12 +108,12 @@ fun enter(p: *Parser): bool {
     return true
 }
 
-fun add_node(p: *Parser, kind: AstKind, tok: Token, a: u32, b: u32): u32 {
+fun add_node(p: *Parser, kind: ast.AstKind, tok: lexer.Token, a: u32, b: u32): u32 {
     if p.has_error {
-        return NODE_NONE
+        return ast.NODE_NONE
     }
-    var id = ast_add_node(p.tree, kind, p.source_base + (tok.offset as u32), a, b)
-    if id == NODE_NONE {
+    var id = ast.add_node(p.tree, kind, p.source_base + (tok.offset as u32), a, b)
+    if id == ast.NODE_NONE {
         fail(p, "could not allocate AST storage")
     }
     return id
@@ -127,24 +127,24 @@ fun push_child(p: *Parser, child: u32) {
     }
 }
 
-fun finish_children(p: *Parser, mark: u64): NodeRange {
+fun finish_children(p: *Parser, mark: u64): ast.NodeRange {
     if p.has_error {
         p.pending.len = mark
-        return NodeRange { first: 0, count: 0 }
+        return ast.NodeRange { first: 0, count: 0 }
     }
     var before = p.pending.len
-    var range = ast_finish_children(p.tree, &p.pending, mark)
+    var range = ast.finish_children(p.tree, &p.pending, mark)
     if before > mark && range.count == 0 {
         fail(p, "could not allocate AST storage")
     }
     return range
 }
 
-fun is_separator(kind: TokenKind): bool {
-    return kind == TokenKind.Newline || kind == TokenKind.Semicolon
+fun is_separator(kind: lexer.TokenKind): bool {
+    return kind == lexer.TokenKind.Newline || kind == lexer.TokenKind.Semicolon
 }
 
-fun finish_item(p: *Parser, end_kind: TokenKind, msg: []u8) {
+fun finish_item(p: *Parser, end_kind: lexer.TokenKind, msg: []u8) {
     if len(msg) > 0 && !p.has_error && p.current.kind != end_kind && !is_separator(p.current.kind) {
         fail(p, msg)
     }
@@ -158,78 +158,78 @@ fun open_group(p: *Parser) {
     advance(p)
 }
 
-fun close_group(p: *Parser, kind: TokenKind, msg: []u8) {
+fun close_group(p: *Parser, kind: lexer.TokenKind, msg: []u8) {
     p.group_depth -= 1
     expect_tok(p, kind, msg)
 }
 
-fun source_span(p: *Parser, tok: Token): Span {
-    return Span { offset: p.source_base + (tok.offset as u32), length: tok.length as u32 }
+fun source_span(p: *Parser, tok: lexer.Token): ast.Span {
+    return ast.Span { offset: p.source_base + (tok.offset as u32), length: tok.length as u32 }
 }
 
-fun infix_prec(kind: TokenKind): u32 {
+fun infix_prec(kind: lexer.TokenKind): u32 {
     match kind {
-        TokenKind.Equal, TokenKind.PlusEqual, TokenKind.MinusEqual, TokenKind.StarEqual, TokenKind.SlashEqual, TokenKind.PercentEqual, TokenKind.AmpersandEqual, TokenKind.PipeEqual, TokenKind.CaretEqual, TokenKind.ShiftLeftEqual, TokenKind.ShiftRightEqual => return PREC_ASSIGNMENT
-        TokenKind.PipePipe => return PREC_LOGICAL_OR
-        TokenKind.AmpersandAmpersand => return PREC_LOGICAL_AND
-        TokenKind.Pipe => return PREC_BIT_OR
-        TokenKind.Caret => return PREC_BIT_XOR
-        TokenKind.Ampersand => return PREC_BIT_AND
-        TokenKind.EqualEqual, TokenKind.BangEqual => return PREC_EQUALITY
-        TokenKind.Less, TokenKind.LessEqual, TokenKind.Greater, TokenKind.GreaterEqual => return PREC_COMPARISON
-        TokenKind.ShiftLeft, TokenKind.ShiftRight => return PREC_SHIFT
-        TokenKind.Plus, TokenKind.Minus => return PREC_SUM
-        TokenKind.Star, TokenKind.Slash, TokenKind.Percent => return PREC_PRODUCT
+        lexer.TokenKind.Equal, lexer.TokenKind.PlusEqual, lexer.TokenKind.MinusEqual, lexer.TokenKind.StarEqual, lexer.TokenKind.SlashEqual, lexer.TokenKind.PercentEqual, lexer.TokenKind.AmpersandEqual, lexer.TokenKind.PipeEqual, lexer.TokenKind.CaretEqual, lexer.TokenKind.ShiftLeftEqual, lexer.TokenKind.ShiftRightEqual => return PREC_ASSIGNMENT
+        lexer.TokenKind.PipePipe => return PREC_LOGICAL_OR
+        lexer.TokenKind.AmpersandAmpersand => return PREC_LOGICAL_AND
+        lexer.TokenKind.Pipe => return PREC_BIT_OR
+        lexer.TokenKind.Caret => return PREC_BIT_XOR
+        lexer.TokenKind.Ampersand => return PREC_BIT_AND
+        lexer.TokenKind.EqualEqual, lexer.TokenKind.BangEqual => return PREC_EQUALITY
+        lexer.TokenKind.Less, lexer.TokenKind.LessEqual, lexer.TokenKind.Greater, lexer.TokenKind.GreaterEqual => return PREC_COMPARISON
+        lexer.TokenKind.ShiftLeft, lexer.TokenKind.ShiftRight => return PREC_SHIFT
+        lexer.TokenKind.Plus, lexer.TokenKind.Minus => return PREC_SUM
+        lexer.TokenKind.Star, lexer.TokenKind.Slash, lexer.TokenKind.Percent => return PREC_PRODUCT
         else => return 0
     }
 }
 
-fun infix_kind(kind: TokenKind): AstKind {
+fun infix_kind(kind: lexer.TokenKind): ast.AstKind {
     match kind {
-        TokenKind.Equal => return AstKind.Assign
-        TokenKind.PlusEqual => return AstKind.AssignAdd
-        TokenKind.MinusEqual => return AstKind.AssignSubtract
-        TokenKind.StarEqual => return AstKind.AssignMultiply
-        TokenKind.SlashEqual => return AstKind.AssignDivide
-        TokenKind.PercentEqual => return AstKind.AssignRemainder
-        TokenKind.AmpersandEqual => return AstKind.AssignBitAnd
-        TokenKind.PipeEqual => return AstKind.AssignBitOr
-        TokenKind.CaretEqual => return AstKind.AssignBitXor
-        TokenKind.ShiftLeftEqual => return AstKind.AssignShiftLeft
-        TokenKind.ShiftRightEqual => return AstKind.AssignShiftRight
-        TokenKind.PipePipe => return AstKind.LogicalOr
-        TokenKind.AmpersandAmpersand => return AstKind.LogicalAnd
-        TokenKind.Pipe => return AstKind.BitOr
-        TokenKind.Caret => return AstKind.BitXor
-        TokenKind.Ampersand => return AstKind.BitAnd
-        TokenKind.EqualEqual => return AstKind.Equal
-        TokenKind.BangEqual => return AstKind.NotEqual
-        TokenKind.Less => return AstKind.Less
-        TokenKind.LessEqual => return AstKind.LessEqual
-        TokenKind.Greater => return AstKind.Greater
-        TokenKind.GreaterEqual => return AstKind.GreaterEqual
-        TokenKind.ShiftLeft => return AstKind.ShiftLeft
-        TokenKind.ShiftRight => return AstKind.ShiftRight
-        TokenKind.Plus => return AstKind.Add
-        TokenKind.Minus => return AstKind.Subtract
-        TokenKind.Star => return AstKind.Multiply
-        TokenKind.Slash => return AstKind.Divide
-        else => return AstKind.Remainder
+        lexer.TokenKind.Equal => return ast.AstKind.Assign
+        lexer.TokenKind.PlusEqual => return ast.AstKind.AssignAdd
+        lexer.TokenKind.MinusEqual => return ast.AstKind.AssignSubtract
+        lexer.TokenKind.StarEqual => return ast.AstKind.AssignMultiply
+        lexer.TokenKind.SlashEqual => return ast.AstKind.AssignDivide
+        lexer.TokenKind.PercentEqual => return ast.AstKind.AssignRemainder
+        lexer.TokenKind.AmpersandEqual => return ast.AstKind.AssignBitAnd
+        lexer.TokenKind.PipeEqual => return ast.AstKind.AssignBitOr
+        lexer.TokenKind.CaretEqual => return ast.AstKind.AssignBitXor
+        lexer.TokenKind.ShiftLeftEqual => return ast.AstKind.AssignShiftLeft
+        lexer.TokenKind.ShiftRightEqual => return ast.AstKind.AssignShiftRight
+        lexer.TokenKind.PipePipe => return ast.AstKind.LogicalOr
+        lexer.TokenKind.AmpersandAmpersand => return ast.AstKind.LogicalAnd
+        lexer.TokenKind.Pipe => return ast.AstKind.BitOr
+        lexer.TokenKind.Caret => return ast.AstKind.BitXor
+        lexer.TokenKind.Ampersand => return ast.AstKind.BitAnd
+        lexer.TokenKind.EqualEqual => return ast.AstKind.Equal
+        lexer.TokenKind.BangEqual => return ast.AstKind.NotEqual
+        lexer.TokenKind.Less => return ast.AstKind.Less
+        lexer.TokenKind.LessEqual => return ast.AstKind.LessEqual
+        lexer.TokenKind.Greater => return ast.AstKind.Greater
+        lexer.TokenKind.GreaterEqual => return ast.AstKind.GreaterEqual
+        lexer.TokenKind.ShiftLeft => return ast.AstKind.ShiftLeft
+        lexer.TokenKind.ShiftRight => return ast.AstKind.ShiftRight
+        lexer.TokenKind.Plus => return ast.AstKind.Add
+        lexer.TokenKind.Minus => return ast.AstKind.Subtract
+        lexer.TokenKind.Star => return ast.AstKind.Multiply
+        lexer.TokenKind.Slash => return ast.AstKind.Divide
+        else => return ast.AstKind.Remainder
     }
 }
 
-fun parse_type_application(p: *Parser, kind: AstKind, base: u32): u32 {
+fun parse_type_application(p: *Parser, kind: ast.AstKind, base: u32): u32 {
     var opening = p.current
     var mark = p.pending.len
     push_child(p, base)
     open_group(p)
     for {
         push_child(p, parse_type(p))
-        if !match_tok(p, TokenKind.Comma) || p.current.kind == TokenKind.RightBracket {
+        if !match_tok(p, lexer.TokenKind.Comma) || p.current.kind == lexer.TokenKind.RightBracket {
             break
         }
     }
-    close_group(p, TokenKind.RightBracket, "expected ']' after type arguments")
+    close_group(p, lexer.TokenKind.RightBracket, "expected ']' after type arguments")
     var items = finish_children(p, mark)
     return add_node(p, kind, opening, items.first, items.count)
 }
@@ -239,16 +239,16 @@ fun bracket_before_initializer(p: *Parser): bool {
     var depth: u32 = 1
     for depth > 0 {
         var k = read_token(&look, true).kind
-        if k == TokenKind.Eof {
+        if k == lexer.TokenKind.Eof {
             return false
         }
-        if k == TokenKind.LeftBracket {
+        if k == lexer.TokenKind.LeftBracket {
             depth += 1
-        } else if k == TokenKind.RightBracket {
+        } else if k == lexer.TokenKind.RightBracket {
             depth -= 1
         }
     }
-    return read_token(&look, p.group_depth != 0).kind == TokenKind.LeftBrace
+    return read_token(&look, p.group_depth != 0).kind == lexer.TokenKind.LeftBrace
 }
 
 fun parse_call(p: *Parser, callee: u32): u32 {
@@ -258,17 +258,17 @@ fun parse_call(p: *Parser, callee: u32): u32 {
     open_group(p)
     var saved = p.disallow_struct_literal
     p.disallow_struct_literal = false
-    for !p.has_error && p.current.kind != TokenKind.RightParen && p.current.kind != TokenKind.Eof {
+    for !p.has_error && p.current.kind != lexer.TokenKind.RightParen && p.current.kind != lexer.TokenKind.Eof {
         push_child(p, parse_expression(p, PREC_ASSIGNMENT))
-        if p.current.kind == TokenKind.RightParen || p.current.kind == TokenKind.Eof {
+        if p.current.kind == lexer.TokenKind.RightParen || p.current.kind == lexer.TokenKind.Eof {
             break
         }
-        expect_tok(p, TokenKind.Comma, "expected ',' or ')' after argument")
+        expect_tok(p, lexer.TokenKind.Comma, "expected ',' or ')' after argument")
     }
     p.disallow_struct_literal = saved
-    close_group(p, TokenKind.RightParen, "expected ')' after arguments")
+    close_group(p, lexer.TokenKind.RightParen, "expected ')' after arguments")
     var items = finish_children(p, mark)
-    return add_node(p, AstKind.Call, opening, items.first, items.count)
+    return add_node(p, ast.AstKind.Call, opening, items.first, items.count)
 }
 
 fun parse_struct_literal(p: *Parser, type_expr: u32): u32 {
@@ -278,19 +278,19 @@ fun parse_struct_literal(p: *Parser, type_expr: u32): u32 {
     open_group(p)
     var saved = p.disallow_struct_literal
     p.disallow_struct_literal = false
-    for !p.has_error && p.current.kind != TokenKind.RightBrace && p.current.kind != TokenKind.Eof {
-        var field = expect_tok(p, TokenKind.Identifier, "expected field name in struct initializer")
-        expect_tok(p, TokenKind.Colon, "expected ':' after field name")
+    for !p.has_error && p.current.kind != lexer.TokenKind.RightBrace && p.current.kind != lexer.TokenKind.Eof {
+        var field = expect_tok(p, lexer.TokenKind.Identifier, "expected field name in struct initializer")
+        expect_tok(p, lexer.TokenKind.Colon, "expected ':' after field name")
         var val = parse_expression(p, PREC_ASSIGNMENT)
-        push_child(p, add_node(p, AstKind.StructFieldInit, field, field.length as u32, val))
-        if !match_tok(p, TokenKind.Comma) {
+        push_child(p, add_node(p, ast.AstKind.StructFieldInit, field, field.length as u32, val))
+        if !match_tok(p, lexer.TokenKind.Comma) {
             break
         }
     }
     p.disallow_struct_literal = saved
-    close_group(p, TokenKind.RightBrace, "expected '}' after struct initializer")
+    close_group(p, lexer.TokenKind.RightBrace, "expected '}' after struct initializer")
     var items = finish_children(p, mark)
-    return add_node(p, AstKind.StructLiteral, opening, items.first, items.count)
+    return add_node(p, ast.AstKind.StructLiteral, opening, items.first, items.count)
 }
 
 fun parse_array_literal(p: *Parser): u32 {
@@ -299,125 +299,125 @@ fun parse_array_literal(p: *Parser): u32 {
     open_group(p)
     var saved = p.disallow_struct_literal
     p.disallow_struct_literal = false
-    for !p.has_error && p.current.kind != TokenKind.RightBracket && p.current.kind != TokenKind.Eof {
+    for !p.has_error && p.current.kind != lexer.TokenKind.RightBracket && p.current.kind != lexer.TokenKind.Eof {
         push_child(p, parse_expression(p, PREC_ASSIGNMENT))
-        if !match_tok(p, TokenKind.Comma) {
+        if !match_tok(p, lexer.TokenKind.Comma) {
             break
         }
     }
     p.disallow_struct_literal = saved
-    close_group(p, TokenKind.RightBracket, "expected ']' after array initializer")
+    close_group(p, lexer.TokenKind.RightBracket, "expected ']' after array initializer")
     var items = finish_children(p, mark)
     if !p.has_error && items.count == 0 {
         fail(p, "array initializer cannot be empty")
     }
-    return add_node(p, AstKind.ArrayLiteral, opening, items.first, items.count)
+    return add_node(p, ast.AstKind.ArrayLiteral, opening, items.first, items.count)
 }
 
 fun parse_postfix(p: *Parser, base_in: u32): u32 {
     var base = base_in
-    var nodes = vec.as_slice.[AstNode](&p.tree.nodes)
+    var nodes = vec.as_slice.[ast.AstNode](&p.tree.nodes)
     for !p.has_error {
         var tok = p.current
-        if tok.kind == TokenKind.LeftParen {
+        if tok.kind == lexer.TokenKind.LeftParen {
             base = parse_call(p, base)
-            nodes = vec.as_slice.[AstNode](&p.tree.nodes)
-        } else if tok.kind == TokenKind.LeftBrace {
-            var base_kind = AstKind.Invalid
-            if base != NODE_NONE {
+            nodes = vec.as_slice.[ast.AstNode](&p.tree.nodes)
+        } else if tok.kind == lexer.TokenKind.LeftBrace {
+            var base_kind = ast.AstKind.Invalid
+            if base != ast.NODE_NONE {
                 base_kind = nodes[base as i64].kind
             }
             if p.disallow_struct_literal ||
-               (base_kind != AstKind.Identifier && base_kind != AstKind.Member && base_kind != AstKind.GenericType) {
+               (base_kind != ast.AstKind.Identifier && base_kind != ast.AstKind.Member && base_kind != ast.AstKind.GenericType) {
                 return base
             }
             base = parse_struct_literal(p, base)
-            nodes = vec.as_slice.[AstNode](&p.tree.nodes)
-        } else if tok.kind == TokenKind.LeftBracket {
+            nodes = vec.as_slice.[ast.AstNode](&p.tree.nodes)
+        } else if tok.kind == lexer.TokenKind.LeftBracket {
             var base_kind = nodes[base as i64].kind
             if !p.disallow_struct_literal &&
-               (base_kind == AstKind.Identifier || base_kind == AstKind.Member) &&
+               (base_kind == ast.AstKind.Identifier || base_kind == ast.AstKind.Member) &&
                bracket_before_initializer(p) {
-                base = parse_type_application(p, AstKind.GenericType, base)
-                nodes = vec.as_slice.[AstNode](&p.tree.nodes)
+                base = parse_type_application(p, ast.AstKind.GenericType, base)
+                nodes = vec.as_slice.[ast.AstNode](&p.tree.nodes)
                 continue
             }
             open_group(p)
             var idx = parse_expression(p, PREC_ASSIGNMENT)
-            if p.current.kind == TokenKind.DotDot && !p.has_error {
+            if p.current.kind == lexer.TokenKind.DotDot && !p.has_error {
                 var range_tok = p.current
                 advance(p)
                 var end_expr = parse_expression(p, PREC_ASSIGNMENT)
-                close_group(p, TokenKind.RightBracket, "expected ']' after slice range")
-                var bounds = add_node(p, AstKind.SliceRange, range_tok, idx, end_expr)
-                base = add_node(p, AstKind.Slice, tok, base, bounds)
+                close_group(p, lexer.TokenKind.RightBracket, "expected ']' after slice range")
+                var bounds = add_node(p, ast.AstKind.SliceRange, range_tok, idx, end_expr)
+                base = add_node(p, ast.AstKind.Slice, tok, base, bounds)
             } else {
-                close_group(p, TokenKind.RightBracket, "expected ']' after index")
-                base = add_node(p, AstKind.Index, tok, base, idx)
+                close_group(p, lexer.TokenKind.RightBracket, "expected ']' after index")
+                base = add_node(p, ast.AstKind.Index, tok, base, idx)
             }
-            nodes = vec.as_slice.[AstNode](&p.tree.nodes)
-        } else if tok.kind == TokenKind.Dot {
+            nodes = vec.as_slice.[ast.AstNode](&p.tree.nodes)
+        } else if tok.kind == lexer.TokenKind.Dot {
             advance(p)
-            if p.current.kind == TokenKind.LeftBracket {
-                base = parse_type_application(p, AstKind.GenericCallee, base)
-                if !p.has_error && p.current.kind != TokenKind.LeftParen {
+            if p.current.kind == lexer.TokenKind.LeftBracket {
+                base = parse_type_application(p, ast.AstKind.GenericCallee, base)
+                if !p.has_error && p.current.kind != lexer.TokenKind.LeftParen {
                     fail(p, "expected '(' after generic function type arguments")
                 }
                 if !p.has_error {
                     base = parse_call(p, base)
                 }
             } else {
-                var member = expect_tok(p, TokenKind.Identifier, "expected member name after '.'")
-                base = add_node(p, AstKind.Member, member, base, member.length as u32)
+                var member = expect_tok(p, lexer.TokenKind.Identifier, "expected member name after '.'")
+                base = add_node(p, ast.AstKind.Member, member, base, member.length as u32)
             }
-            nodes = vec.as_slice.[AstNode](&p.tree.nodes)
+            nodes = vec.as_slice.[ast.AstNode](&p.tree.nodes)
         } else {
             return base
         }
     }
-    return NODE_NONE
+    return ast.NODE_NONE
 }
 
 fun parse_operand(p: *Parser): u32 {
     var tok = p.current
-    var kind = AstKind.Invalid
-    if tok.kind == TokenKind.Plus {
-        kind = AstKind.Positive
-    } else if tok.kind == TokenKind.Minus {
-        kind = AstKind.Negate
-    } else if tok.kind == TokenKind.Bang {
-        kind = AstKind.LogicalNot
-    } else if tok.kind == TokenKind.Tilde {
-        kind = AstKind.BitNot
-    } else if tok.kind == TokenKind.Ampersand {
-        kind = AstKind.AddressOf
-    } else if tok.kind == TokenKind.Star {
-        kind = AstKind.Dereference
-    } else if tok.kind == TokenKind.LeftParen {
+    var kind = ast.AstKind.Invalid
+    if tok.kind == lexer.TokenKind.Plus {
+        kind = ast.AstKind.Positive
+    } else if tok.kind == lexer.TokenKind.Minus {
+        kind = ast.AstKind.Negate
+    } else if tok.kind == lexer.TokenKind.Bang {
+        kind = ast.AstKind.LogicalNot
+    } else if tok.kind == lexer.TokenKind.Tilde {
+        kind = ast.AstKind.BitNot
+    } else if tok.kind == lexer.TokenKind.Ampersand {
+        kind = ast.AstKind.AddressOf
+    } else if tok.kind == lexer.TokenKind.Star {
+        kind = ast.AstKind.Dereference
+    } else if tok.kind == lexer.TokenKind.LeftParen {
         open_group(p)
         var saved = p.disallow_struct_literal
         p.disallow_struct_literal = false
         var val = parse_expression(p, PREC_ASSIGNMENT)
         p.disallow_struct_literal = saved
-        close_group(p, TokenKind.RightParen, "expected ')' after expression")
+        close_group(p, lexer.TokenKind.RightParen, "expected ')' after expression")
         return parse_postfix(p, val)
-    } else if tok.kind == TokenKind.LeftBracket {
+    } else if tok.kind == lexer.TokenKind.LeftBracket {
         return parse_postfix(p, parse_array_literal(p))
-    } else if tok.kind == TokenKind.Identifier {
+    } else if tok.kind == lexer.TokenKind.Identifier {
         advance(p)
-        return parse_postfix(p, add_node(p, AstKind.Identifier, tok, tok.length as u32, 0))
-    } else if tok.kind == TokenKind.Integer || tok.kind == TokenKind.Char {
+        return parse_postfix(p, add_node(p, ast.AstKind.Identifier, tok, tok.length as u32, 0))
+    } else if tok.kind == lexer.TokenKind.Integer || tok.kind == lexer.TokenKind.Char {
         advance(p)
-        return parse_postfix(p, add_node(p, AstKind.Integer, tok, tok.length as u32, 0))
-    } else if tok.kind == TokenKind.Float {
+        return parse_postfix(p, add_node(p, ast.AstKind.Integer, tok, tok.length as u32, 0))
+    } else if tok.kind == lexer.TokenKind.Float {
         advance(p)
-        return parse_postfix(p, add_node(p, AstKind.Float, tok, tok.length as u32, 0))
-    } else if tok.kind == TokenKind.String {
+        return parse_postfix(p, add_node(p, ast.AstKind.Float, tok, tok.length as u32, 0))
+    } else if tok.kind == lexer.TokenKind.String {
         advance(p)
-        return parse_postfix(p, add_node(p, AstKind.String, tok, tok.length as u32, 0))
+        return parse_postfix(p, add_node(p, ast.AstKind.String, tok, tok.length as u32, 0))
     } else {
         fail(p, "expected an expression")
-        return NODE_NONE
+        return ast.NODE_NONE
     }
 
     advance(p)
@@ -427,15 +427,15 @@ fun parse_operand(p: *Parser): u32 {
 
 fun parse_expression(p: *Parser, minimum: u32): u32 {
     if !enter(p) {
-        return NODE_NONE
+        return ast.NODE_NONE
     }
     var left = parse_operand(p)
     for !p.has_error {
         var tok = p.current
-        if tok.kind == TokenKind.As && minimum <= PREC_CAST {
+        if tok.kind == lexer.TokenKind.As && minimum <= PREC_CAST {
             advance(p)
             var t = parse_type(p)
-            left = add_node(p, AstKind.Cast, tok, left, t)
+            left = add_node(p, ast.AstKind.Cast, tok, left, t)
             continue
         }
         var prec = infix_prec(tok.kind)
@@ -444,7 +444,7 @@ fun parse_expression(p: *Parser, minimum: u32): u32 {
         }
         var op_kind = infix_kind(tok.kind)
         advance(p)
-        for p.current.kind == TokenKind.Newline {
+        for p.current.kind == lexer.TokenKind.Newline {
             advance(p)
         }
         var next_min = prec
@@ -459,77 +459,77 @@ fun parse_expression(p: *Parser, minimum: u32): u32 {
 }
 
 fun parse_type_name(p: *Parser): u32 {
-    var t = expect_tok(p, TokenKind.Identifier, "expected a type name")
-    if !match_tok(p, TokenKind.Dot) {
-        return add_node(p, AstKind.TypeName, t, t.length as u32, 0)
+    var t = expect_tok(p, lexer.TokenKind.Identifier, "expected a type name")
+    if !match_tok(p, lexer.TokenKind.Dot) {
+        return add_node(p, ast.AstKind.TypeName, t, t.length as u32, 0)
     }
     var mark = p.pending.len
-    push_child(p, add_node(p, AstKind.Identifier, t, t.length as u32, 0))
+    push_child(p, add_node(p, ast.AstKind.Identifier, t, t.length as u32, 0))
     for {
-        var part = expect_tok(p, TokenKind.Identifier, "expected a type path component")
-        push_child(p, add_node(p, AstKind.Identifier, part, part.length as u32, 0))
-        if !match_tok(p, TokenKind.Dot) {
+        var part = expect_tok(p, lexer.TokenKind.Identifier, "expected a type path component")
+        push_child(p, add_node(p, ast.AstKind.Identifier, part, part.length as u32, 0))
+        if !match_tok(p, lexer.TokenKind.Dot) {
             break
         }
     }
     var path = finish_children(p, mark)
-    return add_node(p, AstKind.QualifiedType, t, path.first, path.count)
+    return add_node(p, ast.AstKind.QualifiedType, t, path.first, path.count)
 }
 
 fun parse_type(p: *Parser): u32 {
     if !enter(p) {
-        return NODE_NONE
+        return ast.NODE_NONE
     }
     var opening = p.current
-    var res = NODE_NONE
-    if match_tok(p, TokenKind.Star) {
+    var res = ast.NODE_NONE
+    if match_tok(p, lexer.TokenKind.Star) {
         var read_only: u32 = 0
-        if match_tok(p, TokenKind.Const) {
+        if match_tok(p, lexer.TokenKind.Const) {
             read_only = 1
         }
         var pointee = parse_type(p)
-        res = add_node(p, AstKind.PointerType, opening, pointee, read_only)
-    } else if opening.kind != TokenKind.LeftBracket {
+        res = add_node(p, ast.AstKind.PointerType, opening, pointee, read_only)
+    } else if opening.kind != lexer.TokenKind.LeftBracket {
         var base = parse_type_name(p)
-        if !p.has_error && p.current.kind == TokenKind.LeftBracket {
-            res = parse_type_application(p, AstKind.GenericType, base)
+        if !p.has_error && p.current.kind == lexer.TokenKind.LeftBracket {
+            res = parse_type_application(p, ast.AstKind.GenericType, base)
         } else {
             res = base
         }
     } else {
         open_group(p)
-        var count = NODE_NONE
-        if p.current.kind != TokenKind.RightBracket {
+        var count = ast.NODE_NONE
+        if p.current.kind != lexer.TokenKind.RightBracket {
             var len_tok = p.current
-            if len_tok.kind == TokenKind.Identifier {
+            if len_tok.kind == lexer.TokenKind.Identifier {
                 advance(p)
-                count = add_node(p, AstKind.Identifier, len_tok, len_tok.length as u32, 0)
+                count = add_node(p, ast.AstKind.Identifier, len_tok, len_tok.length as u32, 0)
             } else {
-                len_tok = expect_tok(p, TokenKind.Integer, "expected an integer array length or ']'")
-                count = add_node(p, AstKind.Integer, len_tok, len_tok.length as u32, 0)
+                len_tok = expect_tok(p, lexer.TokenKind.Integer, "expected an integer array length or ']'")
+                count = add_node(p, ast.AstKind.Integer, len_tok, len_tok.length as u32, 0)
             }
         }
-        close_group(p, TokenKind.RightBracket, "expected ']' after array length")
+        close_group(p, lexer.TokenKind.RightBracket, "expected ']' after array length")
         var elem = parse_type(p)
-        res = add_node(p, AstKind.ArrayType, opening, elem, count)
+        res = add_node(p, ast.AstKind.ArrayType, opening, elem, count)
     }
     p.recursion_depth -= 1
     return res
 }
 
 fun match_else(p: *Parser): bool {
-    if match_tok(p, TokenKind.Else) {
+    if match_tok(p, lexer.TokenKind.Else) {
         return true
     }
-    if p.has_error || p.current.kind != TokenKind.Newline {
+    if p.has_error || p.current.kind != lexer.TokenKind.Newline {
         return false
     }
     var look = p.lex
     var tok = read_token(&look, false)
-    for tok.kind == TokenKind.Newline {
+    for tok.kind == lexer.TokenKind.Newline {
         tok = read_token(&look, false)
     }
-    if tok.kind != TokenKind.Else {
+    if tok.kind != lexer.TokenKind.Else {
         return false
     }
     p.lex = look
@@ -539,168 +539,168 @@ fun match_else(p: *Parser): bool {
 
 fun parse_if(p: *Parser): u32 {
     if !enter(p) {
-        return NODE_NONE
+        return ast.NODE_NONE
     }
-    var kw = expect_tok(p, TokenKind.If, "expected 'if'")
+    var kw = expect_tok(p, lexer.TokenKind.If, "expected 'if'")
     var saved = p.disallow_struct_literal
     p.disallow_struct_literal = true
     var cond = parse_expression(p, PREC_ASSIGNMENT)
     p.disallow_struct_literal = saved
-    var branches = AstIfBranches { then_branch: parse_block(p), else_branch: NODE_NONE }
+    var branches = ast.AstIfBranches { then_branch: parse_block(p), else_branch: ast.NODE_NONE }
     if match_else(p) {
-        if p.current.kind == TokenKind.If {
+        if p.current.kind == lexer.TokenKind.If {
             branches.else_branch = parse_if(p)
         } else {
             branches.else_branch = parse_block(p)
         }
     }
     var idx = p.tree.if_branches.len as u32
-    if !p.has_error && vec.push.[AstIfBranches](&p.tree.if_branches, &branches) < 0 {
+    if !p.has_error && vec.push.[ast.AstIfBranches](&p.tree.if_branches, &branches) < 0 {
         fail(p, "could not allocate AST storage")
     }
     p.recursion_depth -= 1
-    return add_node(p, AstKind.If, kw, cond, idx)
+    return add_node(p, ast.AstKind.If, kw, cond, idx)
 }
 
 fun parse_match(p: *Parser): u32 {
     if !enter(p) {
-        return NODE_NONE
+        return ast.NODE_NONE
     }
-    var kw = expect_tok(p, TokenKind.Match, "expected 'match'")
+    var kw = expect_tok(p, lexer.TokenKind.Match, "expected 'match'")
     var saved = p.disallow_struct_literal
     p.disallow_struct_literal = true
     var scrutinee = parse_expression(p, PREC_ASSIGNMENT)
     p.disallow_struct_literal = saved
 
-    expect_tok(p, TokenKind.LeftBrace, "expected '{' after match expression")
+    expect_tok(p, lexer.TokenKind.LeftBrace, "expected '{' after match expression")
     var mark = p.pending.len
     push_child(p, scrutinee)
     for !p.has_error && is_separator(p.current.kind) {
         advance(p)
     }
-    for !p.has_error && p.current.kind != TokenKind.RightBrace && p.current.kind != TokenKind.Eof {
+    for !p.has_error && p.current.kind != lexer.TokenKind.RightBrace && p.current.kind != lexer.TokenKind.Eof {
         var arm_tok = p.current
         var arm_mark = p.pending.len
-        if !match_tok(p, TokenKind.Else) {
+        if !match_tok(p, lexer.TokenKind.Else) {
             for {
                 push_child(p, parse_expression(p, PREC_ASSIGNMENT))
-                if !match_tok(p, TokenKind.Comma) {
+                if !match_tok(p, lexer.TokenKind.Comma) {
                     break
                 }
             }
         }
-        expect_tok(p, TokenKind.FatArrow, "expected '=>' after match pattern")
-        var body = NODE_NONE
-        if p.current.kind == TokenKind.LeftBrace {
+        expect_tok(p, lexer.TokenKind.FatArrow, "expected '=>' after match pattern")
+        var body = ast.NODE_NONE
+        if p.current.kind == lexer.TokenKind.LeftBrace {
             body = parse_block(p)
         } else {
             body = parse_statement(p)
         }
         push_child(p, body)
         var arm_items = finish_children(p, arm_mark)
-        push_child(p, add_node(p, AstKind.MatchArm, arm_tok, arm_items.first, arm_items.count))
-        if p.current.kind == TokenKind.Eof {
+        push_child(p, add_node(p, ast.AstKind.MatchArm, arm_tok, arm_items.first, arm_items.count))
+        if p.current.kind == lexer.TokenKind.Eof {
             break
         }
-        finish_item(p, TokenKind.RightBrace, "expected a newline, ';', or '}' after match arm")
+        finish_item(p, lexer.TokenKind.RightBrace, "expected a newline, ';', or '}' after match arm")
     }
-    expect_tok(p, TokenKind.RightBrace, "expected '}' after match")
+    expect_tok(p, lexer.TokenKind.RightBrace, "expected '}' after match")
     var items = finish_children(p, mark)
     p.recursion_depth -= 1
-    return add_node(p, AstKind.Match, kw, items.first, items.count)
+    return add_node(p, ast.AstKind.Match, kw, items.first, items.count)
 }
 
 fun parse_variable(p: *Parser): u32 {
     advance(p)
-    var name = expect_tok(p, TokenKind.Identifier, "expected a variable name after 'var'")
-    var v = AstVariable { name_length: name.length as u32, type_node: NODE_NONE, initializer: NODE_NONE }
-    if match_tok(p, TokenKind.Colon) {
+    var name = expect_tok(p, lexer.TokenKind.Identifier, "expected a variable name after 'var'")
+    var v = ast.AstVariable { name_length: name.length as u32, type_node: ast.NODE_NONE, initializer: ast.NODE_NONE }
+    if match_tok(p, lexer.TokenKind.Colon) {
         v.type_node = parse_type(p)
     }
-    if match_tok(p, TokenKind.Equal) {
+    if match_tok(p, lexer.TokenKind.Equal) {
         v.initializer = parse_expression(p, PREC_ASSIGNMENT)
-    } else if v.type_node == NODE_NONE {
+    } else if v.type_node == ast.NODE_NONE {
         fail(p, "expected ':' or '=' after variable name")
     }
     var idx = p.tree.variables.len as u32
-    if !p.has_error && vec.push.[AstVariable](&p.tree.variables, &v) < 0 {
+    if !p.has_error && vec.push.[ast.AstVariable](&p.tree.variables, &v) < 0 {
         fail(p, "could not allocate AST storage")
     }
-    return add_node(p, AstKind.Var, name, idx, 0)
+    return add_node(p, ast.AstKind.Var, name, idx, 0)
 }
 
-fun parse_for_with_label(p: *Parser, label: Span): u32 {
-    var kw = expect_tok(p, TokenKind.For, "expected 'for' after loop label")
+fun parse_for_with_label(p: *Parser, label: ast.Span): u32 {
+    var kw = expect_tok(p, lexer.TokenKind.For, "expected 'for' after loop label")
     if p.has_error {
-        return NODE_NONE
+        return ast.NODE_NONE
     }
-    if p.current.kind == TokenKind.LeftBrace {
+    if p.current.kind == lexer.TokenKind.LeftBrace {
         var body = parse_block(p)
         if label.length == 0 {
-            return add_node(p, AstKind.For, kw, NODE_NONE, body)
+            return add_node(p, ast.AstKind.For, kw, ast.NODE_NONE, body)
         }
-        var header = AstForHeader { initializer: NODE_NONE, condition: NODE_NONE, step: NODE_NONE, label: label }
+        var header = ast.AstForHeader { initializer: ast.NODE_NONE, condition: ast.NODE_NONE, step: ast.NODE_NONE, label: label }
         var idx = p.tree.for_headers.len as u32
-        if !p.has_error && vec.push.[AstForHeader](&p.tree.for_headers, &header) < 0 {
+        if !p.has_error && vec.push.[ast.AstForHeader](&p.tree.for_headers, &header) < 0 {
             fail(p, "could not allocate AST storage")
         }
-        return add_node(p, AstKind.ForCStyle, kw, idx, body)
+        return add_node(p, ast.AstKind.ForCStyle, kw, idx, body)
     }
 
-    var declares_var = p.current.kind == TokenKind.Var
+    var declares_var = p.current.kind == lexer.TokenKind.Var
     var saved = p.disallow_struct_literal
     p.disallow_struct_literal = true
-    var first = NODE_NONE
+    var first = ast.NODE_NONE
     if declares_var {
         first = parse_variable(p)
-    } else if p.current.kind != TokenKind.Semicolon {
+    } else if p.current.kind != lexer.TokenKind.Semicolon {
         first = parse_expression(p, PREC_ASSIGNMENT)
     }
 
-    if !match_tok(p, TokenKind.Semicolon) {
+    if !match_tok(p, lexer.TokenKind.Semicolon) {
         p.disallow_struct_literal = saved
         if declares_var {
             fail(p, "expected ';' after for initializer")
         }
         var body = parse_block(p)
         if label.length == 0 {
-            return add_node(p, AstKind.For, kw, first, body)
+            return add_node(p, ast.AstKind.For, kw, first, body)
         }
-        var header = AstForHeader { initializer: NODE_NONE, condition: first, step: NODE_NONE, label: label }
+        var header = ast.AstForHeader { initializer: ast.NODE_NONE, condition: first, step: ast.NODE_NONE, label: label }
         var idx = p.tree.for_headers.len as u32
-        if !p.has_error && vec.push.[AstForHeader](&p.tree.for_headers, &header) < 0 {
+        if !p.has_error && vec.push.[ast.AstForHeader](&p.tree.for_headers, &header) < 0 {
             fail(p, "could not allocate AST storage")
         }
-        return add_node(p, AstKind.ForCStyle, kw, idx, body)
+        return add_node(p, ast.AstKind.ForCStyle, kw, idx, body)
     }
 
-    var header = AstForHeader { initializer: first, condition: NODE_NONE, step: NODE_NONE, label: label }
-    if p.current.kind != TokenKind.Semicolon {
+    var header = ast.AstForHeader { initializer: first, condition: ast.NODE_NONE, step: ast.NODE_NONE, label: label }
+    if p.current.kind != lexer.TokenKind.Semicolon {
         header.condition = parse_expression(p, PREC_ASSIGNMENT)
     }
-    expect_tok(p, TokenKind.Semicolon, "expected ';' after for condition")
-    if p.current.kind != TokenKind.LeftBrace {
+    expect_tok(p, lexer.TokenKind.Semicolon, "expected ';' after for condition")
+    if p.current.kind != lexer.TokenKind.LeftBrace {
         header.step = parse_expression(p, PREC_ASSIGNMENT)
     }
     p.disallow_struct_literal = saved
     var body = parse_block(p)
     var idx = p.tree.for_headers.len as u32
-    if !p.has_error && vec.push.[AstForHeader](&p.tree.for_headers, &header) < 0 {
+    if !p.has_error && vec.push.[ast.AstForHeader](&p.tree.for_headers, &header) < 0 {
         fail(p, "could not allocate AST storage")
     }
-    return add_node(p, AstKind.ForCStyle, kw, idx, body)
+    return add_node(p, ast.AstKind.ForCStyle, kw, idx, body)
 }
 
 fun parse_const(p: *Parser, public: bool, local: bool): u32 {
-    var kw = expect_tok(p, TokenKind.Const, "expected 'const'")
-    var name = expect_tok(p, TokenKind.Identifier, "expected a constant name")
-    var t = NODE_NONE
-    if match_tok(p, TokenKind.Colon) {
+    var kw = expect_tok(p, lexer.TokenKind.Const, "expected 'const'")
+    var name = expect_tok(p, lexer.TokenKind.Identifier, "expected a constant name")
+    var t = ast.NODE_NONE
+    if match_tok(p, lexer.TokenKind.Colon) {
         t = parse_type(p)
     }
-    expect_tok(p, TokenKind.Equal, "expected '=' in constant declaration")
+    expect_tok(p, lexer.TokenKind.Equal, "expected '=' in constant declaration")
     var val = parse_expression(p, PREC_ASSIGNMENT)
-    var c = AstConst {
+    var c = ast.AstConst {
         name: source_span(p, name),
         type_node: t,
         value: val,
@@ -709,177 +709,177 @@ fun parse_const(p: *Parser, public: bool, local: bool): u32 {
         local: local,
     }
     var idx = p.tree.consts.len as u32
-    if !p.has_error && vec.push.[AstConst](&p.tree.consts, &c) < 0 {
+    if !p.has_error && vec.push.[ast.AstConst](&p.tree.consts, &c) < 0 {
         fail(p, "could not allocate AST storage")
     }
-    return add_node(p, AstKind.Const, kw, idx, 0)
+    return add_node(p, ast.AstKind.Const, kw, idx, 0)
 }
 
 fun parse_statement(p: *Parser): u32 {
     var tok = p.current
-    if tok.kind == TokenKind.Identifier {
+    if tok.kind == lexer.TokenKind.Identifier {
         var saved_lex = p.lex
         var next = read_token(&saved_lex, p.group_depth > 0)
-        if next.kind == TokenKind.Colon {
+        if next.kind == lexer.TokenKind.Colon {
             advance(p)
             advance(p)
             return parse_for_with_label(p, source_span(p, tok))
         }
     }
-    if tok.kind == TokenKind.If { return parse_if(p) }
-    if tok.kind == TokenKind.Match { return parse_match(p) }
-    if tok.kind == TokenKind.For { return parse_for_with_label(p, Span { offset: 0, length: 0 }) }
-    if tok.kind == TokenKind.Break || tok.kind == TokenKind.Continue {
+    if tok.kind == lexer.TokenKind.If { return parse_if(p) }
+    if tok.kind == lexer.TokenKind.Match { return parse_match(p) }
+    if tok.kind == lexer.TokenKind.For { return parse_for_with_label(p, ast.Span { offset: 0, length: 0 }) }
+    if tok.kind == lexer.TokenKind.Break || tok.kind == lexer.TokenKind.Continue {
         advance(p)
-        var lbl = NODE_NONE
-        if p.current.kind == TokenKind.Identifier {
+        var lbl = ast.NODE_NONE
+        if p.current.kind == lexer.TokenKind.Identifier {
             var target = p.current
             advance(p)
-            lbl = add_node(p, AstKind.Identifier, target, target.length as u32, 0)
+            lbl = add_node(p, ast.AstKind.Identifier, target, target.length as u32, 0)
         }
-        if tok.kind == TokenKind.Break {
-            return add_node(p, AstKind.Break, tok, lbl, 0)
+        if tok.kind == lexer.TokenKind.Break {
+            return add_node(p, ast.AstKind.Break, tok, lbl, 0)
         }
-        return add_node(p, AstKind.Continue, tok, lbl, 0)
+        return add_node(p, ast.AstKind.Continue, tok, lbl, 0)
     }
-    if tok.kind == TokenKind.Var { return parse_variable(p) }
-    if tok.kind == TokenKind.Const { return parse_const(p, false, true) }
-    if tok.kind == TokenKind.Return {
+    if tok.kind == lexer.TokenKind.Var { return parse_variable(p) }
+    if tok.kind == lexer.TokenKind.Const { return parse_const(p, false, true) }
+    if tok.kind == lexer.TokenKind.Return {
         advance(p)
         var nk = p.current.kind
-        var val = NODE_NONE
-        if !is_separator(nk) && nk != TokenKind.RightBrace && nk != TokenKind.Eof {
+        var val = ast.NODE_NONE
+        if !is_separator(nk) && nk != lexer.TokenKind.RightBrace && nk != lexer.TokenKind.Eof {
             val = parse_expression(p, PREC_ASSIGNMENT)
         }
-        return add_node(p, AstKind.Return, tok, val, 0)
+        return add_node(p, ast.AstKind.Return, tok, val, 0)
     }
     return parse_expression(p, PREC_ASSIGNMENT)
 }
 
 fun parse_block(p: *Parser): u32 {
     if !enter(p) {
-        return NODE_NONE
+        return ast.NODE_NONE
     }
-    var opening = expect_tok(p, TokenKind.LeftBrace, "expected '{' to start block")
+    var opening = expect_tok(p, lexer.TokenKind.LeftBrace, "expected '{' to start block")
     var mark = p.pending.len
     for !p.has_error && is_separator(p.current.kind) {
         advance(p)
     }
-    for !p.has_error && p.current.kind != TokenKind.RightBrace && p.current.kind != TokenKind.Eof {
+    for !p.has_error && p.current.kind != lexer.TokenKind.RightBrace && p.current.kind != lexer.TokenKind.Eof {
         push_child(p, parse_statement(p))
-        if p.current.kind == TokenKind.Eof {
+        if p.current.kind == lexer.TokenKind.Eof {
             break
         }
-        finish_item(p, TokenKind.RightBrace, "expected a newline, ';', or '}' after statement")
+        finish_item(p, lexer.TokenKind.RightBrace, "expected a newline, ';', or '}' after statement")
     }
-    expect_tok(p, TokenKind.RightBrace, "expected '}' to end block")
+    expect_tok(p, lexer.TokenKind.RightBrace, "expected '}' to end block")
     var stmts = finish_children(p, mark)
     p.recursion_depth -= 1
-    return add_node(p, AstKind.Block, opening, stmts.first, stmts.count)
+    return add_node(p, ast.AstKind.Block, opening, stmts.first, stmts.count)
 }
 
-fun parse_type_parameters(p: *Parser): NodeRange {
-    if p.current.kind != TokenKind.LeftBracket {
-        return NodeRange { first: 0, count: 0 }
+fun parse_type_parameters(p: *Parser): ast.NodeRange {
+    if p.current.kind != lexer.TokenKind.LeftBracket {
+        return ast.NodeRange { first: 0, count: 0 }
     }
     var mark = p.pending.len
     open_group(p)
     for {
-        var name = expect_tok(p, TokenKind.Identifier, "expected a type parameter name")
-        push_child(p, add_node(p, AstKind.Identifier, name, name.length as u32, 0))
-        if !match_tok(p, TokenKind.Comma) || p.current.kind == TokenKind.RightBracket {
+        var name = expect_tok(p, lexer.TokenKind.Identifier, "expected a type parameter name")
+        push_child(p, add_node(p, ast.AstKind.Identifier, name, name.length as u32, 0))
+        if !match_tok(p, lexer.TokenKind.Comma) || p.current.kind == lexer.TokenKind.RightBracket {
             break
         }
     }
-    close_group(p, TokenKind.RightBracket, "expected ']' after type parameters")
+    close_group(p, lexer.TokenKind.RightBracket, "expected ']' after type parameters")
     return finish_children(p, mark)
 }
 
-fun parse_parameters(p: *Parser): NodeRange {
+fun parse_parameters(p: *Parser): ast.NodeRange {
     var mark = p.pending.len
     if p.has_error {
-        return NodeRange { first: 0, count: 0 }
+        return ast.NodeRange { first: 0, count: 0 }
     }
-    if p.current.kind != TokenKind.LeftParen {
+    if p.current.kind != lexer.TokenKind.LeftParen {
         fail(p, "expected '(' before parameters")
-        return NodeRange { first: 0, count: 0 }
+        return ast.NodeRange { first: 0, count: 0 }
     }
     open_group(p)
-    if p.current.kind != TokenKind.RightParen {
+    if p.current.kind != lexer.TokenKind.RightParen {
         for {
-            var name = expect_tok(p, TokenKind.Identifier, "expected a parameter name")
-            expect_tok(p, TokenKind.Colon, "expected ':' after parameter name")
+            var name = expect_tok(p, lexer.TokenKind.Identifier, "expected a parameter name")
+            expect_tok(p, lexer.TokenKind.Colon, "expected ':' after parameter name")
             var t = parse_type(p)
-            push_child(p, add_node(p, AstKind.Parameter, name, name.length as u32, t))
-            if !match_tok(p, TokenKind.Comma) || p.current.kind == TokenKind.RightParen {
+            push_child(p, add_node(p, ast.AstKind.Parameter, name, name.length as u32, t))
+            if !match_tok(p, lexer.TokenKind.Comma) || p.current.kind == lexer.TokenKind.RightParen {
                 break
             }
         }
     }
-    close_group(p, TokenKind.RightParen, "expected ')' after parameters")
+    close_group(p, lexer.TokenKind.RightParen, "expected ')' after parameters")
     return finish_children(p, mark)
 }
 
 fun parse_function(p: *Parser, public: bool): u32 {
     var start = p.current
-    var external = match_tok(p, TokenKind.Ext)
+    var external = match_tok(p, lexer.TokenKind.Ext)
     if external {
-        expect_tok(p, TokenKind.Fun, "expected 'fun' after 'ext'")
+        expect_tok(p, lexer.TokenKind.Fun, "expected 'fun' after 'ext'")
     } else {
-        expect_tok(p, TokenKind.Fun, "expected a function declaration")
+        expect_tok(p, lexer.TokenKind.Fun, "expected a function declaration")
     }
-    var name = expect_tok(p, TokenKind.Identifier, "expected a function name")
+    var name = expect_tok(p, lexer.TokenKind.Identifier, "expected a function name")
     var first_node = p.tree.nodes.len as u32
     var type_params = parse_type_parameters(p)
     var params = parse_parameters(p)
-    var ret_type = NODE_NONE
-    if match_tok(p, TokenKind.Colon) {
+    var ret_type = ast.NODE_NONE
+    if match_tok(p, lexer.TokenKind.Colon) {
         ret_type = parse_type(p)
     }
-    var body = NODE_NONE
+    var body = ast.NODE_NONE
     if !external {
         body = parse_block(p)
-    } else if p.current.kind == TokenKind.LeftBrace {
+    } else if p.current.kind == lexer.TokenKind.LeftBrace {
         fail(p, "an external function declaration cannot have a body")
     }
-    var fn = AstFunction {
+    var fn = ast.AstFunction {
         name: source_span(p, name),
         parameters: params,
         type_parameters: type_params,
-        nodes: NodeRange { first: first_node, count: (p.tree.nodes.len as u32) - first_node },
+        nodes: ast.NodeRange { first: first_node, count: (p.tree.nodes.len as u32) - first_node },
         return_type: ret_type,
         body: body,
         module: p.module,
         public: public,
     }
     var idx = p.tree.functions.len as u32
-    if !p.has_error && vec.push.[AstFunction](&p.tree.functions, &fn) < 0 {
+    if !p.has_error && vec.push.[ast.AstFunction](&p.tree.functions, &fn) < 0 {
         fail(p, "could not allocate AST storage")
     }
-    return add_node(p, AstKind.Function, start, idx, 0)
+    return add_node(p, ast.AstKind.Function, start, idx, 0)
 }
 
 fun parse_struct(p: *Parser, public: bool): u32 {
-    var kw = expect_tok(p, TokenKind.Struct, "expected 'struct'")
-    var name = expect_tok(p, TokenKind.Identifier, "expected a struct name")
+    var kw = expect_tok(p, lexer.TokenKind.Struct, "expected 'struct'")
+    var name = expect_tok(p, lexer.TokenKind.Identifier, "expected a struct name")
     var type_params = parse_type_parameters(p)
-    expect_tok(p, TokenKind.LeftBrace, "expected '{' after struct name")
+    expect_tok(p, lexer.TokenKind.LeftBrace, "expected '{' after struct name")
     var mark = p.pending.len
     for !p.has_error && is_separator(p.current.kind) {
         advance(p)
     }
-    for !p.has_error && p.current.kind != TokenKind.RightBrace && p.current.kind != TokenKind.Eof {
-        var field = expect_tok(p, TokenKind.Identifier, "expected a field name")
-        expect_tok(p, TokenKind.Colon, "expected ':' after field name")
+    for !p.has_error && p.current.kind != lexer.TokenKind.RightBrace && p.current.kind != lexer.TokenKind.Eof {
+        var field = expect_tok(p, lexer.TokenKind.Identifier, "expected a field name")
+        expect_tok(p, lexer.TokenKind.Colon, "expected ':' after field name")
         var t = parse_type(p)
-        push_child(p, add_node(p, AstKind.Field, field, field.length as u32, t))
-        if p.current.kind == TokenKind.Eof {
+        push_child(p, add_node(p, ast.AstKind.Field, field, field.length as u32, t))
+        if p.current.kind == lexer.TokenKind.Eof {
             break
         }
-        finish_item(p, TokenKind.RightBrace, "expected a newline, ';', or '}' after field")
+        finish_item(p, lexer.TokenKind.RightBrace, "expected a newline, ';', or '}' after field")
     }
-    expect_tok(p, TokenKind.RightBrace, "expected '}' to end struct")
-    var rec = AstStruct {
+    expect_tok(p, lexer.TokenKind.RightBrace, "expected '}' to end struct")
+    var rec = ast.AstStruct {
         name: source_span(p, name),
         fields: finish_children(p, mark),
         type_parameters: type_params,
@@ -887,50 +887,50 @@ fun parse_struct(p: *Parser, public: bool): u32 {
         public: public,
     }
     var idx = p.tree.structs.len as u32
-    if !p.has_error && vec.push.[AstStruct](&p.tree.structs, &rec) < 0 {
+    if !p.has_error && vec.push.[ast.AstStruct](&p.tree.structs, &rec) < 0 {
         fail(p, "could not allocate AST storage")
     }
-    return add_node(p, AstKind.Struct, kw, idx, 0)
+    return add_node(p, ast.AstKind.Struct, kw, idx, 0)
 }
 
 fun parse_enum(p: *Parser, public: bool): u32 {
-    var kw = expect_tok(p, TokenKind.Enum, "expected 'enum'")
-    var name = expect_tok(p, TokenKind.Identifier, "expected an enum name")
-    expect_tok(p, TokenKind.Colon, "expected ':' before enum backing type")
-    var t = expect_tok(p, TokenKind.Identifier, "expected an integer backing type")
-    var backing = add_node(p, AstKind.TypeName, t, t.length as u32, 0)
-    expect_tok(p, TokenKind.LeftBrace, "expected '{' after enum backing type")
+    var kw = expect_tok(p, lexer.TokenKind.Enum, "expected 'enum'")
+    var name = expect_tok(p, lexer.TokenKind.Identifier, "expected an enum name")
+    expect_tok(p, lexer.TokenKind.Colon, "expected ':' before enum backing type")
+    var t = expect_tok(p, lexer.TokenKind.Identifier, "expected an integer backing type")
+    var backing = add_node(p, ast.AstKind.TypeName, t, t.length as u32, 0)
+    expect_tok(p, lexer.TokenKind.LeftBrace, "expected '{' after enum backing type")
 
     var mark = p.pending.len
     for !p.has_error && is_separator(p.current.kind) {
         advance(p)
     }
-    for !p.has_error && p.current.kind != TokenKind.RightBrace && p.current.kind != TokenKind.Eof {
-        var member = expect_tok(p, TokenKind.Identifier, "expected an enum member name")
-        var val = NODE_NONE
-        if match_tok(p, TokenKind.Equal) {
+    for !p.has_error && p.current.kind != lexer.TokenKind.RightBrace && p.current.kind != lexer.TokenKind.Eof {
+        var member = expect_tok(p, lexer.TokenKind.Identifier, "expected an enum member name")
+        var val = ast.NODE_NONE
+        if match_tok(p, lexer.TokenKind.Equal) {
             var sign = p.current
-            var neg = match_tok(p, TokenKind.Minus)
+            var neg = match_tok(p, lexer.TokenKind.Minus)
             var lit = p.current
-            if lit.kind == TokenKind.Char {
+            if lit.kind == lexer.TokenKind.Char {
                 advance(p)
             } else {
-                lit = expect_tok(p, TokenKind.Integer, "expected an integer enum value")
+                lit = expect_tok(p, lexer.TokenKind.Integer, "expected an integer enum value")
             }
-            val = add_node(p, AstKind.Integer, lit, lit.length as u32, 0)
+            val = add_node(p, ast.AstKind.Integer, lit, lit.length as u32, 0)
             if neg {
-                val = add_node(p, AstKind.Negate, sign, val, 0)
+                val = add_node(p, ast.AstKind.Negate, sign, val, 0)
             }
         }
-        push_child(p, add_node(p, AstKind.EnumCase, member, member.length as u32, val))
-        if match_tok(p, TokenKind.Comma) {
-            finish_item(p, TokenKind.RightBrace, "")
+        push_child(p, add_node(p, ast.AstKind.EnumCase, member, member.length as u32, val))
+        if match_tok(p, lexer.TokenKind.Comma) {
+            finish_item(p, lexer.TokenKind.RightBrace, "")
         } else {
-            finish_item(p, TokenKind.RightBrace, "expected ',', a newline, ';', or '}' after enum member")
+            finish_item(p, lexer.TokenKind.RightBrace, "expected ',', a newline, ';', or '}' after enum member")
         }
     }
-    expect_tok(p, TokenKind.RightBrace, "expected '}' after enum")
-    var en = AstEnum {
+    expect_tok(p, lexer.TokenKind.RightBrace, "expected '}' after enum")
+    var en = ast.AstEnum {
         name: source_span(p, name),
         cases: finish_children(p, mark),
         backing: backing,
@@ -938,66 +938,66 @@ fun parse_enum(p: *Parser, public: bool): u32 {
         public: public,
     }
     var idx = p.tree.enums.len as u32
-    if !p.has_error && vec.push.[AstEnum](&p.tree.enums, &en) < 0 {
+    if !p.has_error && vec.push.[ast.AstEnum](&p.tree.enums, &en) < 0 {
         fail(p, "could not allocate AST storage")
     }
-    return add_node(p, AstKind.Enum, kw, idx, 0)
+    return add_node(p, ast.AstKind.Enum, kw, idx, 0)
 }
 
 fun parse_import(p: *Parser): u32 {
-    var kw = expect_tok(p, TokenKind.Import, "expected 'import'")
-    var item = AstImport {
-        path: NodeRange { first: 0, count: 0 },
-        items: NodeRange { first: 0, count: 0 },
-        alias: Span { offset: 0, length: 0 },
-        kind: ImportKind.Module,
+    var kw = expect_tok(p, lexer.TokenKind.Import, "expected 'import'")
+    var item = ast.AstImport {
+        path: ast.NodeRange { first: 0, count: 0 },
+        items: ast.NodeRange { first: 0, count: 0 },
+        alias: ast.Span { offset: 0, length: 0 },
+        kind: ast.ImportKind.Module,
     }
     var mark = p.pending.len
     for {
-        if p.pending.len != mark && match_tok(p, TokenKind.Star) {
-            item.kind = ImportKind.All
+        if p.pending.len != mark && match_tok(p, lexer.TokenKind.Star) {
+            item.kind = ast.ImportKind.All
             break
         }
-        var part = expect_tok(p, TokenKind.Identifier, "expected a module path component")
-        push_child(p, add_node(p, AstKind.Identifier, part, part.length as u32, 0))
-        if !match_tok(p, TokenKind.Dot) {
+        var part = expect_tok(p, lexer.TokenKind.Identifier, "expected a module path component")
+        push_child(p, add_node(p, ast.AstKind.Identifier, part, part.length as u32, 0))
+        if !match_tok(p, lexer.TokenKind.Dot) {
             break
         }
     }
     item.path = finish_children(p, mark)
 
-    if item.kind == ImportKind.Module && match_tok(p, TokenKind.As) {
-        item.alias = source_span(p, expect_tok(p, TokenKind.Identifier, "expected an import alias"))
-    } else if item.kind == ImportKind.Module && p.current.kind == TokenKind.LeftBrace {
-        item.kind = ImportKind.Selected
+    if item.kind == ast.ImportKind.Module && match_tok(p, lexer.TokenKind.As) {
+        item.alias = source_span(p, expect_tok(p, lexer.TokenKind.Identifier, "expected an import alias"))
+    } else if item.kind == ast.ImportKind.Module && p.current.kind == lexer.TokenKind.LeftBrace {
+        item.kind = ast.ImportKind.Selected
         open_group(p)
         for {
-            var name = expect_tok(p, TokenKind.Identifier, "expected an imported name")
-            var alias_node = NODE_NONE
-            if match_tok(p, TokenKind.As) {
-                var tok = expect_tok(p, TokenKind.Identifier, "expected an import alias")
-                alias_node = add_node(p, AstKind.Identifier, tok, tok.length as u32, 0)
+            var name = expect_tok(p, lexer.TokenKind.Identifier, "expected an imported name")
+            var alias_node = ast.NODE_NONE
+            if match_tok(p, lexer.TokenKind.As) {
+                var tok = expect_tok(p, lexer.TokenKind.Identifier, "expected an import alias")
+                alias_node = add_node(p, ast.AstKind.Identifier, tok, tok.length as u32, 0)
             }
-            push_child(p, add_node(p, AstKind.ImportItem, name, name.length as u32, alias_node))
-            if !match_tok(p, TokenKind.Comma) || p.current.kind == TokenKind.RightBrace {
+            push_child(p, add_node(p, ast.AstKind.ImportItem, name, name.length as u32, alias_node))
+            if !match_tok(p, lexer.TokenKind.Comma) || p.current.kind == lexer.TokenKind.RightBrace {
                 break
             }
         }
-        close_group(p, TokenKind.RightBrace, "expected '}' after imported names")
+        close_group(p, lexer.TokenKind.RightBrace, "expected '}' after imported names")
         item.items = finish_children(p, mark)
     }
 
     var idx = p.tree.imports.len as u32
-    if !p.has_error && vec.push.[AstImport](&p.tree.imports, &item) < 0 {
+    if !p.has_error && vec.push.[ast.AstImport](&p.tree.imports, &item) < 0 {
         fail(p, "could not allocate AST storage")
     }
-    return add_node(p, AstKind.Import, kw, idx, 0)
+    return add_node(p, ast.AstKind.Import, kw, idx, 0)
 }
 
-pub fun parse_append(arena: *mem.Arena, tree: *Ast, slice: []u8, source_base: u32, module: u32,
-                     out_decls: *NodeRange, err: *ParseError): bool {
+pub fun parse_append(arena: *mem.Arena, tree: *ast.Ast, slice: []u8, source_base: u32, module: u32,
+                     out_decls: *ast.NodeRange, err: *ParseError): bool {
     var p: Parser
-    p.lex = lexer_init(slice)
+    p.lex = lexer.init(slice)
     p.has_error = false
     p.tree = tree
     p.source_base = source_base
@@ -1006,7 +1006,7 @@ pub fun parse_append(arena: *mem.Arena, tree: *Ast, slice: []u8, source_base: u3
     p.recursion_depth = 0
     p.disallow_struct_literal = false
     if vec.init.[u32](&p.pending, arena, 64) < 0 {
-        *err = ParseError { token: Token { kind: TokenKind.Eof, offset: 0, length: 0, line: 1, column: 1 }, message: "could not allocate parser stack" }
+        *err = ParseError { token: lexer.Token { kind: lexer.TokenKind.Eof, offset: 0, length: 0, line: 1, column: 1 }, message: "could not allocate parser stack" }
         return false
     }
 
@@ -1015,22 +1015,22 @@ pub fun parse_append(arena: *mem.Arena, tree: *Ast, slice: []u8, source_base: u3
     for is_separator(p.current.kind) {
         advance(&p)
     }
-    for !p.has_error && p.current.kind != TokenKind.Eof {
+    for !p.has_error && p.current.kind != lexer.TokenKind.Eof {
         var msg: []u8 = ""
-        var decl = NODE_NONE
-        if p.current.kind == TokenKind.Import {
+        var decl = ast.NODE_NONE
+        if p.current.kind == lexer.TokenKind.Import {
             decl = parse_import(&p)
             msg = "expected a newline or ';' after import"
         } else {
-            var public = match_tok(&p, TokenKind.Pub)
+            var public = match_tok(&p, lexer.TokenKind.Pub)
             if !public {
-                match_tok(&p, TokenKind.Priv)
+                match_tok(&p, lexer.TokenKind.Priv)
             }
-            if p.current.kind == TokenKind.Struct {
+            if p.current.kind == lexer.TokenKind.Struct {
                 decl = parse_struct(&p, public)
-            } else if p.current.kind == TokenKind.Enum {
+            } else if p.current.kind == lexer.TokenKind.Enum {
                 decl = parse_enum(&p, public)
-            } else if p.current.kind == TokenKind.Const {
+            } else if p.current.kind == lexer.TokenKind.Const {
                 decl = parse_const(&p, public, false)
                 msg = "expected a newline or ';' after constant"
             } else {
@@ -1039,16 +1039,16 @@ pub fun parse_append(arena: *mem.Arena, tree: *Ast, slice: []u8, source_base: u3
             }
         }
         push_child(&p, decl)
-        finish_item(&p, TokenKind.Eof, msg)
+        finish_item(&p, lexer.TokenKind.Eof, msg)
     }
     *out_decls = finish_children(&p, mark)
     *err = p.error
     return !p.has_error
 }
 
-pub fun parse(arena: *mem.Arena, source: []u8, out: *Ast, err: *ParseError): bool {
-    if !ast_init(arena, source, out) {
-        *err = ParseError { token: Token { kind: TokenKind.Eof, offset: 0, length: 0, line: 1, column: 1 }, message: "could not allocate AST storage" }
+pub fun parse(arena: *mem.Arena, source: []u8, out: *ast.Ast, err: *ParseError): bool {
+    if !ast.init(arena, source, out) {
+        *err = ParseError { token: lexer.Token { kind: lexer.TokenKind.Eof, offset: 0, length: 0, line: 1, column: 1 }, message: "could not allocate AST storage" }
         return false
     }
     return parse_append(arena, out, source, 0, 0, &out.declarations, err)
