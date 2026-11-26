@@ -1,7 +1,7 @@
 import std.mem
 import std.str
 import std.vec
-import frontend.ast { Ast, AstBinding, AstBindingKind, AstConst, AstEnum, AstForHeader, AstFunction, AstIfBranches, AstKind, AstModuleScope, AstNode, AstQualified, AstStruct, AstVariable, NODE_NONE, NodeRange, Span, find_qualified as ast_find_qualified }
+import frontend.ast.*
 
 pub enum TypeKind : u8 {
     Invalid,
@@ -619,9 +619,9 @@ fun specialize_record(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
     var base = children[node.a as i64]
     var decl: u32 = ~0 as u32
     var q: AstQualified
-    if ast_find_qualified(c.tree, id, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
+    if find_qualified(c.tree, id, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
         decl = q.index
-    } else if ast_find_qualified(c.tree, base, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
+    } else if find_qualified(c.tree, base, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
         decl = q.index
     } else {
         var bnode = nodes[base as i64]
@@ -720,7 +720,7 @@ fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
     }
     if node.kind == AstKind.QualifiedType {
         var q: AstQualified
-        if !ast_find_qualified(c.tree, id, &q) {
+        if !find_qualified(c.tree, id, &q) {
             return fail(c, id, "unknown qualified type")
         }
         if q.kind == AstBindingKind.Enum {
@@ -1039,7 +1039,7 @@ fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, ou
     }
     if node.kind == AstKind.Member {
         var q: AstQualified
-        if ast_find_qualified(c.tree, id, &q) {
+        if find_qualified(c.tree, id, &q) {
             if q.kind == AstBindingKind.Const && !q.inaccessible {
                 check_const_decl(c, q.index)
                 if c.has_error { return empty_type() }
@@ -1478,7 +1478,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
             if !c.has_error { si = st.record }
         } else {
             var q: AstQualified
-            if ast_find_qualified(c.tree, tid, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
+            if find_qualified(c.tree, tid, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
                 si = q.index
             } else if tnode.kind == AstKind.Identifier || tnode.kind == AstKind.TypeName {
                 si = find_struct_idx(c, node_span(c.tree, tid, tnode.a))
@@ -1540,7 +1540,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         }
         var cnode = nodes[callee as i64]
         var q: AstQualified
-        var has_q = ast_find_qualified(c.tree, id, &q) && q.kind == AstBindingKind.Function
+        var has_q = find_qualified(c.tree, id, &q) && q.kind == AstBindingKind.Function
         if !has_q && cnode.kind != AstKind.Identifier {
             res = fail(c, callee, "unsupported callee")
         } else {
@@ -1675,7 +1675,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         var base_node = nodes[node.a as i64]
         var q: AstQualified
         var handled = false
-        if ast_find_qualified(c.tree, id, &q) {
+        if find_qualified(c.tree, id, &q) {
             if q.kind == AstBindingKind.Const && !q.inaccessible {
                 check_const_decl(c, q.index)
                 if !c.has_error {

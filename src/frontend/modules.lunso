@@ -6,9 +6,9 @@ import std.os
 import std.path
 import std.str
 import std.vec
-import frontend.ast { Ast, AstBinding, AstBindingKind, AstConst, AstEnum, AstFunction, AstImport, AstKind, AstModuleScope, AstNode, AstQualified, AstStruct, ImportKind, NODE_NONE, NodeRange, Span, init as ast_init }
-import frontend.lexer { TokenKind }
-import frontend.parser { ParseError, parse_append }
+import frontend.ast.*
+import frontend.lexer
+import frontend.parser
 
 pub struct ModuleFile {
     path: []u8
@@ -255,10 +255,10 @@ fun parse_file(l: *Loader, mod_id: u32, source: []u8, offset: u32): bool {
         return false
     }
     var slice = l.program.tree.source[(base as i64)..((base as i64) + len(source))]
-    var perr: ParseError
+    var perr: parser.ParseError
     var decls: NodeRange
-    if !parse_append(l.arena, &l.program.tree, slice, base, mod_id, &decls, &perr) {
-        if perr.token.kind == TokenKind.Invalid {
+    if !parser.parse_append(l.arena, &l.program.tree, slice, base, mod_id, &decls, &perr) {
+        if perr.token.kind == lexer.TokenKind.Invalid {
             var byte = slice[perr.token.offset as i64]
             return err_at(l, base + (perr.token.offset as u32), format_unexpected_byte(l.arena, byte))
         }
@@ -722,7 +722,7 @@ fun select_std_root(arena: *mem.Arena, override: []u8): []u8 {
 }
 
 pub fun load(arena: *mem.Arena, entry_path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, out: *ModuleProgram): bool {
-    if !ast_init(arena, source, &out.tree) {
+    if !init(arena, source, &out.tree) {
         return false
     }
     if vec.init.[ModuleFile](&out.files, arena, 8) < 0 {

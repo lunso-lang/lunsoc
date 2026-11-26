@@ -2,8 +2,8 @@ import std.fmt
 import std.io
 import std.mem
 import std.vec
-import frontend.ast { Ast, AstForHeader, AstFunction, AstIfBranches, AstKind, AstNode, AstStruct, AstVariable, NODE_NONE, Span }
-import frontend.sema { Sema, SemaBuiltin, SemaConstant, SemaFunction, SemaNode, SemaRecord, SemaType, TypeKind, empty_type, is_float, is_signed, simple_type }
+import frontend.ast.*
+import frontend.sema.*
 
 pub enum IrOp : u8 {
     Label,
