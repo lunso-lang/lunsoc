@@ -679,6 +679,16 @@ fun specialize_record(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
     return t
 }
 
+fun complete_type(c: *Checker, t: SemaType): SemaType {
+    if t.kind == TypeKind.Struct {
+        resolve_struct_layout(c, t.record)
+        var res = t
+        res.record_size = c.sema.records.data[t.record as i64].size
+        return res
+    }
+    return t
+}
+
 fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
     if id == NODE_NONE || c.has_error {
         return simple_type(TypeKind.Void)
@@ -1636,10 +1646,10 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
             } else if !c.has_error {
                 if bt.kind == TypeKind.Array || bt.kind == TypeKind.Slice {
                     var elems = vec.as_slice.[SemaType](&c.sema.elements)
-                    res = elems[bt.element_type as i64]
+                    res = complete_type(c, elems[bt.element_type as i64])
                 } else if bt.kind == TypeKind.Pointer {
                     var pts = vec.as_slice.[SemaType](&c.sema.pointees)
-                    res = pts[bt.pointee as i64]
+                    res = complete_type(c, pts[bt.pointee as i64])
                 } else {
                     res = fail(c, node.a, "indexing requires an array, slice, or pointer")
                 }
@@ -1657,10 +1667,10 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                 var elem = empty_type()
                 if bt.kind == TypeKind.Array || bt.kind == TypeKind.Slice {
                     var elems = vec.as_slice.[SemaType](&c.sema.elements)
-                    elem = elems[bt.element_type as i64]
+                    elem = complete_type(c, elems[bt.element_type as i64])
                 } else if bt.kind == TypeKind.Pointer {
                     var pts = vec.as_slice.[SemaType](&c.sema.pointees)
-                    elem = pts[bt.pointee as i64]
+                    elem = complete_type(c, pts[bt.pointee as i64])
                 } else {
                     return fail(c, node.a, "slicing requires an array, slice, or pointer")
                 }
@@ -1754,25 +1764,28 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                 if bt.kind != TypeKind.Struct {
                     res = fail(c, id, "member access requires a struct value")
                 } else {
-                    var recs = c.sema.records.data
-                    var sdecls = vec.as_slice.[AstStruct](&c.tree.structs)
-                    var sdecl = sdecls[recs[bt.record as i64].declaration as i64]
-                    var children = vec.as_slice.[u32](&c.tree.children)
-                    var found = false
-                    for var i: u32 = 0; i < sdecl.fields.count; i += 1 {
-                        var fid = children[(sdecl.fields.first + i) as i64]
-                        var fn_node = nodes[fid as i64]
-                        if same_span(c.tree, mname, node_span(c.tree, fid, fn_node.a)) {
-                            var fields = vec.as_slice.[SemaNode](&recs[bt.record as i64].fields)
-                            var sn = node_info(c, id)
-                            sn.binding = fields[i as i64].binding
-                            res = fields[i as i64].type_info
-                            found = true
-                            break
+                    resolve_struct_layout(c, bt.record)
+                    if !c.has_error {
+                        var recs = c.sema.records.data
+                        var sdecls = vec.as_slice.[AstStruct](&c.tree.structs)
+                        var sdecl = sdecls[recs[bt.record as i64].declaration as i64]
+                        var children = vec.as_slice.[u32](&c.tree.children)
+                        var found = false
+                        for var i: u32 = 0; i < sdecl.fields.count; i += 1 {
+                            var fid = children[(sdecl.fields.first + i) as i64]
+                            var fn_node = nodes[fid as i64]
+                            if same_span(c.tree, mname, node_span(c.tree, fid, fn_node.a)) {
+                                var fields = vec.as_slice.[SemaNode](&recs[bt.record as i64].fields)
+                                var sn = node_info(c, id)
+                                sn.binding = fields[i as i64].binding
+                                res = fields[i as i64].type_info
+                                found = true
+                                break
+                            }
                         }
-                    }
-                    if !found {
-                        res = fail(c, id, "unknown struct field")
+                        if !found {
+                            res = fail(c, id, "unknown struct field")
+                        }
                     }
                 }
             }
@@ -1804,7 +1817,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                 res = fail(c, id, "dereference requires a pointer")
             } else {
                 var pts = vec.as_slice.[SemaType](&c.sema.pointees)
-                res = pts[op.pointee as i64]
+                res = complete_type(c, pts[op.pointee as i64])
             }
         }
     } else if node.kind == AstKind.Positive || node.kind == AstKind.Negate {
