@@ -753,6 +753,7 @@ fun select_std_root(arena: *mem.Arena, override: []u8): []u8 {
 
 pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, std_dir: []u8,
                               include_dirs: [][]u8, overlays: *map.StrMap[[]u8], out: *ModuleProgram): bool {
+    var _overlay_layout: map.StrMap[[]u8]
     if !init(arena, source, &out.tree) {
         return false
     }
