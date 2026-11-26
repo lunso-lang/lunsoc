@@ -20,6 +20,10 @@ pub struct ModuleFile {
 pub struct ModuleProgram {
     tree: Ast
     files: vec.Vec[ModuleFile]
+    quiet: bool
+    has_error: bool
+    err_offset: u32
+    err_message: []u8
 }
 
 enum LoadState : u8 {
@@ -152,7 +156,12 @@ pub fun report(program: *ModuleProgram, offset: u32, message: []u8) {
 }
 
 fun err_at(l: *Loader, offset: u32, msg: []u8): bool {
-    report(l.program, offset, msg)
+    l.program.has_error = true
+    l.program.err_offset = offset
+    l.program.err_message = msg
+    if !l.program.quiet {
+        report(l.program, offset, msg)
+    }
     return false
 }
 
