@@ -5,7 +5,7 @@ Self-hosted compiler for the Lunso programming language.
 ## Requirements
 
 - [QBE](https://c9x.me/compile/) (>= 1.3)
-- [lunsoc v0.2](https://github.com/lunso-lang/lunsoc/releases/tag/v0.2) (or [lunso-boot 1.0](https://github.com/lunso-lang/lunso-boot/releases/tag/v1.0) for bootstrapping from C)
+- [lunsoc v0.3.0](https://github.com/lunso-lang/lunsoc/releases/tag/v0.3.0) (or [lunso-boot 1.0](https://github.com/lunso-lang/lunso-boot/releases/tag/v1.0) for bootstrapping from C)
 - C compiler (`cc`), `make`, `python3`
 
 ## Build & Test
