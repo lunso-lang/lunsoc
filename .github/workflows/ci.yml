@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  pull_request:
+    branches:
+      - dev
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-fuzz:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lunsoc
+
+      - uses: actions/checkout@v4
+        with:
+          repository: lunso-lang/lunso-boot
+          ref: v1.0
+          path: lunso-boot
+
+      - name: Install QBE
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qbe
+
+      - name: Build lunso-boot
+        run: make -C lunso-boot all build/std-linux-x86_64.o
+
+      - name: Build and run test suite
+        run: make -C lunsoc test
+
+      - name: Build and run fuzzer
+        run: make -C lunsoc fuzz FUZZ_ITERS=50000

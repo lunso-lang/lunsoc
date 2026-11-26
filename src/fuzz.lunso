@@ -1,0 +1,141 @@
+import std.args
+import std.file
+import std.fmt
+import std.io
+import std.mem
+import std.rand
+import std.str
+import std.vec
+import ast { Ast }
+import ir { IrModule, lower as ir_lower }
+import lexer { Token, tokenize_all }
+import parser { ParseError, parse }
+import qbe { write as qbe_write }
+import sema { Sema, SemaError, check }
+
+fun parse_u64(s: []u8, out: *u64): bool {
+    if len(s) == 0 { return false }
+    var acc: u64 = 0
+    for var i: i64 = 0; i < len(s); i += 1 {
+        if s[i] < '0' || s[i] > '9' { return false }
+        acc = acc * 10 + ((s[i] - '0') as u64)
+    }
+    *out = acc
+    return true
+}
+
+fun fuzz_one(arena: *mem.Arena, src: []u8) {
+    var tokens: vec.Vec[Token]
+    if vec.init.[Token](&tokens, arena, 64) < 0 { return }
+    var err_tok: Token
+    if !tokenize_all(src, &tokens, &err_tok) { return }
+
+    var tree: Ast
+    var perr: ParseError
+    if !parse(arena, src, &tree, &perr) { return }
+
+    var sem: Sema
+    var serr: SemaError
+    if !check(arena, &tree, &sem, &serr) { return }
+
+    var mod: IrModule
+    if !ir_lower(arena, &tree, &sem, &mod) { return }
+
+    var qbe_buf: vec.Vec[u8]
+    qbe_write(arena, &mod, &qbe_buf)
+}
+
+fun mutate_buf(rng: *rand.Rng, seed: []u8, buf: *u8, cap: i64): i64 {
+    var n = len(seed)
+    if n > cap { n = cap }
+    for var i: i64 = 0; i < n; i += 1 {
+        buf[i] = seed[i]
+    }
+    var edits = rand.range_i64(rng, 1, 6)
+    var tokens: [12][]u8 = [
+        "fun ", "struct ", "enum ", "const ", "var ", "if ", "for ",
+        "match ", "return ", "pub ", "[]u8", "i32"
+    ]
+    for var e: i64 = 0; e < edits; e += 1 {
+        var kind = rand.range_i64(rng, 0, 3)
+        if kind == 0 && n > 0 {
+            var pos = rand.range_i64(rng, 0, n - 1)
+            buf[pos] = (rand.next_u64(rng) & 127) as u8
+        } else if kind == 1 && n > 1 {
+            var pos = rand.range_i64(rng, 0, n - 1)
+            for var j = pos; j + 1 < n; j += 1 {
+                buf[j] = buf[j + 1]
+            }
+            n -= 1
+        } else if kind == 2 && n + 16 < cap {
+            var tok = tokens[rand.range_i64(rng, 0, 11)]
+            var pos = rand.range_i64(rng, 0, n)
+            var tlen = len(tok)
+            for var j = n - 1; j >= pos; j -= 1 {
+                buf[j + tlen] = buf[j]
+            }
+            for var j: i64 = 0; j < tlen; j += 1 {
+                buf[pos + j] = tok[j]
+            }
+            n += tlen
+        } else if n > 2 {
+            n = rand.range_i64(rng, 1, n)
+        }
+    }
+    return n
+}
+
+fun main(): i32 {
+    var arena: mem.Arena
+    if mem.init(&arena, 65536) < 0 { return 1 }
+
+    var argv: [][]u8
+    if args.load(&arena, &argv) < 0 {
+        mem.deinit(&arena)
+        return 1
+    }
+
+    var iters: u64 = 20000
+    var seeds: vec.Vec[[]u8]
+    vec.init.[[]u8](&seeds, &arena, 32)
+
+    for var i: i64 = 1; i < len(argv); i += 1 {
+        var arg = argv[i]
+        if len(arg) > 8 && str.equals(arg[0..8], "--iters=") {
+            if !parse_u64(arg[8..len(arg)], &iters) {
+                io.eprintln("fuzz: invalid --iters")
+                mem.deinit(&arena)
+                return 1
+            }
+        } else {
+            var raw: file.Bytes
+            if file.read_all(arg, &arena, &raw) >= 0 {
+                vec.push_value.[[]u8](&seeds, raw.ptr[0..raw.len])
+            }
+        }
+    }
+    if seeds.len == 0 {
+        vec.push_value.[[]u8](&seeds, "fun main(): i32 { return 0 }\n")
+    }
+
+    var rng: rand.Rng
+    rand.seed(&rng, 0x123456789abcdef0)
+    var scratch: [16384]u8
+    var seed_slice = vec.as_slice.[[]u8](&seeds)
+
+    for var it: u64 = 0; it < iters; it += 1 {
+        var idx = rand.range_i64(&rng, 0, len(seed_slice) - 1)
+        var mlen = mutate_buf(&rng, seed_slice[idx], &scratch[0], 16384)
+        var iter_arena: mem.Arena
+        if mem.init(&iter_arena, 65536) >= 0 {
+            fuzz_one(&iter_arena, scratch[0..mlen])
+            mem.deinit(&iter_arena)
+        }
+    }
+
+    io.print("fuzz: completed ")
+    fmt.print_u64(1, iters)
+    io.println(" iterations")
+    mem.deinit(&arena)
+    return 0
+}
