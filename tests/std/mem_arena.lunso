@@ -41,6 +41,22 @@ fun main(): i32 {
         return 9
     }
 
+    var one: *i64
+    if mem.alloc_one.[i64](&arena, &one) != 0 || ((one as u64) & 7) != 0 {
+        return 11
+    }
+    *one = 123456
+
+    var many: *i32
+    if mem.alloc_many.[i32](&arena, 4, &many) != 0 || ((many as u64) & 3) != 0 {
+        return 12
+    }
+    many[0] = 10
+    many[3] = 40
+    if *one != 123456 || many[0] + many[3] != 50 {
+        return 13
+    }
+
     if mem.deinit(&arena) != 0 {
         return 10
     }

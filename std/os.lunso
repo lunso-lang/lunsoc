@@ -125,12 +125,11 @@ fun build_envp(arena: *mem.Arena, raw: []u8, has_env: bool, out: ***u8): i64 {
             }
         }
     }
-    var ptr_mem: *u8
-    var status = mem.alloc(arena, ((count as u64) + 1) * 8, 8, &ptr_mem)
+    var envp: **u8
+    var status = mem.alloc_many.[*u8](arena, (count as u64) + 1, &envp)
     if status < 0 {
         return status
     }
-    var envp = ptr_mem as **u8
     if has_env {
         var idx: i64 = 0
         var start: i64 = 0
@@ -218,12 +217,11 @@ pub fun run(program: []u8, argv: [][]u8): i64 {
     }
 
     var argc = len(argv)
-    var argv_mem: *u8
-    status = mem.alloc(&arena, ((argc as u64) + 1) * 8, 8, &argv_mem)
+    var c_argv: **u8
+    status = mem.alloc_many.[*u8](&arena, (argc as u64) + 1, &c_argv)
     if status < 0 {
         return status
     }
-    var c_argv = argv_mem as **u8
     for var i: i64 = 0; i < argc; i += 1 {
         var arg_ptr: *u8
         status = to_cstr(&arena, argv[i], &arg_ptr)
