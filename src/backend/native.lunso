@@ -7,8 +7,8 @@ import std.path
 import std.str
 import std.time
 import std.vec
-import ir { IrFunction, IrModule }
-import qbe { write as qbe_write }
+import backend.ir { IrFunction, IrModule }
+import backend.qbe { write as qbe_write }
 import frontend.sema { TypeKind }
 
 pub enum NativeKind : u8 {

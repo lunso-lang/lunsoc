@@ -3,7 +3,7 @@ import std.mem
 import std.str
 import std.vec
 import frontend.ast { Span }
-import ir { IrFunction, IrInstruction, IrModule, IrOp }
+import backend.ir { IrFunction, IrInstruction, IrModule, IrOp }
 import frontend.sema { SemaType, TypeKind, element_size, is_signed, is_unsigned, parse_int_literal, scalar_size, storage_size }
 
 struct QbeType {

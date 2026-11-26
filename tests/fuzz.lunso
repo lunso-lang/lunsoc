@@ -7,10 +7,10 @@ import std.rand
 import std.str
 import std.vec
 import frontend.ast { Ast }
-import ir { IrModule, lower as ir_lower }
+import backend.ir { IrModule, lower as ir_lower }
 import frontend.lexer { Token, tokenize_all }
 import frontend.parser { ParseError, parse }
-import qbe { write as qbe_write }
+import backend.qbe { write as qbe_write }
 import frontend.sema { Sema, SemaError, check }
 
 fun parse_u64(s: []u8, out: *u64): bool {
