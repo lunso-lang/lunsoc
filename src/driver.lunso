@@ -11,6 +11,7 @@ import backend.ir
 import frontend.lexer
 import frontend.modules
 import backend.native
+import backend.native { NativeOptions }
 import frontend.parser
 import backend.qbe
 import frontend.sema
@@ -397,7 +398,7 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
         var nkind = native.NativeKind.Exe
         if mode == Mode.EmitAsm { nkind = native.NativeKind.Asm }
         if mode == Mode.EmitObj { nkind = native.NativeKind.Obj }
-        var opts = native.NativeOptions {
+        var opts = NativeOptions {
             kind: nkind,
             nostdlib: nostdlib,
             output: output,
