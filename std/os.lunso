@@ -200,6 +200,7 @@ pub fun run(program: []u8, argv: [][]u8): i64 {
     if status < 0 {
         return status
     }
+    defer mem.deinit(&arena)
 
     var raw_env: []u8
     var has_env = file.read_all("/proc/self/environ", &arena, &raw_env) >= 0
@@ -207,14 +208,12 @@ pub fun run(program: []u8, argv: [][]u8): i64 {
     var c_envp: **u8
     status = build_envp(&arena, raw_env, has_env, &c_envp)
     if status < 0 {
-        mem.deinit(&arena)
         return status
     }
 
     var prog_cstr: *u8
     status = resolve_program(&arena, program, raw_env, has_env, &prog_cstr)
     if status < 0 {
-        mem.deinit(&arena)
         return status
     }
 
@@ -222,7 +221,6 @@ pub fun run(program: []u8, argv: [][]u8): i64 {
     var argv_mem: *u8
     status = mem.alloc(&arena, ((argc as u64) + 1) * 8, 8, &argv_mem)
     if status < 0 {
-        mem.deinit(&arena)
         return status
     }
     var c_argv = argv_mem as **u8
@@ -230,7 +228,6 @@ pub fun run(program: []u8, argv: [][]u8): i64 {
         var arg_ptr: *u8
         status = to_cstr(&arena, argv[i], &arg_ptr)
         if status < 0 {
-            mem.deinit(&arena)
             return status
         }
         c_argv[i] = arg_ptr
@@ -240,7 +237,6 @@ pub fun run(program: []u8, argv: [][]u8): i64 {
 
     var pid = lunso_sys_fork()
     if pid < 0 {
-        mem.deinit(&arena)
         return pid
     }
     if pid == 0 {
@@ -248,7 +244,6 @@ pub fun run(program: []u8, argv: [][]u8): i64 {
         lunso_sys_exit(127)
     }
 
-    mem.deinit(&arena)
     var wstatus: i32 = 0
     var waited = lunso_sys_wait4(pid, &wstatus)
     for waited == -4 {

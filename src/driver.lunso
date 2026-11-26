@@ -362,7 +362,6 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
 
     if len(path) == 0 || mode_count > 1 {
         print_usage(2, prog_name)
-        mem.deinit(&arena)
         return 1
     }
 
@@ -370,7 +369,6 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
     var allows_link = mode == Mode.Build || mode == Mode.Run
     if (len(output) > 0 && !allows_output) || (!allows_link && (objects.len > 0 || nostdlib)) {
         io.eprintln("-o, --link, and -nostdlib require a compatible build/run mode")
-        mem.deinit(&arena)
         return 1
     }
 

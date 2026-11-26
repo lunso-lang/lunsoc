@@ -9,15 +9,13 @@ fun main(): i32 {
         io.eprintln("lunsoc: could not initialize arena")
         return 1
     }
+    defer mem.deinit(&arena)
 
     var argv: [][]u8
     if args.load(&arena, &argv) < 0 {
         io.eprintln("lunsoc: could not load arguments")
-        mem.deinit(&arena)
         return 1
     }
 
-    var rc = driver.run(&arena, argv)
-    mem.deinit(&arena)
-    return rc
+    return driver.run(&arena, argv)
 }
