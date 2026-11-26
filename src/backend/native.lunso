@@ -100,54 +100,54 @@ pub fun build(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *Na
 
     var il_path = str.concat(arena, dir, "/module.ssa")
     var asm_path = str.concat(arena, dir, "/module.s")
-
-    var qbe_buf: vec.Vec[u8]
-    var ok = qbe.write(arena, mod, &qbe_buf)
-    if !ok {
-        io.eprintln("lunsoc: could not generate QBE IL")
-    } else if file.write_all(il_path, vec.as_slice.[u8](&qbe_buf)) < 0 {
-        io.eprint(il_path)
-        io.eprintln(": could not write QBE IL")
-        ok = false
-    } else {
-        var qbe_bin = get_tool(arena, "QBE", "qbe")
-        var cc_bin = get_tool(arena, "CC", "cc")
-        if opts.kind == NativeKind.Asm {
-            var qbe_argv: [4][]u8 = [qbe_bin, "-o", opts.output, il_path]
-            ok = run_tool(qbe_bin, qbe_argv[0..4])
-        } else {
-            var qbe_argv: [4][]u8 = [qbe_bin, "-o", asm_path, il_path]
-            ok = run_tool(qbe_bin, qbe_argv[0..4])
-            if ok {
-                if opts.kind == NativeKind.Obj {
-                    var cc_argv: [5][]u8 = [cc_bin, "-c", asm_path, "-o", opts.output]
-                    ok = run_tool(cc_bin, cc_argv[0..5])
-                } else {
-                    var link_args: vec.Vec[[]u8]
-                    if vec.init.[[]u8](&link_args, arena, (8 + len(opts.objects) * 2) as u64) < 0 {
-                        ok = false
-                    } else {
-                        vec.push_value.[[]u8](&link_args, cc_bin)
-                        if opts.nostdlib {
-                            vec.push_value.[[]u8](&link_args, "-nostdlib")
-                        }
-                        vec.push_value.[[]u8](&link_args, asm_path)
-                        for var i: i64 = 0; i < len(opts.objects); i += 1 {
-                            vec.push_value.[[]u8](&link_args, opts.objects[i])
-                        }
-                        vec.push_value.[[]u8](&link_args, "-o")
-                        vec.push_value.[[]u8](&link_args, opts.output)
-                        ok = run_tool(cc_bin, vec.as_slice.[[]u8](&link_args))
-                    }
-                }
-            }
-        }
+    defer {
+        os.remove(asm_path)
+        os.remove(il_path)
+        os.rmdir(dir)
     }
 
-    os.remove(asm_path)
-    os.remove(il_path)
-    os.rmdir(dir)
-    return ok
+    var qbe_buf: vec.Vec[u8]
+    if !qbe.write(arena, mod, &qbe_buf) {
+        io.eprintln("lunsoc: could not generate QBE IL")
+        return false
+    }
+    if file.write_all(il_path, vec.as_slice.[u8](&qbe_buf)) < 0 {
+        io.eprint(il_path)
+        io.eprintln(": could not write QBE IL")
+        return false
+    }
+
+    var qbe_bin = get_tool(arena, "QBE", "qbe")
+    var cc_bin = get_tool(arena, "CC", "cc")
+    if opts.kind == NativeKind.Asm {
+        var qbe_argv: [4][]u8 = [qbe_bin, "-o", opts.output, il_path]
+        return run_tool(qbe_bin, qbe_argv[0..4])
+    }
+
+    var qbe_argv: [4][]u8 = [qbe_bin, "-o", asm_path, il_path]
+    if !run_tool(qbe_bin, qbe_argv[0..4]) {
+        return false
+    }
+    if opts.kind == NativeKind.Obj {
+        var cc_argv: [5][]u8 = [cc_bin, "-c", asm_path, "-o", opts.output]
+        return run_tool(cc_bin, cc_argv[0..5])
+    }
+
+    var link_args: vec.Vec[[]u8]
+    if vec.init.[[]u8](&link_args, arena, (8 + len(opts.objects) * 2) as u64) < 0 {
+        return false
+    }
+    vec.push_value.[[]u8](&link_args, cc_bin)
+    if opts.nostdlib {
+        vec.push_value.[[]u8](&link_args, "-nostdlib")
+    }
+    vec.push_value.[[]u8](&link_args, asm_path)
+    for var i: i64 = 0; i < len(opts.objects); i += 1 {
+        vec.push_value.[[]u8](&link_args, opts.objects[i])
+    }
+    vec.push_value.[[]u8](&link_args, "-o")
+    vec.push_value.[[]u8](&link_args, opts.output)
+    return run_tool(cc_bin, vec.as_slice.[[]u8](&link_args))
 }
 
 pub fun run_exe(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *NativeOptions, run_args: [][]u8): i32 {
@@ -157,30 +157,33 @@ pub fun run_exe(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *
         return 1
     }
     var exe_path = str.concat(arena, dir, "/program")
+    defer {
+        os.remove(exe_path)
+        os.rmdir(dir)
+    }
+
     var run_opts = NativeOptions {
         kind: NativeKind.Exe,
         nostdlib: opts.nostdlib,
         output: exe_path,
         objects: opts.objects,
     }
-    var rc: i32 = 1
-    if build(arena, mod, source_path, &run_opts) {
-        var argv_buf: vec.Vec[[]u8]
-        if vec.init.[[]u8](&argv_buf, arena, (len(run_args) + 1) as u64) >= 0 {
-            vec.push_value.[[]u8](&argv_buf, exe_path)
-            for var i: i64 = 0; i < len(run_args); i += 1 {
-                vec.push_value.[[]u8](&argv_buf, run_args[i])
-            }
-            var status = os.run(exe_path, vec.as_slice.[[]u8](&argv_buf))
-            if status < 0 {
-                io.eprint(exe_path)
-                io.eprintln(": could not run program")
-            } else {
-                rc = status as i32
-            }
-        }
+    if !build(arena, mod, source_path, &run_opts) {
+        return 1
     }
-    os.remove(exe_path)
-    os.rmdir(dir)
-    return rc
+    var argv_buf: vec.Vec[[]u8]
+    if vec.init.[[]u8](&argv_buf, arena, (len(run_args) + 1) as u64) < 0 {
+        return 1
+    }
+    vec.push_value.[[]u8](&argv_buf, exe_path)
+    for var i: i64 = 0; i < len(run_args); i += 1 {
+        vec.push_value.[[]u8](&argv_buf, run_args[i])
+    }
+    var status = os.run(exe_path, vec.as_slice.[[]u8](&argv_buf))
+    if status < 0 {
+        io.eprint(exe_path)
+        io.eprintln(": could not run program")
+        return 1
+    }
+    return status as i32
 }
