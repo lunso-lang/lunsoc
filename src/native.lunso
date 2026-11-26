@@ -3,6 +3,7 @@ import std.fmt
 import std.io
 import std.mem
 import std.os
+import std.path
 import std.str
 import std.time
 import std.vec
@@ -37,29 +38,14 @@ fun has_entry_point(mod: *IrModule): bool {
     return false
 }
 
-fun join_str(arena: *mem.Arena, a: []u8, b: []u8): []u8 {
-    var total = len(a) + len(b)
-    var buf: *u8
-    if mem.alloc(arena, total as u64, 1, &buf) < 0 {
-        return ""
-    }
-    for var i: i64 = 0; i < len(a); i += 1 {
-        buf[i] = a[i]
-    }
-    for var i: i64 = 0; i < len(b); i += 1 {
-        buf[len(a) + i] = b[i]
-    }
-    return buf[0..total]
-}
-
 fun make_temp_dir(arena: *mem.Arena): []u8 {
     var ns = time.monotonic_ns() as u64
     for var attempt: u64 = 0; attempt < 64; attempt += 1 {
         var buf: [32]u8
         var n = fmt.u64_to_buf(ns + attempt, &buf[0], 32)
-        var path = join_str(arena, "/tmp/.lunso-", buf[0..n])
-        if len(path) > 0 && os.mkdir(path) == 0 {
-            return path
+        var dir = path.join2(arena, "/tmp/.lunso-", buf[0..n])
+        if len(dir) > 0 && os.mkdir(dir) == 0 {
+            return dir
         }
     }
     return ""
@@ -112,8 +98,8 @@ pub fun build(arena: *mem.Arena, mod: *IrModule, source_path: []u8, opts: *Nativ
         return false
     }
 
-    var il_path = join_str(arena, dir, "/module.ssa")
-    var asm_path = join_str(arena, dir, "/module.s")
+    var il_path = path.join2(arena, dir, "/module.ssa")
+    var asm_path = path.join2(arena, dir, "/module.s")
 
     var qbe_buf: vec.Vec[u8]
     var ok = qbe_write(arena, mod, &qbe_buf)
@@ -170,7 +156,7 @@ pub fun run_exe(arena: *mem.Arena, mod: *IrModule, source_path: []u8, opts: *Nat
         io.eprintln("lunsoc: could not create temporary directory")
         return 1
     }
-    var exe_path = join_str(arena, dir, "/program")
+    var exe_path = path.join2(arena, dir, "/program")
     var run_opts = NativeOptions {
         kind: NativeKind.Exe,
         nostdlib: opts.nostdlib,

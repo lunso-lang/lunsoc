@@ -4,6 +4,7 @@ import std.fmt
 import std.io
 import std.mem
 import std.os
+import std.path
 import std.str
 import std.vec
 import ast { Ast }
@@ -251,17 +252,10 @@ fun resolve_std_obj(arena: *mem.Arena): []u8 {
     return ""
 }
 
-fun default_output_name(arena: *mem.Arena, path: []u8, mode: Mode): []u8 {
-    var base_start: i64 = 0
-    for var i: i64 = 0; i < len(path); i += 1 {
-        if path[i] == '/' { base_start = i + 1 }
-    }
-    var base = path[base_start..len(path)]
-    var has_ext = len(base) > 6 && str.equals(base[(len(base) - 6)..len(base)], ".lunso")
-    var stem = base
-    if has_ext {
-        stem = base[0..(len(base) - 6)]
-    }
+fun default_output_name(arena: *mem.Arena, src_path: []u8, mode: Mode): []u8 {
+    var base = path.basename(src_path)
+    var stem = path.strip_suffix(base, ".lunso")
+    var has_ext = len(stem) < len(base)
     var suffix: []u8 = ""
     if mode == Mode.EmitAsm {
         suffix = ".s"
@@ -270,14 +264,11 @@ fun default_output_name(arena: *mem.Arena, path: []u8, mode: Mode): []u8 {
     } else if !has_ext {
         suffix = ".out"
     }
-    var total = len(stem) + len(suffix)
-    var buf: *u8
-    if mem.alloc(arena, total as u64, 1, &buf) < 0 {
+    var out = path.join2(arena, stem, suffix)
+    if len(out) == 0 {
         return "a.out"
     }
-    for var i: i64 = 0; i < len(stem); i += 1 { buf[i] = stem[i] }
-    for var i: i64 = 0; i < len(suffix); i += 1 { buf[len(stem) + i] = suffix[i] }
-    return buf[0..total]
+    return out
 }
 
 fun main(): i32 {

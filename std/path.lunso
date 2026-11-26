@@ -1,0 +1,60 @@
+import std.mem
+import std.str
+
+pub fun join2(arena: *mem.Arena, a: []u8, b: []u8): []u8 {
+    var total = len(a) + len(b)
+    if total == 0 { return "" }
+    var buf: *u8
+    if mem.alloc(arena, total as u64, 1, &buf) < 0 {
+        return ""
+    }
+    for var i: i64 = 0; i < len(a); i += 1 { buf[i] = a[i] }
+    for var i: i64 = 0; i < len(b); i += 1 { buf[len(a) + i] = b[i] }
+    return buf[0..total]
+}
+
+pub fun join3(arena: *mem.Arena, a: []u8, b: []u8, c: []u8): []u8 {
+    var total = len(a) + len(b) + len(c)
+    if total == 0 { return "" }
+    var buf: *u8
+    if mem.alloc(arena, total as u64, 1, &buf) < 0 {
+        return ""
+    }
+    var pos: i64 = 0
+    for var i: i64 = 0; i < len(a); i += 1 { buf[pos] = a[i]; pos += 1 }
+    for var i: i64 = 0; i < len(b); i += 1 { buf[pos] = b[i]; pos += 1 }
+    for var i: i64 = 0; i < len(c); i += 1 { buf[pos] = c[i]; pos += 1 }
+    return buf[0..total]
+}
+
+pub fun join(arena: *mem.Arena, dir: []u8, name: []u8): []u8 {
+    if len(dir) == 0 { return name }
+    if dir[len(dir) - 1] == '/' {
+        return join2(arena, dir, name)
+    }
+    return join3(arena, dir, "/", name)
+}
+
+pub fun dir_prefix(p: []u8): []u8 {
+    var last: i64 = -1
+    for var i: i64 = 0; i < len(p); i += 1 {
+        if p[i] == '/' { last = i }
+    }
+    if last < 0 { return "" }
+    return p[0..(last + 1)]
+}
+
+pub fun basename(p: []u8): []u8 {
+    var base_start: i64 = 0
+    for var i: i64 = 0; i < len(p); i += 1 {
+        if p[i] == '/' { base_start = i + 1 }
+    }
+    return p[base_start..len(p)]
+}
+
+pub fun strip_suffix(s: []u8, suffix: []u8): []u8 {
+    if len(s) >= len(suffix) && str.equals(s[(len(s) - len(suffix))..len(s)], suffix) {
+        return s[0..(len(s) - len(suffix))]
+    }
+    return s
+}
