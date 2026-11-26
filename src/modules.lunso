@@ -48,6 +48,53 @@ struct Loader {
 const NO_MODULE: u32 = ~0 as u32
 const MAX_MODULE_DEPTH: u32 = 256
 
+pub fun print_caret(src: []u8, file_start: u32, file_end: u32, offset: u32, line: u64, col: u64) {
+    if offset < file_start || offset > file_end || (file_end as i64) > len(src) {
+        return
+    }
+    var line_start = offset
+    for line_start > file_start {
+        var prev = src[(line_start - 1) as i64]
+        if prev == '\n' || prev == '\r' {
+            break
+        }
+        line_start -= 1
+    }
+    var line_end = offset
+    for line_end < file_end {
+        var ch = src[line_end as i64]
+        if ch == '\n' || ch == '\r' {
+            break
+        }
+        line_end += 1
+    }
+    var num_buf: [32]u8
+    var num_len = fmt.u64_to_buf(line, &num_buf[0], 32)
+    io.eprint("  ")
+    io.write_bytes(2, num_buf[0..num_len])
+    io.eprint(" | ")
+    io.write_bytes(2, src[(line_start as i64)..(line_end as i64)])
+    io.eprintln("")
+    io.eprint("  ")
+    for var k: i64 = 0; k < num_len; k += 1 {
+        io.eprint(" ")
+    }
+    io.eprint(" | ")
+    var p = line_start
+    for p < offset && p < line_end {
+        if src[p as i64] == '\t' {
+            io.eprint("\t")
+        } else {
+            io.eprint(" ")
+        }
+        p += 1
+    }
+    if p == line_end && col > ((line_end - line_start) as u64) + 1 {
+        // clamp at end of line
+    }
+    io.eprintln("^")
+}
+
 pub fun report(program: *ModuleProgram, offset: u32, message: []u8) {
     var files = vec.as_slice.[ModuleFile](&program.files)
     var src = program.tree.source
@@ -77,6 +124,7 @@ pub fun report(program: *ModuleProgram, offset: u32, message: []u8) {
         fmt.print_u64(2, col)
         io.eprint(": ")
         io.eprintln(message)
+        print_caret(src, f.start, f.start + f.length, offset, line, col)
         return
     }
     io.eprintln(message)

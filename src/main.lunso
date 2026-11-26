@@ -9,7 +9,7 @@ import std.vec
 import ast { Ast }
 import ir { IrModule, lower as ir_lower, write as ir_write }
 import lexer { Token, TokenKind, error_message, token_name, tokenize_all }
-import modules { ModuleProgram, load as modules_load, report as modules_report }
+import modules { ModuleProgram, load as modules_load, print_caret, report as modules_report }
 import native { NativeKind, NativeOptions, build as native_build, run_exe as native_run_exe }
 import parser { ParseError, parse }
 import qbe { write as qbe_write }
@@ -49,7 +49,7 @@ fun has_lexeme(kind: TokenKind): bool {
     }
 }
 
-fun report_error(path: []u8, tok: Token, msg: []u8): i32 {
+fun report_error(path: []u8, source: []u8, tok: Token, msg: []u8): i32 {
     io.eprint(path)
     io.eprint(":")
     fmt.print_u64(2, tok.line)
@@ -57,6 +57,7 @@ fun report_error(path: []u8, tok: Token, msg: []u8): i32 {
     fmt.print_u64(2, tok.column)
     io.eprint(": ")
     io.eprintln(msg)
+    print_caret(source, 0, len(source) as u32, tok.offset as u32, tok.line, tok.column)
     return 1
 }
 
@@ -69,7 +70,7 @@ fun dump_tokens(path: []u8, source: []u8, arena: *mem.Arena): i32 {
 
     var err_tok: Token
     if !tokenize_all(source, &tokens, &err_tok) {
-        return report_error(path, err_tok, error_message(err_tok.kind))
+        return report_error(path, source, err_tok, error_message(err_tok.kind))
     }
 
     var slice = vec.as_slice.[Token](&tokens)
@@ -95,7 +96,7 @@ fun run_parse(path: []u8, source: []u8, arena: *mem.Arena): i32 {
     var tree: Ast
     var err: ParseError
     if !parse(arena, source, &tree, &err) {
-        return report_error(path, err.token, err.message)
+        return report_error(path, source, err.token, err.message)
     }
     var nodes: u64 = 0
     if tree.nodes.len > 0 {
