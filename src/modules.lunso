@@ -628,8 +628,8 @@ fun resolve_references(l: *Loader, owner: u32, first: u32, end: u32, member_pref
                 if count >= 3 && !qualify(l, owner, id, parts[start..63], AstBindingKind.Enum) {
                     return false
                 }
-                if (tree.qualified.len == before && count >= 2 &&
-                   !qualify(l, owner, id, parts[start..64], AstBindingKind.Const)) {
+                if tree.qualified.len == before && count >= 2 &&
+                   !qualify(l, owner, id, parts[start..64], AstBindingKind.Const) {
                     return false
                 }
             }

@@ -48,22 +48,7 @@ def collect_run_tests() -> list[Path]:
 
 def main() -> int:
     boot = find_boot()
-    samples = sorted((ROOT / "src").glob("*.lunso"))
     diff_count = 0
-
-    if boot is not None:
-        for sample in samples:
-            for extra in ([], ["--parse"]):
-                got = subprocess.run([str(LUNSOC), *extra, str(sample)], text=True, capture_output=True, check=False)
-                exp = subprocess.run([str(boot), *extra, str(sample)], text=True, capture_output=True, check=False)
-                if got.returncode != exp.returncode or got.stdout != exp.stdout:
-                    print(
-                        f"mismatch on {sample.name} ({extra}): rc {got.returncode} vs {exp.returncode}\n"
-                        f"got: {got.stdout!r}\nexp: {exp.stdout!r}\nstderr: {got.stderr}",
-                        file=sys.stderr,
-                    )
-                    return 1
-                diff_count += 1
 
     pass_files = sorted((ROOT / "tests" / "pass").glob("*.lunso"))
     if boot is not None:

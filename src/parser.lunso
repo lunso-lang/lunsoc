@@ -59,9 +59,9 @@ fun read_token(l: *Lexer, in_group: bool): Token {
                     tok.column += 1
                 }
                 tok.kind = TokenKind.Newline
-                if (l.source[tok.offset as i64] == '\r' &&
-                    tok.offset + 1 < (len(l.source) as u64) &&
-                    l.source[(tok.offset + 1) as i64] == '\n') {
+                if l.source[tok.offset as i64] == '\r' &&
+                   tok.offset + 1 < (len(l.source) as u64) &&
+                   l.source[(tok.offset + 1) as i64] == '\n' {
                     tok.length = 2
                 } else {
                     tok.length = 1
@@ -327,17 +327,17 @@ fun parse_postfix(p: *Parser, base_in: u32): u32 {
             if base != NODE_NONE {
                 base_kind = nodes[base as i64].kind
             }
-            if (p.disallow_struct_literal ||
-               (base_kind != AstKind.Identifier && base_kind != AstKind.Member && base_kind != AstKind.GenericType)) {
+            if p.disallow_struct_literal ||
+               (base_kind != AstKind.Identifier && base_kind != AstKind.Member && base_kind != AstKind.GenericType) {
                 return base
             }
             base = parse_struct_literal(p, base)
             nodes = vec.as_slice.[AstNode](&p.tree.nodes)
         } else if tok.kind == TokenKind.LeftBracket {
             var base_kind = nodes[base as i64].kind
-            if (!p.disallow_struct_literal &&
+            if !p.disallow_struct_literal &&
                (base_kind == AstKind.Identifier || base_kind == AstKind.Member) &&
-               bracket_before_initializer(p)) {
+               bracket_before_initializer(p) {
                 base = parse_type_application(p, AstKind.GenericType, base)
                 nodes = vec.as_slice.[AstNode](&p.tree.nodes)
                 continue

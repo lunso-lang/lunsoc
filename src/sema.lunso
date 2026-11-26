@@ -1829,8 +1829,8 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         if !c.has_error {
             if !is_writable_lvalue(c, node.a) {
                 var target_k = nodes[node.a as i64].kind
-                if (target_k == AstKind.Dereference ||
-                    (target_k == AstKind.Index && node_info(c, nodes[node.a as i64].a).type_info.kind == TypeKind.Pointer)) {
+                if target_k == AstKind.Dereference ||
+                   (target_k == AstKind.Index && node_info(c, nodes[node.a as i64].a).type_info.kind == TypeKind.Pointer) {
                     res = fail(c, node.a, "cannot write through a read-only pointer")
                 } else {
                     res = fail(c, node.a, "cannot assign to non-writable target")
