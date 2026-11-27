@@ -23,7 +23,7 @@ fun qbe_type(k: TypeKind): QbeType {
         TypeKind.I64, TypeKind.U64 => return QbeType { base: 'l', abi: "l", extend: "" }
         TypeKind.F32 => return QbeType { base: 's', abi: "s", extend: "" }
         TypeKind.F64 => return QbeType { base: 'd', abi: "d", extend: "" }
-        TypeKind.Struct, TypeKind.Pointer, TypeKind.Result => return QbeType { base: 'l', abi: "l", extend: "" }
+        TypeKind.Struct, TypeKind.Pointer, TypeKind.Result, TypeKind.Func => return QbeType { base: 'l', abi: "l", extend: "" }
         TypeKind.Array, TypeKind.Slice, TypeKind.Any => return QbeType { base: 'l', abi: "", extend: "" }
         else => return QbeType { base: 'l', abi: "", extend: "" }
     }
@@ -309,6 +309,60 @@ fun write_call(out: *vec.Vec[u8], mod: *ir.IrModule, inst: ir.IrInstruction) {
     push_str(out, ")\n")
     if is_fat(callee.result.kind) {
         write_load(out, callee.result.kind, inst.result, "retbuf", inst.result)
+    } else if !sret && len(res_qt.extend) > 0 {
+        push_str(out, "\t%v")
+        push_u32(out, inst.result)
+        push_str(out, " =w ")
+        push_str(out, res_qt.extend)
+        push_str(out, " %raw")
+        push_u32(out, inst.result)
+        push_byte(out, '\n')
+    }
+}
+
+fun write_call_indirect(out: *vec.Vec[u8], mod: *ir.IrModule, inst: ir.IrInstruction) {
+    var ft = &mod.func_types.data[(inst.c >> 16) as i64]
+    var count = inst.c & 65535
+    var args = mod.arguments.as_slice()
+    var res_qt = qbe_type(ft.result.kind)
+    var sret = uses_sret(ft.result.kind)
+    push_byte(out, '\t')
+    if inst.result != 0 && !sret {
+        push_byte(out, '%')
+        if len(res_qt.extend) > 0 { push_str(out, "raw") } else { push_byte(out, 'v') }
+        push_u32(out, inst.result)
+        push_str(out, " =")
+        push_str(out, res_qt.abi)
+        push_byte(out, ' ')
+    }
+    push_str(out, "call %v")
+    push_u32(out, inst.a)
+    push_byte(out, '(')
+    if sret {
+        push_str(out, "l %")
+        if is_fat(ft.result.kind) { push_str(out, "retbuf") } else { push_byte(out, 'v') }
+        push_u32(out, inst.result)
+    }
+    for var i: u32 = 0; i < count; i += 1 {
+        if sret || i != 0 {
+            push_str(out, ", ")
+        }
+        var pt = ft.params.data[i as i64]
+        var arg = args[(inst.b + i) as i64]
+        if is_fat(pt.kind) {
+            push_str(out, "l %v")
+            push_u32(out, arg)
+            push_str(out, ", l %len")
+            push_u32(out, arg)
+        } else {
+            push_str(out, qbe_type(pt.kind).abi)
+            push_str(out, " %v")
+            push_u32(out, arg)
+        }
+    }
+    push_str(out, ")\n")
+    if is_fat(ft.result.kind) {
+        write_load(out, ft.result.kind, inst.result, "retbuf", inst.result)
     } else if !sret && len(res_qt.extend) > 0 {
         push_str(out, "\t%v")
         push_u32(out, inst.result)
@@ -900,6 +954,14 @@ fun write_instruction(out: *vec.Vec[u8], mod: *ir.IrModule, index: u32,
         }
     } else if inst.op == ir.IrOp.Call {
         write_call(out, mod, inst)
+    } else if inst.op == ir.IrOp.FnAddr {
+        push_str(out, "\t%v")
+        push_u32(out, inst.result)
+        push_str(out, " =l copy ")
+        write_symbol(out, mod, inst.a)
+        push_byte(out, '\n')
+    } else if inst.op == ir.IrOp.CallIndirect {
+        write_call_indirect(out, mod, inst)
     } else if inst.op == ir.IrOp.Jump {
         push_str(out, "\tjmp @b")
         push_u32(out, inst.a)
@@ -1107,7 +1169,7 @@ fun write_function(arena: *mem.Arena, out: *vec.Vec[u8], mod: *ir.IrModule, inde
                     if sz != 0 { push_str(out, "alloc8 ") } else { push_str(out, "copy ") }
                     push_u32(out, sz)
                     push_byte(out, '\n')
-                } else if inst.op == ir.IrOp.Call && uses_sret(inst.type_info.kind) {
+                } else if (inst.op == ir.IrOp.Call || inst.op == ir.IrOp.CallIndirect) && uses_sret(inst.type_info.kind) {
                     if is_fat(inst.type_info.kind) {
                         push_str(out, "\t%retbuf")
                         push_u32(out, inst.result)

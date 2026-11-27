@@ -527,6 +527,32 @@ fun parse_type(p: *Parser): u32 {
     if match_tok(p, lexer.TokenKind.Bang) {
         var inner = parse_type(p)
         res = add_node(p, ast.AstKind.ResultType, opening, inner, 0)
+    } else if match_tok(p, lexer.TokenKind.Fun) {
+        if p.current.kind != lexer.TokenKind.LeftParen {
+            fail(p, "expected '(' after 'fun'")
+        } else {
+            open_group(p)
+            var mark = p.pending.len
+            if p.current.kind != lexer.TokenKind.RightParen {
+                for !p.has_error {
+                    push_child(p, parse_type(p))
+                    if !match_tok(p, lexer.TokenKind.Comma) || p.current.kind == lexer.TokenKind.RightParen {
+                        break
+                    }
+                }
+            }
+            close_group(p, lexer.TokenKind.RightParen, "expected ')' after function type parameters")
+            var ret = ast.NODE_NONE
+            if match_tok(p, lexer.TokenKind.Colon) {
+                ret = parse_type(p)
+            }
+            var ft = ast.AstFuncType { params: finish_children(p, mark), return_type: ret }
+            var idx = p.tree.func_types.len as u32
+            if !p.has_error && p.tree.func_types.push(&ft) < 0 {
+                fail(p, "could not allocate AST storage")
+            }
+            res = add_node(p, ast.AstKind.FuncType, opening, idx, 0)
+        }
     } else if match_tok(p, lexer.TokenKind.Star) {
         var read_only: u32 = 0
         if match_tok(p, lexer.TokenKind.Const) {

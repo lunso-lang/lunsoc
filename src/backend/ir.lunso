@@ -14,6 +14,8 @@ pub enum IrOp : u8 {
     Load,
     Store,
     Call,
+    FnAddr,
+    CallIndirect,
     StorageAlloc,
     StorageInit,
     WidenIndex,
@@ -85,6 +87,7 @@ pub struct IrModule {
     struct_names: vec.Vec[Span]
     pointees: vec.Vec[SemaType]
     elements: vec.Vec[SemaType]
+    func_types: vec.Vec[SemaFuncType]
     functions: vec.Vec[IrFunction]
     parameters: vec.Vec[SemaType]
     instructions: vec.Vec[IrInstruction]
@@ -284,6 +287,23 @@ fun lower_call(l: *Lowering, id: u32): u32 {
     var count = call.b - 1
     // Lower arguments first so nested calls do not interleave in mod.arguments.
     var temp_vals: [64]u32
+    if info.is_indirect_call {
+        var callee_val = lower_expression(l, children[call.a as i64])
+        for var i: u32 = 0; i < count && !l.failed; i += 1 {
+            var val = lower_expression(l, children[(call.a + 1 + i) as i64])
+            if i < 64 {
+                temp_vals[i as i64] = val
+            }
+        }
+        var first = l.mod.arguments.len as u32
+        for var i: u32 = 0; i < count && !l.failed; i += 1 {
+            if l.mod.arguments.push_value(temp_vals[i as i64]) < 0 {
+                l.failed = true
+            }
+        }
+        var packed_c = (info.binding << 16) | (count & 65535)
+        return emit_value(l, IrOp.CallIndirect, info.type_info, callee_val, first, packed_c)
+    }
     var arg_offset: u32 = 0
     if info.method_call != 0 {
         var callee_id = children[call.a as i64]
@@ -374,6 +394,9 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
         if info.is_const {
             return lower_const(l, info)
         }
+        if info.is_fn_ref {
+            return emit_value(l, IrOp.FnAddr, info.type_info, info.binding, 0, 0)
+        }
         var op = IrOp.Load
         if info.is_boolean_literal { op = IrOp.Bool }
         return emit_value(l, op, info.type_info, info.binding, 0, 0)
@@ -436,6 +459,9 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
     if node.kind == AstKind.Index || node.kind == AstKind.Member || node.kind == AstKind.Dereference {
         if info.is_const {
             return lower_const(l, info)
+        }
+        if info.is_fn_ref {
+            return emit_value(l, IrOp.FnAddr, info.type_info, info.binding, 0, 0)
         }
         if info.is_enum_case {
             var evals = l.sem.enum_values.as_slice()
@@ -1027,6 +1053,7 @@ pub fun lower(arena: *mem.Arena, tree: *Ast, sem: *Sema, out: *IrModule): bool {
     out.module_count = tree.modules.len as u32
     out.pointees = sem.pointees
     out.elements = sem.elements
+    out.func_types = sem.func_types
     if out.struct_names.init(arena, sem.records.len + 1) < 0 { return false }
     if out.functions.init(arena, sem.functions.len + 1) < 0 { return false }
     if out.parameters.init(arena, 32) < 0 { return false }

@@ -20,6 +20,7 @@ pub enum AstKind : u8 {
     ConstType,
     PointerType,
     ResultType,
+    FuncType,
     GenericType,
     Block,
     Return,
@@ -181,6 +182,11 @@ pub struct AstOrElse {
     is_block: bool
 }
 
+pub struct AstFuncType {
+    params: NodeRange
+    return_type: u32
+}
+
 pub struct AstVariable {
     name_length: u32
     type_node: u32
@@ -226,6 +232,7 @@ pub struct Ast {
     for_headers: vec.Vec[AstForHeader]
     for_in_headers: vec.Vec[AstForInHeader]
     or_elses: vec.Vec[AstOrElse]
+    func_types: vec.Vec[AstFuncType]
     variables: vec.Vec[AstVariable]
     modules: vec.Vec[AstModuleScope]
     qualified: vec.Vec[AstQualified]
@@ -246,6 +253,7 @@ pub fun init(arena: *mem.Arena, source: []u8, out: *Ast): bool {
     if out.for_headers.init(arena, 16) < 0 { return false }
     if out.for_in_headers.init(arena, 16) < 0 { return false }
     if out.or_elses.init(arena, 16) < 0 { return false }
+    if out.func_types.init(arena, 16) < 0 { return false }
     if out.variables.init(arena, 32) < 0 { return false }
     if out.modules.init(arena, 8) < 0 { return false }
     if out.qualified.init(arena, 16) < 0 { return false }
