@@ -1,6 +1,6 @@
 // expect-stdout: hi Alice, n=42, ok=true, pi=3.14\n
 import std.fmt
-import std.format
+import std.io
 import std.mem
 import std.str
 
@@ -21,11 +21,11 @@ fun main(): i32 {
     var name = "Alice"
     var n: i32 = 42
     var ok = true
-    var out = format.format(&arena, "hi {}, n={}, ok={}, pi={}", name, n, ok, fmt.format_f64(3.1415, 2, &arena))
+    var out = fmt.format(&arena, "hi {}, n={}, ok={}, pi={}", name, n, ok, fmt.format_f64(3.1415, 2, &arena))
     if !str.equals(out, "hi Alice, n=42, ok=true, pi=3.14") {
         return 3
     }
 
-    format.print("{}\n", out)
+    io.printfln("{}", out)
     return 0
 }

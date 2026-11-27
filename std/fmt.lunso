@@ -1,7 +1,8 @@
-import std.io
 import std.mem
 import std.str
 import std.vec
+
+ext fun lunso_sys_write(fd: i32, buffer: *const u8, count: u64): i64
 
 pub fun u64_to_buf(value: u64, buf: *u8, cap: i64): i64 {
     if cap <= 0 {
@@ -106,7 +107,7 @@ pub fun print_u64(fd: i32, value: u64): i64 {
     if n < 0 {
         return n
     }
-    return io.write_bytes(fd, buf[0..n])
+    return lunso_sys_write(fd, &buf[0], n as u64)
 }
 
 pub fun print_i64(fd: i32, value: i64): i64 {
@@ -115,7 +116,7 @@ pub fun print_i64(fd: i32, value: i64): i64 {
     if n < 0 {
         return n
     }
-    return io.write_bytes(fd, buf[0..n])
+    return lunso_sys_write(fd, &buf[0], n as u64)
 }
 
 pub fun parse_u64(text: []u8, out: *u64): bool {
@@ -246,4 +247,80 @@ pub struct Builder {
     pub fun finish(self: *Builder): []u8 {
         return self.buf.as_slice()
     }
+}
+
+fun write_any(b: *Builder, a: any) {
+    var k = a.tag & 255
+    var ek = (a.tag >> 8) & 255
+    if k == 2 {
+        b.bool_val(*(a.ptr as *const bool))
+    } else if k == 3 {
+        b.i64_val((*(a.ptr as *const i8)) as i64)
+    } else if k == 4 {
+        b.i64_val((*(a.ptr as *const i16)) as i64)
+    } else if k == 5 {
+        b.i64_val((*(a.ptr as *const i32)) as i64)
+    } else if k == 6 {
+        b.i64_val(*(a.ptr as *const i64))
+    } else if k == 7 {
+        b.u64_val((*(a.ptr as *const u8)) as u64)
+    } else if k == 8 {
+        b.u64_val((*(a.ptr as *const u16)) as u64)
+    } else if k == 9 {
+        b.u64_val((*(a.ptr as *const u32)) as u64)
+    } else if k == 10 {
+        b.u64_val(*(a.ptr as *const u64))
+    } else if k == 11 {
+        b.f64_val((*(a.ptr as *const f32)) as f64, 4)
+    } else if k == 12 {
+        b.f64_val(*(a.ptr as *const f64), 4)
+    } else if k == 15 && ek == 7 {
+        b.str(*(a.ptr as *const []const u8))
+    } else if k == 16 {
+        b.str("0x").hex(*(a.ptr as *const u64))
+    } else {
+        b.str("<value>")
+    }
+}
+
+pub fun format_args(arena: *mem.Arena, fmt_str: []const u8, args: []const any): []u8 {
+    var b: Builder
+    if b.init(arena) < 0 {
+        return ""
+    }
+    var n = len(fmt_str)
+    var arg_idx: i64 = 0
+    var arg_count = len(args)
+    var i: i64 = 0
+    for i < n {
+        var ch = fmt_str[i]
+        if ch == '{' && i + 1 < n {
+            if fmt_str[i + 1] == '}' {
+                if arg_idx < arg_count {
+                    write_any(&b, args[arg_idx])
+                    arg_idx += 1
+                } else {
+                    b.str("{}")
+                }
+                i += 2
+                continue
+            }
+            if fmt_str[i + 1] == '{' {
+                b.ch('{')
+                i += 2
+                continue
+            }
+        } else if ch == '}' && i + 1 < n && fmt_str[i + 1] == '}' {
+            b.ch('}')
+            i += 2
+            continue
+        }
+        b.ch(ch)
+        i += 1
+    }
+    return b.finish()
+}
+
+pub fun format(arena: *mem.Arena, fmt_str: []const u8, args: ...any): []u8 {
+    return format_args(arena, fmt_str, args)
 }
