@@ -1,0 +1,67 @@
+import std.fs
+import std.mem
+import std.os
+import std.str
+import std.vec
+
+fun main(): i32 {
+    var arena: mem.Arena
+    if arena.init(8192) < 0 {
+        return 1
+    }
+    defer arena.deinit()
+
+    var base = "/tmp/lunso_std_fs_test"
+    fs.remove_all(base, &arena)
+
+    var nested = "/tmp/lunso_std_fs_test/a/b"
+    if fs.create_dir_all(nested) < 0 {
+        return 2
+    }
+    if !fs.exists(nested) || !fs.is_dir(nested) || fs.is_file(nested) {
+        return 3
+    }
+
+    var f1 = "/tmp/lunso_std_fs_test/a/b/hello.txt"
+    var f2 = "/tmp/lunso_std_fs_test/a/b/copy.txt"
+    var f3 = "/tmp/lunso_std_fs_test/a/b/moved.txt"
+
+    if fs.write_file(f1, "hello std.fs!") < 0 {
+        return 4
+    }
+    if !fs.exists(f1) || !fs.is_file(f1) || fs.is_dir(f1) {
+        return 5
+    }
+
+    if fs.copy_file(f1, f2) < 0 {
+        return 6
+    }
+    if fs.rename(f2, f3) < 0 {
+        return 7
+    }
+    if fs.exists(f2) || !fs.exists(f3) {
+        return 8
+    }
+
+    var content: []u8
+    if fs.read_file(f3, &arena, &content) < 0 {
+        return 9
+    }
+    if !str.equals(content, "hello std.fs!") {
+        return 10
+    }
+
+    var entries: vec.Vec[os.DirEntry]
+    if fs.read_dir(nested, &arena, &entries) < 0 || entries.len != 2 {
+        return 11
+    }
+
+    if fs.remove_all(base, &arena) < 0 {
+        return 12
+    }
+    if fs.exists(base) {
+        return 13
+    }
+
+    return 0
+}

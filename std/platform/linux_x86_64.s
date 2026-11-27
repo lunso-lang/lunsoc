@@ -197,4 +197,12 @@ lunso_sys_getdents64:
     ret
 .size lunso_sys_getdents64, .-lunso_sys_getdents64
 
+.globl lunso_sys_rename
+.type lunso_sys_rename, @function
+lunso_sys_rename:
+    mov $82, %eax          # rename
+    syscall
+    ret
+.size lunso_sys_rename, .-lunso_sys_rename
+
 .section .note.GNU-stack,"",@progbits

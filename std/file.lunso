@@ -15,7 +15,7 @@ ext fun lunso_sys_file_close(fd: i32): i64
 ext fun lunso_sys_read(fd: i32, buffer: *u8, count: u64): i64
 ext fun lunso_sys_write(fd: i32, buffer: *const u8, count: u64): i64
 
-fun open(path: []u8, out: *File, writing: bool): i64 {
+fun open(path: []const u8, out: *File, writing: bool): i64 {
     if (*out).active {
         return -16
     }
@@ -43,11 +43,11 @@ fun open(path: []u8, out: *File, writing: bool): i64 {
     return 0
 }
 
-pub fun open_read(path: []u8, out: *File): i64 {
+pub fun open_read(path: []const u8, out: *File): i64 {
     return open(path, out, false)
 }
 
-pub fun exists(path: []u8): bool {
+pub fun exists(path: []const u8): bool {
     var f: File
     if open_read(path, &f) < 0 {
         return false
@@ -56,7 +56,7 @@ pub fun exists(path: []u8): bool {
     return true
 }
 
-pub fun open_write(path: []u8, out: *File): i64 {
+pub fun open_write(path: []const u8, out: *File): i64 {
     return open(path, out, true)
 }
 
@@ -80,7 +80,7 @@ pub fun read_into(handle: *File, buffer: *u8, capacity: u64): i64 {
     return count
 }
 
-pub fun write_to(handle: *File, bytes: []u8): i64 {
+pub fun write_to(handle: *File, bytes: []const u8): i64 {
     if !(*handle).active {
         return -9
     }
@@ -170,7 +170,7 @@ fun finish(handle: *File, count: i64): i64 {
     return count
 }
 
-pub fun read_all(path: []u8, arena: *mem.Arena, out: *[]u8): i64 {
+pub fun read_all(path: []const u8, arena: *mem.Arena, out: *[]u8): i64 {
     var handle: File
     var status = open_read(path, &handle)
     if status < 0 {
@@ -189,7 +189,7 @@ pub fun read_all(path: []u8, arena: *mem.Arena, out: *[]u8): i64 {
     return status
 }
 
-pub fun write_all(path: []u8, bytes: []u8): i64 {
+pub fun write_all(path: []const u8, bytes: []const u8): i64 {
     var handle: File
     var status = open_write(path, &handle)
     if status < 0 {

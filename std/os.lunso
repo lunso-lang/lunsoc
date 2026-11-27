@@ -41,7 +41,7 @@ fun to_cstr(arena: *mem.Arena, s: []u8, out: **u8): i64 {
     return 0
 }
 
-fun with_cstr(path: []u8, buf: *u8, cap: i64): i64 {
+fun with_cstr(path: []const u8, buf: *u8, cap: i64): i64 {
     var n = len(path)
     if n >= cap {
         return -36
@@ -56,7 +56,7 @@ fun with_cstr(path: []u8, buf: *u8, cap: i64): i64 {
     return 0
 }
 
-pub fun mkdir(path: []u8): i64 {
+pub fun mkdir(path: []const u8): i64 {
     var buf: [4096]u8
     var status = with_cstr(path, &buf[0], 4096)
     if status < 0 {
@@ -65,7 +65,7 @@ pub fun mkdir(path: []u8): i64 {
     return lunso_sys_mkdir(data(buf))
 }
 
-pub fun remove(path: []u8): i64 {
+pub fun remove(path: []const u8): i64 {
     var buf: [4096]u8
     var status = with_cstr(path, &buf[0], 4096)
     if status < 0 {
@@ -74,7 +74,7 @@ pub fun remove(path: []u8): i64 {
     return lunso_sys_unlink(data(buf), 0)
 }
 
-pub fun rmdir(path: []u8): i64 {
+pub fun rmdir(path: []const u8): i64 {
     var buf: [4096]u8
     var status = with_cstr(path, &buf[0], 4096)
     if status < 0 {
@@ -265,7 +265,7 @@ pub fun run(program: []u8, argv: [][]u8): i64 {
     return (128 + (wstatus & 127)) as i64
 }
 
-pub fun list_dir(path: []u8, arena: *mem.Arena, out: *vec.Vec[DirEntry]): i64 {
+pub fun list_dir(path: []const u8, arena: *mem.Arena, out: *vec.Vec[DirEntry]): i64 {
     if (arena as u64) == 0 || (out as u64) == 0 {
         return -22
     }
