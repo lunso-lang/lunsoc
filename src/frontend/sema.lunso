@@ -1320,14 +1320,9 @@ fun register_fn_sig(c: *Checker, fn_idx: u32) {
     leave_type_scope(c, saved)
 }
 
-fun specialize_function(c: *Checker, app_id: u32, decl_idx: u32): u32 {
+fun specialize_function_with_args(c: *Checker, site_id: u32, decl_idx: u32, args: vec.Vec[SemaType]): u32 {
     var fdecls = vec.as_slice.[AstFunction](&c.tree.functions)
     var fdecl = fdecls[decl_idx as i64]
-    var count = fdecl.type_parameters.count
-    var args: vec.Vec[SemaType]
-    if !resolve_type_args(c, app_id, count, &args) {
-        return ~0 as u32
-    }
     var arg_slice = vec.as_slice.[SemaType](&args)
     var fns = c.sema.functions.data
     for var i = c.tree.functions.len as i64; i < (c.sema.functions.len as i64); i += 1 {
@@ -1336,7 +1331,7 @@ fun specialize_function(c: *Checker, app_id: u32, decl_idx: u32): u32 {
         }
     }
     if c.instantiation_depth >= 64 {
-        fail(c, app_id, "generic instantiation nesting limit exceeded")
+        fail(c, site_id, "generic instantiation nesting limit exceeded")
         return ~0 as u32
     }
     var fn_idx = c.sema.functions.len as u32
@@ -1344,7 +1339,7 @@ fun specialize_function(c: *Checker, app_id: u32, decl_idx: u32): u32 {
         result: empty_type(),
         slot_count: 0,
         declaration: decl_idx,
-        instantiated_at: app_id,
+        instantiated_at: site_id,
         param_types: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: c.arena },
         arguments: args,
         nodes: vec.Vec[SemaNode] { data: 0 as *SemaNode, len: 0, cap: 0, arena: c.arena },
@@ -1368,6 +1363,113 @@ fun specialize_function(c: *Checker, app_id: u32, decl_idx: u32): u32 {
     vec.push.[SemaFunction](&c.sema.functions, &sf)
     register_fn_sig(c, fn_idx)
     return fn_idx
+}
+
+fun specialize_function(c: *Checker, app_id: u32, decl_idx: u32): u32 {
+    var fdecls = vec.as_slice.[AstFunction](&c.tree.functions)
+    var count = fdecls[decl_idx as i64].type_parameters.count
+    var args: vec.Vec[SemaType]
+    if !resolve_type_args(c, app_id, count, &args) {
+        return ~0 as u32
+    }
+    return specialize_function_with_args(c, app_id, decl_idx, args)
+}
+
+fun unify_param_ast(c: *Checker, param_ast: u32, actual: SemaType, fdecl: AstFunction, inferred: *vec.Vec[SemaType]) {
+    if param_ast == NODE_NONE || actual.kind == TypeKind.Invalid {
+        return
+    }
+    var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
+    var children = vec.as_slice.[u32](&c.tree.children)
+    var pnode = nodes[param_ast as i64]
+    if pnode.kind == AstKind.TypeName || pnode.kind == AstKind.Identifier {
+        var name = node_span(c.tree, param_ast, pnode.a)
+        for var i: u32 = 0; i < fdecl.type_parameters.count; i += 1 {
+            var tp_id = children[(fdecl.type_parameters.first + i) as i64]
+            var tp_node = nodes[tp_id as i64]
+            if same_span(c.tree, name, node_span(c.tree, tp_id, tp_node.a)) {
+                if inferred.data[i as i64].kind == TypeKind.Invalid {
+                    inferred.data[i as i64] = actual
+                }
+                return
+            }
+        }
+        return
+    }
+    if pnode.kind == AstKind.ConstType {
+        unify_param_ast(c, pnode.a, actual, fdecl, inferred)
+        return
+    }
+    if pnode.kind == AstKind.PointerType {
+        if actual.kind == TypeKind.Pointer {
+            var pts = vec.as_slice.[SemaType](&c.sema.pointees)
+            unify_param_ast(c, pnode.a, pts[actual.pointee as i64], fdecl, inferred)
+        }
+        return
+    }
+    if pnode.kind == AstKind.ArrayType {
+        if pnode.b == NODE_NONE && actual.kind == TypeKind.Slice {
+            var elems = vec.as_slice.[SemaType](&c.sema.elements)
+            unify_param_ast(c, pnode.a, elems[actual.element_type as i64], fdecl, inferred)
+        } else if pnode.b != NODE_NONE && actual.kind == TypeKind.Array {
+            var elems = vec.as_slice.[SemaType](&c.sema.elements)
+            unify_param_ast(c, pnode.a, elems[actual.element_type as i64], fdecl, inferred)
+        }
+        return
+    }
+    if pnode.kind == AstKind.GenericType && actual.kind == TypeKind.Struct {
+        var base = children[pnode.a as i64]
+        var decl: u32 = ~0 as u32
+        var q: AstQualified
+        if find_qualified(c.tree, param_ast, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
+            decl = q.index
+        } else if find_qualified(c.tree, base, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
+            decl = q.index
+        } else {
+            var bnode = nodes[base as i64]
+            if bnode.kind == AstKind.Identifier || bnode.kind == AstKind.TypeName {
+                decl = find_struct_idx(c, node_span(c.tree, base, bnode.a))
+            }
+        }
+        var sr = &c.sema.records.data[actual.record as i64]
+        if decl != (~0 as u32) && sr.declaration == decl && (pnode.b - 1) == (sr.arguments.len as u32) {
+            for var i: u32 = 0; i < (sr.arguments.len as u32); i += 1 {
+                unify_param_ast(c, children[(pnode.a + 1 + i) as i64], sr.arguments.data[i as i64], fdecl, inferred)
+            }
+        }
+    }
+}
+
+fun infer_function_type_args(c: *Checker, call_id: u32, decl_idx: u32, out_args: *vec.Vec[SemaType]): bool {
+    var nodes = vec.as_slice.[AstNode](&c.tree.nodes)
+    var children = vec.as_slice.[u32](&c.tree.children)
+    var call_node = nodes[call_id as i64]
+    var fdecl = vec.as_slice.[AstFunction](&c.tree.functions)[decl_idx as i64]
+    if call_node.b - 1 != fdecl.parameters.count {
+        return false
+    }
+    var count = fdecl.type_parameters.count
+    vec.init.[SemaType](out_args, c.arena, count as u64)
+    var inv = empty_type()
+    for var i: u32 = 0; i < count; i += 1 {
+        vec.push.[SemaType](out_args, &inv)
+    }
+    for var i: u32 = 0; i < fdecl.parameters.count && !c.has_error; i += 1 {
+        var arg_id = children[(call_node.a + 1 + i) as i64]
+        var arg_t = check_expr(c, arg_id, empty_type())
+        var param_id = children[(fdecl.parameters.first + i) as i64]
+        var pnode = nodes[param_id as i64]
+        unify_param_ast(c, pnode.b, arg_t, fdecl, out_args)
+    }
+    if c.has_error {
+        return false
+    }
+    for var i: u32 = 0; i < count; i += 1 {
+        if out_args.data[i as i64].kind == TypeKind.Invalid {
+            return false
+        }
+    }
+    return true
 }
 
 fun is_literal_expr(tree: *Ast, id: u32): bool {
@@ -1633,7 +1735,12 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                     var fdecls = vec.as_slice.[AstFunction](&c.tree.functions)
                     if fdecls[fi as i64].type_parameters.count > 0 {
                         if app == NODE_NONE {
-                            res = fail(c, callee, "generic function requires explicit type arguments")
+                            var inferred_args: vec.Vec[SemaType]
+                            if infer_function_type_args(c, id, fi, &inferred_args) {
+                                fi = specialize_function_with_args(c, id, fi, inferred_args)
+                            } else if !c.has_error {
+                                res = fail(c, callee, "generic function requires explicit type arguments")
+                            }
                         } else {
                             fi = specialize_function(c, app, fi)
                         }

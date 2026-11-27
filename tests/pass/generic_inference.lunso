@@ -1,0 +1,62 @@
+// lunsoc-only
+import "std/mem" as mem
+import "std/vec" as vec
+
+struct Box[T] {
+    value: T,
+}
+
+fun id[T](x: T): T {
+    return x
+}
+
+fun swap[T](a: *T, b: *T) {
+    var tmp = *a
+    *a = *b
+    *b = tmp
+}
+
+fun sum_slice[T](s: []const T): T {
+    var acc: T = 0
+    for var i: u64 = 0; i < s.len; i += 1 {
+        acc += s[i]
+    }
+    return acc
+}
+
+fun unbox[T](b: *const Box[T]): T {
+    return b.value
+}
+
+fun main(): i32 {
+    var a: i32 = 10
+    var b: i32 = 20
+    swap(&a, &b)
+    if a != 20 || b != 10 {
+        return 1
+    }
+
+    var x = id(a)
+    if x != 20 {
+        return 2
+    }
+
+    var arena = mem.arena_new(1024)
+    var v: vec.Vec[i32]
+    vec.init.[i32](&v, &arena, 4)
+    vec.push_value(&v, a)
+    vec.push_value(&v, b)
+
+    var s = vec.as_slice(&v)
+    if sum_slice(s) != 30 {
+        return 3
+    }
+
+    var bx = Box[i32] { value: 12 }
+    if unbox(&bx) != 12 {
+        return 4
+    }
+
+    mem.arena_free(&arena)
+    return 0
+}

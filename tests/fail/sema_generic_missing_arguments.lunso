@@ -1,8 +1,9 @@
 // expect-stderr: generic function requires explicit type arguments
-fun identity[T](value: T): T {
-    return value
+fun make[T](): T {
+    var x: T
+    return x
 }
 
 fun main(): i32 {
-    return identity(42)
+    return make()
 }
