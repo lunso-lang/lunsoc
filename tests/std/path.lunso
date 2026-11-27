@@ -5,10 +5,10 @@ import std.str
 
 fun main(): i32 {
     var arena: mem.Arena
-    if mem.init(&arena, 4096) < 0 {
+    if arena.init(4096) < 0 {
         return 1
     }
-    defer mem.deinit(&arena)
+    defer arena.deinit()
 
     if !str.equals(path.join(&arena, "/tmp", "a.lunso"), "/tmp/a.lunso") ||
        !str.equals(path.join(&arena, "/tmp/", "a.lunso"), "/tmp/a.lunso") ||
@@ -17,20 +17,49 @@ fun main(): i32 {
         return 2
     }
 
+    if !path.is_abs("/a/b") || path.is_abs("a/b") || path.is_abs("") {
+        return 3
+    }
+    if !str.equals(path.dirname("/a/b/c.lunso"), "/a/b") ||
+       !str.equals(path.dirname("/a/b/"), "/a") ||
+       !str.equals(path.dirname("/a"), "/") ||
+       !str.equals(path.dirname("/"), "/") ||
+       !str.equals(path.dirname("foo.lunso"), ".") {
+        return 4
+    }
+    if !str.equals(path.extension("/a/b/c.lunso"), ".lunso") ||
+       !str.equals(path.extension("/a.b/c"), "") ||
+       !str.equals(path.extension(".bashrc"), "") ||
+       !str.equals(path.stem("/a/b/c.lunso"), "c") ||
+       !str.equals(path.stem(".bashrc"), ".bashrc") {
+        return 5
+    }
+    if !str.equals(path.with_extension(&arena, "src/main.lunso", ".o"), "src/main.o") ||
+       !str.equals(path.with_extension(&arena, "src/main.lunso", "c"), "src/main.c") ||
+       !str.equals(path.with_extension(&arena, "src/main.lunso", ""), "src/main") {
+        return 6
+    }
+    if !str.equals(path.normalize(&arena, "/a/b/../c/./d//e"), "/a/c/d/e") ||
+       !str.equals(path.normalize(&arena, "/../../a"), "/a") ||
+       !str.equals(path.normalize(&arena, "a/b/../../.."), "..") ||
+       !str.equals(path.normalize(&arena, "./"), ".") {
+        return 7
+    }
+
     var decoded: []u8
     if !path.from_file_uri(&arena, "file:///home/user/my%20project/main.lunso", &decoded) ||
        !str.equals(decoded, "/home/user/my project/main.lunso") {
-        return 3
+        return 8
     }
     if !path.from_file_uri(&arena, "file://localhost/tmp/test.lunso", &decoded) ||
        !str.equals(decoded, "/tmp/test.lunso") {
-        return 4
+        return 9
     }
 
     var encoded: []u8
     if !path.to_file_uri(&arena, "/home/user/my project/main.lunso", &encoded) ||
        !str.equals(encoded, "file:///home/user/my%20project/main.lunso") {
-        return 5
+        return 10
     }
 
     // Reject non-file, relative, or malformed percent-encoding.
@@ -38,7 +67,7 @@ fun main(): i32 {
        path.from_file_uri(&arena, "file://relative/path", &decoded) ||
        path.from_file_uri(&arena, "file:///bad%2", &decoded) ||
        path.to_file_uri(&arena, "relative/path", &encoded) {
-        return 6
+        return 11
     }
 
     return 0

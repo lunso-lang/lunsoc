@@ -2,8 +2,14 @@ import std.mem
 import std.str
 import std.vec
 
-pub fun join(arena: *mem.Arena, dir: []u8, name: []u8): []u8 {
-    if len(dir) == 0 { return name }
+pub fun is_abs(p: []const u8): bool {
+    return len(p) > 0 && p[0] == '/'
+}
+
+pub fun join(arena: *mem.Arena, dir: []const u8, name: []const u8): []u8 {
+    if len(dir) == 0 { return str.clone(arena, name) }
+    if len(name) == 0 { return str.clone(arena, dir) }
+    if is_abs(name) { return str.clone(arena, name) }
     if dir[len(dir) - 1] == '/' {
         return str.concat(arena, dir, name)
     }
@@ -19,12 +25,126 @@ pub fun dir_prefix(p: []u8): []u8 {
     return p[0..(last + 1)]
 }
 
-pub fun basename(p: []u8): []u8 {
+pub fun dirname(p: []const u8): []const u8 {
+    var end = len(p)
+    if end == 0 { return "." }
+    for end > 1 && p[end - 1] == '/' {
+        end -= 1
+    }
+    if end == 1 && p[0] == '/' {
+        return "/"
+    }
+    var last: i64 = -1
+    for var i: i64 = 0; i < end; i += 1 {
+        if p[i] == '/' { last = i }
+    }
+    if last < 0 { return "." }
+    if last == 0 { return "/" }
+    return p[0..last]
+}
+
+pub fun basename(p: []const u8): []const u8 {
+    var end = len(p)
+    if end == 0 { return "" }
+    for end > 1 && p[end - 1] == '/' {
+        end -= 1
+    }
+    if end == 1 && p[0] == '/' {
+        return "/"
+    }
     var base_start: i64 = 0
-    for var i: i64 = 0; i < len(p); i += 1 {
+    for var i: i64 = 0; i < end; i += 1 {
         if p[i] == '/' { base_start = i + 1 }
     }
-    return p[base_start..len(p)]
+    return p[base_start..end]
+}
+
+pub fun extension(p: []const u8): []const u8 {
+    var base = basename(p)
+    if len(base) == 0 || str.equals(base, "/") {
+        return ""
+    }
+    var i = len(base) - 1
+    for i > 0 {
+        if base[i] == '.' {
+            return base[i..len(base)]
+        }
+        i -= 1
+    }
+    return ""
+}
+
+pub fun stem(p: []const u8): []const u8 {
+    var base = basename(p)
+    var e = extension(p)
+    if len(e) == 0 {
+        return base
+    }
+    return base[0..(len(base) - len(e))]
+}
+
+pub fun with_extension(arena: *mem.Arena, p: []const u8, new_ext: []const u8): []u8 {
+    var old_ext = extension(p)
+    var prefix = p[0..(len(p) - len(old_ext))]
+    if len(new_ext) == 0 {
+        return str.clone(arena, prefix)
+    }
+    if new_ext[0] == '.' {
+        return str.concat(arena, prefix, new_ext)
+    }
+    return str.concat3(arena, prefix, ".", new_ext)
+}
+
+pub fun normalize(arena: *mem.Arena, p: []const u8): []u8 {
+    var abs = is_abs(p)
+    var parts: vec.Vec[[]const u8]
+    if parts.init(arena, 16) < 0 {
+        return ""
+    }
+    var i: i64 = 0
+    var n = len(p)
+    for i < n {
+        for i < n && p[i] == '/' {
+            i += 1
+        }
+        if i >= n { break }
+        var start = i
+        for i < n && p[i] != '/' {
+            i += 1
+        }
+        var seg = p[start..i]
+        if str.equals(seg, ".") {
+            continue
+        }
+        if str.equals(seg, "..") {
+            if parts.len > 0 && !str.equals(parts.data[parts.len - 1], "..") {
+                var popped: []const u8
+                parts.pop(&popped)
+            } else if !abs {
+                parts.push_value(seg)
+            }
+        } else {
+            parts.push_value(seg)
+        }
+    }
+    if parts.len == 0 {
+        if abs { return "/" }
+        return "."
+    }
+    var out: vec.Vec[u8]
+    if out.init(arena, (n + 2) as u64) < 0 {
+        return ""
+    }
+    if abs {
+        out.push_value('/')
+    }
+    for var k: u64 = 0; k < parts.len; k += 1 {
+        if k > 0 {
+            out.push_value('/')
+        }
+        out.append_slice(parts.data[k])
+    }
+    return out.as_slice()
 }
 
 fun hex_val(ch: u8): i32 {
@@ -41,7 +161,7 @@ fun is_uri_safe(ch: u8): bool {
     return ch == '/' || ch == '-' || ch == '.' || ch == '_' || ch == '~'
 }
 
-pub fun from_file_uri(arena: *mem.Arena, uri: []u8, out: *[]u8): bool {
+pub fun from_file_uri(arena: *mem.Arena, uri: []const u8, out: *[]u8): bool {
     if (arena as u64) == 0 || (out as u64) == 0 || !str.starts_with(uri, "file://") {
         return false
     }
@@ -53,7 +173,7 @@ pub fun from_file_uri(arena: *mem.Arena, uri: []u8, out: *[]u8): bool {
         return false
     }
     var buf: vec.Vec[u8]
-    if vec.init.[u8](&buf, arena, len(rest) as u64) < 0 {
+    if buf.init(arena, len(rest) as u64) < 0 {
         return false
     }
     for var i: i64 = 0; i < len(rest); i += 1 {
@@ -71,37 +191,37 @@ pub fun from_file_uri(arena: *mem.Arena, uri: []u8, out: *[]u8): bool {
             if byte == 0 {
                 return false
             }
-            if vec.push_value.[u8](&buf, byte) < 0 { return false }
+            if buf.push_value(byte) < 0 { return false }
             i += 2
         } else {
-            if vec.push_value.[u8](&buf, ch) < 0 { return false }
+            if buf.push_value(ch) < 0 { return false }
         }
     }
-    *out = vec.as_slice.[u8](&buf)
+    *out = buf.as_slice()
     return true
 }
 
-pub fun to_file_uri(arena: *mem.Arena, p: []u8, out: *[]u8): bool {
+pub fun to_file_uri(arena: *mem.Arena, p: []const u8, out: *[]u8): bool {
     if (arena as u64) == 0 || (out as u64) == 0 || len(p) == 0 || p[0] != '/' {
         return false
     }
     var buf: vec.Vec[u8]
-    if vec.init.[u8](&buf, arena, (len(p) + 8) as u64) < 0 {
+    if buf.init(arena, (len(p) + 8) as u64) < 0 {
         return false
     }
-    if vec.append_slice.[u8](&buf, "file://") < 0 {
+    if buf.append_slice("file://") < 0 {
         return false
     }
     var hex = "0123456789ABCDEF"
     for var i: i64 = 0; i < len(p); i += 1 {
         var ch = p[i]
         if is_uri_safe(ch) {
-            if vec.push_value.[u8](&buf, ch) < 0 { return false }
+            if buf.push_value(ch) < 0 { return false }
         } else {
             var esc: [3]u8 = ['%', hex[((ch >> 4) & 15) as i64], hex[(ch & 15) as i64]]
-            if vec.append_slice.[u8](&buf, esc[0..3]) < 0 { return false }
+            if buf.append_slice(esc[0..3]) < 0 { return false }
         }
     }
-    *out = vec.as_slice.[u8](&buf)
+    *out = buf.as_slice()
     return true
 }
