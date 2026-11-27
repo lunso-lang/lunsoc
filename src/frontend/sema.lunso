@@ -755,6 +755,11 @@ fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
     if node.kind == AstKind.GenericType {
         return specialize_record(c, id, allow_incomplete)
     }
+    if node.kind == AstKind.ConstType {
+        var t = resolve_type_inner(c, node.a, allow_incomplete)
+        t.read_only = true
+        return t
+    }
     if node.kind == AstKind.PointerType {
         var pointee = resolve_type_inner(c, node.a, true)
         if c.has_error { return empty_type() }
@@ -1238,8 +1243,22 @@ fun check_value(c: *Checker, id: u32, expected: SemaType): SemaType {
     }
     if expected.kind == TypeKind.Slice && t.kind == TypeKind.Array {
         var elems = vec.as_slice.[SemaType](&c.sema.elements)
-        if same_type(c, elems[t.element_type as i64], elems[expected.element_type as i64]) {
+        var te = elems[t.element_type as i64]
+        var ee = elems[expected.element_type as i64]
+        if expected.read_only {
+            te.read_only = ee.read_only
+        }
+        if same_type(c, te, ee) {
             node_info(c, id).borrow_array = true
+            return expected
+        }
+    }
+    if expected.kind == TypeKind.Slice && t.kind == TypeKind.Slice && expected.read_only && !t.read_only {
+        var elems = vec.as_slice.[SemaType](&c.sema.elements)
+        var te = elems[t.element_type as i64]
+        var ee = elems[expected.element_type as i64]
+        te.read_only = ee.read_only
+        if same_type(c, te, ee) {
             return expected
         }
     }
@@ -1266,7 +1285,7 @@ fun is_writable_lvalue(c: *Checker, id: u32): bool {
             return !bt.read_only
         }
         if nodes[cur as i64].kind == AstKind.Index && bt.kind == TypeKind.Slice {
-            return false
+            return !bt.read_only
         }
         cur = base
     }
@@ -1586,7 +1605,11 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                                     var elems = vec.as_slice.[SemaType](&c.sema.elements)
                                     res = simple_type(TypeKind.Pointer)
                                     res.pointee = add_pointee(c, elems[at.element_type as i64])
-                                    res.read_only = true
+                                    if at.kind == TypeKind.Slice {
+                                        res.read_only = at.read_only
+                                    } else {
+                                        res.read_only = !is_writable_lvalue(c, arg)
+                                    }
                                 }
                             } else {
                                 sn.builtin = SemaBuiltin.SizeOf
@@ -1681,7 +1704,13 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                 res.record = elem.record
                 res.record_size = elem.record_size
                 res.pointee = elem.pointee
-                res.read_only = elem.read_only
+                if bt.kind == TypeKind.Array {
+                    res.read_only = !is_writable_lvalue(c, node.a)
+                } else if bt.kind == TypeKind.Slice {
+                    res.read_only = bt.read_only
+                } else {
+                    res.read_only = elem.read_only || bt.read_only
+                }
             }
         }
     } else if node.kind == AstKind.Member {

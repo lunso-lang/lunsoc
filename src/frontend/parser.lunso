@@ -510,7 +510,11 @@ fun parse_type(p: *Parser): u32 {
             }
         }
         close_group(p, lexer.TokenKind.RightBracket, "expected ']' after array length")
+        var is_const = match_tok(p, lexer.TokenKind.Const)
         var elem = parse_type(p)
+        if is_const {
+            elem = add_node(p, ast.AstKind.ConstType, opening, elem, 0)
+        }
         res = add_node(p, ast.AstKind.ArrayType, opening, elem, count)
     }
     p.recursion_depth -= 1

@@ -17,6 +17,7 @@ pub enum AstKind : u8 {
     TypeName,
     QualifiedType,
     ArrayType,
+    ConstType,
     PointerType,
     GenericType,
     Block,

@@ -1,0 +1,36 @@
+// lunsoc-only
+// expect-exit: 0
+
+fun fill(dst: []u8, val: u8) {
+    for var i: i64 = 0; i < len(dst); i += 1 {
+        dst[i] = val
+    }
+}
+
+fun sum(src: []const u8): i32 {
+    var acc: i32 = 0
+    for var i: i64 = 0; i < len(src); i += 1 {
+        acc += src[i] as i32
+    }
+    return acc
+}
+
+fun main(): i32 {
+    var buf: [4]u8 = [1, 2, 3, 4]
+    var s: []u8 = buf[0..4]
+    s[0] = 10
+    fill(s[1..4], 5)
+    // buf is now [10, 5, 5, 5] -> sum = 25
+    if sum(s) != 25 || sum(buf) != 25 {
+        return 1
+    }
+    var ptr: *u8 = data(s)
+    ptr[0] = 20
+    if buf[0] != 20 {
+        return 2
+    }
+    if sum("AB") != 131 {
+        return 3
+    }
+    return 0
+}
