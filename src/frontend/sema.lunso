@@ -133,6 +133,7 @@ struct Checker {
     current_fn_idx: u32
     recursion_depth: u32
     module: u32
+    owner_struct: u32
     type_parameters: NodeRange
     type_arguments: []SemaType
     instantiation_depth: u32
@@ -144,6 +145,7 @@ struct TypeScope {
     parameters: NodeRange
     arguments: []SemaType
     module: u32
+    owner_struct: u32
     instantiation_depth: u32
 }
 
@@ -152,6 +154,7 @@ fun enter_type_scope(c: *Checker, module: u32, params: NodeRange, args: []SemaTy
         parameters: c.type_parameters,
         arguments: c.type_arguments,
         module: c.module,
+        owner_struct: c.owner_struct,
         instantiation_depth: c.instantiation_depth,
     }
     c.type_parameters = params
@@ -165,6 +168,7 @@ fun leave_type_scope(c: *Checker, saved: TypeScope) {
     c.type_parameters = saved.parameters
     c.type_arguments = saved.arguments
     c.module = saved.module
+    c.owner_struct = saved.owner_struct
     c.instantiation_depth = saved.instantiation_depth
 }
 
@@ -638,35 +642,7 @@ fun resolve_type_args(c: *Checker, id: u32, expected_count: u32, out: *vec.Vec[S
     return true
 }
 
-fun specialize_record(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
-    var nodes = c.tree.nodes.as_slice()
-    var children = c.tree.children.as_slice()
-    var node = nodes[id as i64]
-    var base = children[node.a as i64]
-    var decl: u32 = ~0 as u32
-    var q: AstQualified
-    if find_qualified(c.tree, id, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
-        decl = q.index
-    } else if find_qualified(c.tree, base, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
-        decl = q.index
-    } else {
-        var bnode = nodes[base as i64]
-        if bnode.kind == AstKind.Identifier || bnode.kind == AstKind.TypeName {
-            decl = find_struct_idx(c, node_span(c.tree, base, bnode.a))
-        }
-    }
-    if decl == (~0 as u32) {
-        return fail(c, id, "expected a generic struct")
-    }
-    var sdecls = c.tree.structs.as_slice()
-    var count = sdecls[decl as i64].type_parameters.count
-    if count == 0 {
-        return fail(c, id, "struct does not take type arguments")
-    }
-    var args: vec.Vec[SemaType]
-    if !resolve_type_args(c, id, count, &args) {
-        return empty_type()
-    }
+fun specialize_record_with_args(c: *Checker, id: u32, decl: u32, args: vec.Vec[SemaType], allow_incomplete: bool): SemaType {
     var arg_slice = args.as_slice()
     var recs = c.sema.records.data
     for var i = c.tree.structs.len as i64; i < (c.sema.records.len as i64); i += 1 {
@@ -703,6 +679,58 @@ fun specialize_record(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
     return t
 }
 
+fun specialize_record(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
+    var nodes = c.tree.nodes.as_slice()
+    var children = c.tree.children.as_slice()
+    var node = nodes[id as i64]
+    var base = children[node.a as i64]
+    var decl: u32 = ~0 as u32
+    var q: AstQualified
+    if find_qualified(c.tree, id, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
+        decl = q.index
+    } else if find_qualified(c.tree, base, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
+        decl = q.index
+    } else {
+        var bnode = nodes[base as i64]
+        if bnode.kind == AstKind.Identifier || bnode.kind == AstKind.TypeName {
+            decl = find_struct_idx(c, node_span(c.tree, base, bnode.a))
+        }
+    }
+    if decl == (~0 as u32) {
+        return fail(c, id, "expected a generic struct")
+    }
+    var sdecls = c.tree.structs.as_slice()
+    var count = sdecls[decl as i64].type_parameters.count
+    if count == 0 {
+        return fail(c, id, "struct does not take type arguments")
+    }
+    var args: vec.Vec[SemaType]
+    if !resolve_type_args(c, id, count, &args) {
+        return empty_type()
+    }
+    return specialize_record_with_args(c, id, decl, args, allow_incomplete)
+}
+
+fun resolve_self_type(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
+    var sdecl = c.tree.structs.data[c.owner_struct as i64]
+    var scount = sdecl.type_parameters.count
+    if scount == 0 {
+        if !allow_incomplete {
+            resolve_struct_layout(c, c.owner_struct)
+        }
+        var t = simple_type(TypeKind.Struct)
+        t.record = c.owner_struct
+        t.record_size = c.sema.records.data[c.owner_struct as i64].size
+        return t
+    }
+    var args: vec.Vec[SemaType]
+    args.init(c.arena, scount as u64)
+    for var i: u32 = 0; i < scount; i += 1 {
+        args.push(&c.type_arguments[i as i64])
+    }
+    return specialize_record_with_args(c, id, c.owner_struct, args, allow_incomplete)
+}
+
 fun complete_type(c: *Checker, t: SemaType): SemaType {
     if t.kind == TypeKind.Struct {
         resolve_struct_layout(c, t.record)
@@ -729,6 +757,9 @@ fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
             if same_span(c.tree, name, node_span(c.tree, tp_id, tp_node.a)) {
                 return c.type_arguments[i as i64]
             }
+        }
+        if str.equals(text, "Self") && c.owner_struct != (~0 as u32) {
+            return resolve_self_type(c, id, allow_incomplete)
         }
         var prim = resolve_primitive(text)
         if prim != TypeKind.Invalid {
@@ -1391,6 +1422,7 @@ fun register_fn_sig(c: *Checker, fn_idx: u32) {
     var saved = enter_type_scope(c, fdecl.module, fdecl.type_parameters,
                                  sf.arguments.as_slice(),
                                  c.instantiation_depth + 1)
+    c.owner_struct = fdecl.owner_struct
     var res_t = resolve_type(c, fdecl.return_type)
     c.sema.functions.data[fn_idx as i64].result = res_t
     for var p: u32 = 0; p < fdecl.parameters.count && !c.has_error; p += 1 {
@@ -1534,6 +1566,42 @@ fun unify_param_ast(c: *Checker, param_ast: u32, actual: SemaType, fdecl: AstFun
             }
         }
     }
+}
+
+fun infer_method_type_args(c: *Checker, call_id: u32, decl_idx: u32, struct_args: vec.Vec[SemaType], out_args: *vec.Vec[SemaType]): bool {
+    var nodes = c.tree.nodes.as_slice()
+    var children = c.tree.children.as_slice()
+    var call_node = nodes[call_id as i64]
+    var fdecl = c.tree.functions.as_slice()[decl_idx as i64]
+    if fdecl.parameters.count == 0 || (call_node.b - 1) != (fdecl.parameters.count - 1) {
+        return false
+    }
+    var count = fdecl.type_parameters.count
+    out_args.init(c.arena, count as u64)
+    var inv = empty_type()
+    for var i: u32 = 0; i < count; i += 1 {
+        if (i as u64) < struct_args.len {
+            out_args.push(&struct_args.data[i as i64])
+        } else {
+            out_args.push(&inv)
+        }
+    }
+    for var i: u32 = 0; i < fdecl.parameters.count - 1 && !c.has_error; i += 1 {
+        var arg_id = children[(call_node.a + 1 + i) as i64]
+        var arg_t = check_expr(c, arg_id, empty_type())
+        var param_id = children[(fdecl.parameters.first + 1 + i) as i64]
+        var pnode = nodes[param_id as i64]
+        unify_param_ast(c, pnode.b, arg_t, fdecl, out_args)
+    }
+    if c.has_error {
+        return false
+    }
+    for var i: u32 = 0; i < count; i += 1 {
+        if out_args.data[i as i64].kind == TypeKind.Invalid {
+            return false
+        }
+    }
+    return true
 }
 
 fun infer_function_type_args(c: *Checker, call_id: u32, decl_idx: u32, out_args: *vec.Vec[SemaType]): bool {
@@ -1712,7 +1780,12 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
             } else if find_qualified(c.tree, tid, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
                 si = q.index
             } else if tnode.kind == AstKind.Identifier || tnode.kind == AstKind.TypeName {
-                si = find_struct_idx(c, node_span(c.tree, tid, tnode.a))
+                var tspan = node_span(c.tree, tid, tnode.a)
+                if str.equals(span_bytes(c.tree, tspan), "Self") && c.owner_struct != (~0 as u32) {
+                    si = resolve_self_type(c, tid, false).record
+                } else {
+                    si = find_struct_idx(c, tspan)
+                }
             }
         }
         if si == (~0 as u32) {
@@ -1803,7 +1876,12 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                                         }
                                         fi = specialize_function_with_args(c, id, fi, margs)
                                     } else {
-                                        res = fail(c, callee, "generic method requires explicit type arguments")
+                                        var inferred_args: vec.Vec[SemaType]
+                                        if infer_method_type_args(c, id, fi, sr.arguments, &inferred_args) {
+                                            fi = specialize_function_with_args(c, id, fi, inferred_args)
+                                        } else if !c.has_error {
+                                            res = fail(c, callee, "generic method requires explicit type arguments")
+                                        }
                                     }
                                 } else {
                                     fi = specialize_function(c, app, fi)
@@ -2745,6 +2823,7 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
     c.current_fn_idx = ~0 as u32
     c.recursion_depth = 0
     c.module = 0
+    c.owner_struct = ~0 as u32
     c.type_parameters = NodeRange { first: 0, count: 0 }
     c.instantiation_depth = 0
     c.locals.init(arena, 64)
@@ -2847,6 +2926,7 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
         var saved = enter_type_scope(&c, fdecl.module, fdecl.type_parameters,
                                      (sf_list[i].arguments).as_slice(),
                                      c.instantiation_depth + 1)
+        c.owner_struct = fdecl.owner_struct
         c.current_return = sf_list[i].result
         c.current_fn_idx = i as u32
         c.locals.len = 0
