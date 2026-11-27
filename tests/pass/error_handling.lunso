@@ -1,0 +1,69 @@
+// lunsoc-only
+import std.str
+
+fun div_pos(a: i32, b: i32): !i32 {
+    if b <= 0 {
+        return fail("divisor must be positive")
+    }
+    return a / b
+}
+
+fun bump(flag: *bool): !void {
+    *flag = true
+    return
+}
+
+fun chain(a: i32, b: i32, deferred_ran: *bool): !i64 {
+    defer *deferred_ran = true
+    var q = div_pos(a, b)?
+    bump(deferred_ran)?
+    return (q as i64) * 2
+}
+
+fun check_block_err(): i32 {
+    var v = div_pos(10, 0) or err_msg {
+        if !str.equals(err_msg, "divisor must be positive") {
+            return 99
+        }
+        return 7
+    }
+    return v
+}
+
+fun main(): i32 {
+    var ok_v = div_pos(20, 4) or 0
+    if ok_v != 5 {
+        return 1
+    }
+
+    var fb = div_pos(20, 0) or 8080
+    if fb != 8080 {
+        return 2
+    }
+
+    var ran = false
+    var c_ok = chain(12, 3, &ran) or -1
+    if c_ok != 8 || !ran {
+        return 3
+    }
+
+    var ran2 = false
+    var c_err = chain(12, 0, &ran2) or -1
+    if c_err != -1 || !ran2 {
+        return 4
+    }
+
+    if check_block_err() != 7 {
+        return 5
+    }
+
+    var handled = false
+    bump(&handled) or {
+        return 6
+    }
+    if !handled {
+        return 7
+    }
+
+    return 0
+}

@@ -169,7 +169,30 @@ fun emit_store(l: *Lowering, t: SemaType, slot: u32, val: u32) {
 }
 
 fun uses_storage(t: SemaType): bool {
-    return t.kind == TypeKind.Array || t.kind == TypeKind.Struct
+    return t.kind == TypeKind.Array || t.kind == TypeKind.Struct || t.kind == TypeKind.Result
+}
+
+fun make_result_type(l: *Lowering, inner: SemaType): SemaType {
+    var al: u32 = 8
+    if inner.kind == TypeKind.Struct && (inner.record as u64) < l.sem.records.len {
+        var ral = l.sem.records.data[inner.record as i64].alignment
+        if ral > al { al = ral }
+    }
+    var val_off: u32 = 24
+    if al > 8 {
+        val_off = ((24 + al - 1) / al) * al
+    }
+    var sz = val_off + storage_size(inner)
+    var rem = sz % al
+    if rem != 0 {
+        sz += al - rem
+    }
+    var t = simple_type(TypeKind.Result)
+    t.length = val_off
+    t.record_size = sz
+    t.element = inner.kind
+    t.element_size = storage_size(inner)
+    return t
 }
 
 fun lower_node(l: *Lowering, id: u32): SemaNode {
@@ -245,6 +268,9 @@ fun lower_call(l: *Lowering, id: u32): u32 {
     var children = l.tree.children.as_slice()
     if info.builtin == SemaBuiltin.SizeOf {
         return emit_value(l, IrOp.Immediate, info.type_info, info.binding, 0, 0)
+    }
+    if info.builtin == SemaBuiltin.Fail {
+        return lower_expression(l, children[(call.a + 1) as i64])
     }
     if info.builtin != SemaBuiltin.None {
         var arg = children[(call.a + 1) as i64]
@@ -440,6 +466,88 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
         }
         return emit_value(l, IrOp.Slice, src_t, base, start, end)
     }
+    if node.kind == AstKind.Try {
+        var r_addr = lower_expression(l, node.a)
+        var res_t = lower_node(l, node.a).type_info
+        var inner_t = info.type_info
+        var ok_val = emit_value(l, IrOp.MemoryLoad, simple_type(TypeKind.Bool), r_addr, 0, 0)
+        var ok_lbl = new_label(l)
+        var err_lbl = new_label(l)
+        emit_branch(l, ok_val, ok_lbl, err_lbl)
+        emit_label(l, err_lbl)
+        var ret_t = l.sem.functions.data[l.current_fn as i64].result
+        var ret_slot = emit_value(l, IrOp.StorageAlloc, ret_t, 0, 0, 0)
+        var bool_t = simple_type(TypeKind.Bool)
+        var slice_t = simple_type(TypeKind.Slice)
+        var ok_dst = emit_value(l, IrOp.FieldAddress, ret_t, ret_slot, 0, 0)
+        var ok_false = emit_value(l, IrOp.Bool, bool_t, 0, 0, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: ok_dst, b: ok_false, c: 0 })
+        var err_src = emit_value(l, IrOp.FieldAddress, res_t, r_addr, 8, 0)
+        var err_val = emit_value(l, IrOp.MemoryLoad, slice_t, err_src, 0, 0)
+        var err_dst = emit_value(l, IrOp.FieldAddress, ret_t, ret_slot, 8, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: slice_t, result: 0, a: err_dst, b: err_val, c: 0 })
+        emit_defers(l, 0)
+        emit(l, IrInstruction { op: IrOp.Return, type_info: empty_type(), result: 0, a: ret_slot, b: 0, c: 0 })
+        emit_label(l, ok_lbl)
+        if inner_t.kind == TypeKind.Void {
+            return 0
+        }
+        var val_addr = emit_value(l, IrOp.FieldAddress, res_t, r_addr, res_t.length, 0)
+        if uses_storage(inner_t) {
+            return val_addr
+        }
+        return emit_value(l, IrOp.MemoryLoad, inner_t, val_addr, 0, 0)
+    }
+    if node.kind == AstKind.OrElse {
+        var oeh = l.tree.or_elses.as_slice()[node.a as i64]
+        var r_addr = lower_expression(l, oeh.expr)
+        var res_t = lower_node(l, oeh.expr).type_info
+        var inner_t = info.type_info
+        var ok_val = emit_value(l, IrOp.MemoryLoad, simple_type(TypeKind.Bool), r_addr, 0, 0)
+        var ok_lbl = new_label(l)
+        var err_lbl = new_label(l)
+        var end_lbl = new_label(l)
+        var out_slot: u32 = 0
+        if inner_t.kind != TypeKind.Void {
+            out_slot = l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count
+            l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count += 1
+        }
+        emit_branch(l, ok_val, ok_lbl, err_lbl)
+        emit_label(l, ok_lbl)
+        if inner_t.kind != TypeKind.Void {
+            var val_addr = emit_value(l, IrOp.FieldAddress, res_t, r_addr, res_t.length, 0)
+            var v = val_addr
+            if !uses_storage(inner_t) {
+                v = emit_value(l, IrOp.MemoryLoad, inner_t, val_addr, 0, 0)
+            }
+            emit_store(l, inner_t, out_slot, v)
+        }
+        emit_jump(l, end_lbl)
+        emit_label(l, err_lbl)
+        if oeh.is_block {
+            if oeh.err_name.length > 0 {
+                var slice_t = simple_type(TypeKind.Slice)
+                var err_src = emit_value(l, IrOp.FieldAddress, res_t, r_addr, 8, 0)
+                var err_val = emit_value(l, IrOp.MemoryLoad, slice_t, err_src, 0, 0)
+                emit_store(l, slice_t, info.binding, err_val)
+            }
+            lower_statement(l, oeh.handler)
+            if lower_node(l, oeh.handler).falls_through {
+                emit_jump(l, end_lbl)
+            }
+        } else {
+            var fb = lower_expression(l, oeh.handler)
+            if inner_t.kind != TypeKind.Void {
+                emit_store(l, inner_t, out_slot, fb)
+            }
+            emit_jump(l, end_lbl)
+        }
+        emit_label(l, end_lbl)
+        if inner_t.kind != TypeKind.Void {
+            return emit_value(l, IrOp.Load, inner_t, out_slot, 0, 0)
+        }
+        return 0
+    }
     if node.kind == AstKind.Cast {
         var val = lower_expression(l, node.a)
         var src_t = lower_node(l, node.a).type_info
@@ -537,6 +645,34 @@ fun lower_expression(l: *Lowering, id: u32): u32 {
             tag |= (l.sem.pointees.data[orig_t.pointee as i64].kind as u32) << 8
         }
         val = emit_value(l, IrOp.MakeAny, simple_type(TypeKind.Any), val, tag, 0)
+    }
+    if info.result_wrap == 1 {
+        var inner_t = info.type_info
+        if info.borrow_array {
+            inner_t.kind = TypeKind.Slice
+        } else if info.promotion != TypeKind.Invalid {
+            inner_t = simple_type(info.promotion)
+        }
+        var res_t = make_result_type(l, inner_t)
+        var slot_addr = emit_value(l, IrOp.StorageAlloc, res_t, 0, 0, 0)
+        var bool_t = simple_type(TypeKind.Bool)
+        var ok_addr = emit_value(l, IrOp.FieldAddress, res_t, slot_addr, 0, 0)
+        var ok_val = emit_value(l, IrOp.Bool, bool_t, 1, 0, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: ok_addr, b: ok_val, c: 0 })
+        var val_addr = emit_value(l, IrOp.FieldAddress, res_t, slot_addr, res_t.length, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: inner_t, result: 0, a: val_addr, b: val, c: 0 })
+        val = slot_addr
+    } else if info.result_wrap == 2 {
+        var res_t = info.type_info
+        var slot_addr = emit_value(l, IrOp.StorageAlloc, res_t, 0, 0, 0)
+        var bool_t = simple_type(TypeKind.Bool)
+        var slice_t = simple_type(TypeKind.Slice)
+        var ok_addr = emit_value(l, IrOp.FieldAddress, res_t, slot_addr, 0, 0)
+        var ok_val = emit_value(l, IrOp.Bool, bool_t, 0, 0, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: ok_addr, b: ok_val, c: 0 })
+        var err_addr = emit_value(l, IrOp.FieldAddress, res_t, slot_addr, 8, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: slice_t, result: 0, a: err_addr, b: val, c: 0 })
+        val = slot_addr
     }
     return val
 }
@@ -825,6 +961,16 @@ fun lower_statement(l: *Lowering, id: u32) {
         var val: u32 = 0
         if node.a != NODE_NONE {
             val = lower_expression(l, node.a)
+        } else if l.current_fn < (l.sem.functions.len as u32) {
+            var ret_t = l.sem.functions.data[l.current_fn as i64].result
+            if ret_t.kind == TypeKind.Result {
+                var slot_addr = emit_value(l, IrOp.StorageAlloc, ret_t, 0, 0, 0)
+                var bool_t = simple_type(TypeKind.Bool)
+                var ok_addr = emit_value(l, IrOp.FieldAddress, ret_t, slot_addr, 0, 0)
+                var ok_val = emit_value(l, IrOp.Bool, bool_t, 1, 0, 0)
+                emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: ok_addr, b: ok_val, c: 0 })
+                val = slot_addr
+            }
         }
         emit_defers(l, 0)
         emit(l, IrInstruction { op: IrOp.Return, type_info: empty_type(), result: 0, a: val, b: 0, c: 0 })

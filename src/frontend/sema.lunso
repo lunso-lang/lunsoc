@@ -22,6 +22,8 @@ pub enum TypeKind : u8 {
     Slice,
     Pointer,
     Any,
+    Result,
+    Error,
 }
 
 pub struct SemaType {
@@ -41,6 +43,7 @@ pub enum SemaBuiltin : u8 {
     Len,
     Data,
     SizeOf,
+    Fail,
 }
 
 pub struct SemaNode {
@@ -49,6 +52,7 @@ pub struct SemaNode {
     builtin: SemaBuiltin
     promotion: TypeKind
     method_call: u8
+    result_wrap: u8
     box_any: bool
     is_boolean_literal: bool
     borrow_array: bool
@@ -234,7 +238,7 @@ pub fun element_size(t: SemaType): u32 {
     if t.kind == TypeKind.Array || t.kind == TypeKind.Slice {
         return t.element_size
     }
-    if t.kind == TypeKind.Struct {
+    if t.kind == TypeKind.Struct || t.kind == TypeKind.Result {
         return t.record_size
     }
     return scalar_size(t.kind)
@@ -244,7 +248,7 @@ pub fun storage_size(t: SemaType): u32 {
     if t.kind == TypeKind.Array {
         return t.length * t.element_size
     }
-    if t.kind == TypeKind.Struct {
+    if t.kind == TypeKind.Struct || t.kind == TypeKind.Result {
         return t.record_size
     }
     if t.kind == TypeKind.Slice || t.kind == TypeKind.Any {
@@ -264,6 +268,12 @@ fun type_alignment(c: *Checker, t: SemaType): u32 {
     }
     if t.kind == TypeKind.Slice || t.kind == TypeKind.Any {
         return 8
+    }
+    if t.kind == TypeKind.Result {
+        var elems = c.sema.elements.as_slice()
+        var al = type_alignment(c, elems[t.element_type as i64])
+        if al < 8 { al = 8 }
+        return al
     }
     var sz = scalar_size(t.kind)
     if sz == 0 {
@@ -328,7 +338,7 @@ fun same_type(c: *Checker, a: SemaType, b: SemaType): bool {
         var pts = c.sema.pointees.as_slice()
         return same_type(c, pts[a.pointee as i64], pts[b.pointee as i64])
     }
-    if a.kind == TypeKind.Array || a.kind == TypeKind.Slice {
+    if a.kind == TypeKind.Array || a.kind == TypeKind.Slice || a.kind == TypeKind.Result {
         if a.kind == TypeKind.Array && a.length != b.length {
             return false
         }
@@ -766,6 +776,34 @@ fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
         }
         return fail(c, id, "unknown qualified type")
     }
+    if node.kind == AstKind.ResultType {
+        var inner = empty_type()
+        var anode = nodes[node.a as i64]
+        if anode.kind == AstKind.TypeName && str.equals(span_bytes(c.tree, node_span(c.tree, node.a, anode.a)), "void") {
+            inner = simple_type(TypeKind.Void)
+        } else {
+            inner = resolve_type_inner(c, node.a, allow_incomplete)
+        }
+        if c.has_error { return empty_type() }
+        var al = type_alignment(c, inner)
+        if al < 8 { al = 8 }
+        var val_off: u32 = 24
+        if al > 8 {
+            val_off = ((24 + al - 1) / al) * al
+        }
+        var total = val_off + storage_size(inner)
+        var rem = total % al
+        if rem != 0 {
+            total += al - rem
+        }
+        var t = simple_type(TypeKind.Result)
+        t.length = val_off
+        t.record_size = total
+        t.element = inner.kind
+        t.element_type = add_element(c, inner)
+        t.element_size = storage_size(inner)
+        return t
+    }
     if node.kind == AstKind.GenericType {
         return specialize_record(c, id, allow_incomplete)
     }
@@ -901,6 +939,7 @@ fun resolve_struct_layout(c: *Checker, rec_idx: u32) {
             builtin: SemaBuiltin.None,
             promotion: TypeKind.Invalid,
             method_call: 0,
+            result_wrap: 0,
             box_any: false,
             is_boolean_literal: false,
             borrow_array: false,
@@ -1257,6 +1296,23 @@ fun check_value(c: *Checker, id: u32, expected: SemaType): SemaType {
     if same_type(c, t, expected) {
         return t
     }
+    if expected.kind == TypeKind.Result {
+        if t.kind == TypeKind.Error {
+            var sn = node_info(c, id)
+            sn.result_wrap = 2
+            sn.type_info = expected
+            return expected
+        }
+        var inner_exp = c.sema.elements.data[expected.element_type as i64]
+        if inner_exp.kind == TypeKind.Void {
+            return fail(c, id, "cannot return a value from !void")
+        }
+        check_value(c, id, inner_exp)
+        if !c.has_error {
+            node_info(c, id).result_wrap = 1
+        }
+        return expected
+    }
     if expected.kind == TypeKind.Any {
         if t.kind == TypeKind.Array {
             var sn = node_info(c, id)
@@ -1389,6 +1445,7 @@ fun specialize_function_with_args(c: *Checker, site_id: u32, decl_idx: u32, args
         builtin: SemaBuiltin.None,
         promotion: TypeKind.Invalid,
         method_call: 0,
+        result_wrap: 0,
         box_any: false,
         is_boolean_literal: false,
         borrow_array: false,
@@ -1834,10 +1891,23 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
             if !has_q && app == NODE_NONE {
                 var cname = node_span(c.tree, callee, cnode.a)
                 var text = span_bytes(c.tree, cname)
-                if str.equals(text, "len") || str.equals(text, "data") || str.equals(text, "size_of") {
+                if str.equals(text, "len") || str.equals(text, "data") || str.equals(text, "size_of") || (str.equals(text, "fail") && find_fn_idx(c, cname) == (~0 as u32)) {
                     is_builtin = true
                     if node.b != 2 {
                         res = fail(c, id, "builtin expects 1 argument")
+                    } else if str.equals(text, "fail") {
+                        var arg = children[(node.a + 1) as i64]
+                        var msg_t = simple_type(TypeKind.Slice)
+                        msg_t.element = TypeKind.U8
+                        msg_t.element_type = add_element(c, simple_type(TypeKind.U8))
+                        msg_t.element_size = 1
+                        msg_t.read_only = true
+                        check_value(c, arg, msg_t)
+                        if !c.has_error {
+                            var sn = node_info(c, id)
+                            sn.builtin = SemaBuiltin.Fail
+                            res = simple_type(TypeKind.Error)
+                        }
                     } else {
                         var arg = children[(node.a + 1) as i64]
                         var at = check_expr(c, arg, empty_type())
@@ -2103,6 +2173,61 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                 }
             }
         }
+    } else if node.kind == AstKind.Try {
+        var rt = check_expr(c, node.a, empty_type())
+        if !c.has_error {
+            if rt.kind != TypeKind.Result {
+                res = fail(c, node.a, "? requires a !T result expression")
+            } else if c.current_return.kind != TypeKind.Result {
+                res = fail(c, id, "? can only be used in a function returning !T")
+            } else {
+                res = c.sema.elements.data[rt.element_type as i64]
+            }
+        }
+    } else if node.kind == AstKind.OrElse {
+        var oeh = c.tree.or_elses.data[node.a as i64]
+        var rt = check_expr(c, oeh.expr, empty_type())
+        if !c.has_error {
+            if rt.kind != TypeKind.Result {
+                res = fail(c, oeh.expr, "'or' requires a !T result expression")
+            } else {
+                var inner_t = c.sema.elements.data[rt.element_type as i64]
+                if !oeh.is_block {
+                    check_value(c, oeh.handler, inner_t)
+                } else {
+                    var saved_locals = c.locals.len
+                    c.scope_depth += 1
+                    if oeh.err_name.length > 0 {
+                        var eslot = c.slot_count
+                        c.slot_count += 1
+                        var msg_t = simple_type(TypeKind.Slice)
+                        msg_t.element = TypeKind.U8
+                        msg_t.element_type = add_element(c, simple_type(TypeKind.U8))
+                        msg_t.element_size = 1
+                        msg_t.read_only = true
+                        var elv = LocalVar {
+                            name: oeh.err_name,
+                            slot: eslot,
+                            type_info: msg_t,
+                            is_const: false,
+                            const_idx: 0,
+                            depth: c.scope_depth,
+                        }
+                        c.locals.push(&elv)
+                        node_info(c, id).binding = eslot
+                    }
+                    var bf = check_block(c, oeh.handler)
+                    c.scope_depth -= 1
+                    c.locals.len = saved_locals
+                    if !c.has_error && inner_t.kind != TypeKind.Void && bf {
+                        fail(c, oeh.handler, "'or' block must return or diverge when expression yields a value")
+                    }
+                }
+                if !c.has_error {
+                    res = inner_t
+                }
+            }
+        }
     } else if node.kind == AstKind.Cast {
         var dst = resolve_type(c, node.b)
         if !c.has_error {
@@ -2263,7 +2388,12 @@ fun check_statement(c: *Checker, id: u32): bool {
             fail(c, id, "cannot return from defer")
         }
         if node.a == NODE_NONE {
-            if c.current_return.kind != TypeKind.Void {
+            if c.current_return.kind == TypeKind.Result {
+                var inner = c.sema.elements.data[c.current_return.element_type as i64]
+                if inner.kind != TypeKind.Void {
+                    fail(c, id, "non-void function must return a value")
+                }
+            } else if c.current_return.kind != TypeKind.Void {
                 fail(c, id, "non-void function must return a value")
             }
         } else {
@@ -2591,6 +2721,7 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
         builtin: SemaBuiltin.None,
         promotion: TypeKind.Invalid,
         method_call: 0,
+        result_wrap: 0,
         box_any: false,
         is_boolean_literal: false,
         borrow_array: false,
