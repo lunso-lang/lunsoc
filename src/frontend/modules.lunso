@@ -64,8 +64,7 @@ fun file_available(l: *Loader, p: []u8): bool {
 }
 
 pub fun find_file_at(files: []ModuleFile, offset: u32): i64 {
-    for var i: i64 = 0; i < len(files); i += 1 {
-        var f = files[i]
+    for i, f in files {
         if offset >= f.start && offset <= f.start + f.length {
             return i
         }
@@ -208,8 +207,7 @@ fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
             if !file_available(l, file_path) {
                 file_path = ""
                 var fname = str.concat(l.arena, name, ".lunso")
-                for var k: i64 = 0; k < len(l.include_dirs); k += 1 {
-                    var inc = l.include_dirs[k]
+                for inc in l.include_dirs {
                     if len(inc) == 0 { continue }
                     var cand = path.join(l.arena, inc, fname)
                     if file_available(l, cand) {
@@ -332,9 +330,9 @@ fun declaration_info(tree: *Ast, id: u32, out_name: *Span, out_kind: *AstBinding
 
 fun binding_named(mod: *ModuleEntry, name: []u8, out: *AstBinding): bool {
     var bs = mod.scope.bindings.as_slice()
-    for var i: i64 = 0; i < len(bs); i += 1 {
-        if str.equals(bs[i].name, name) {
-            *out = bs[i]
+    for b in bs {
+        if str.equals(b.name, name) {
+            *out = b
             return true
         }
     }

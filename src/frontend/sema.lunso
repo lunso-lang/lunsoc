@@ -421,9 +421,9 @@ fun find_in_module(c: *Checker, name: Span, kind: AstBindingKind): u32 {
     }
     var bs = (c.tree.modules.data[c.module as i64].bindings).as_slice()
     var target = span_bytes(c.tree, name)
-    for var i: i64 = 0; i < len(bs); i += 1 {
-        if bs[i].kind == kind && str.equals(bs[i].name, target) {
-            return bs[i].index
+    for b in bs {
+        if b.kind == kind && str.equals(b.name, target) {
+            return b.index
         }
     }
     return ~0 as u32
@@ -431,8 +431,8 @@ fun find_in_module(c: *Checker, name: Span, kind: AstBindingKind): u32 {
 
 fun find_struct_idx(c: *Checker, name: Span): u32 {
     var list = c.tree.structs.as_slice()
-    for var i: i64 = 0; i < len(list); i += 1 {
-        if list[i].module == c.module && same_span(c.tree, list[i].name, name) {
+    for i, item in list {
+        if item.module == c.module && same_span(c.tree, item.name, name) {
             return i as u32
         }
     }
@@ -441,8 +441,8 @@ fun find_struct_idx(c: *Checker, name: Span): u32 {
 
 fun find_enum_idx(c: *Checker, name: Span): u32 {
     var list = c.tree.enums.as_slice()
-    for var i: i64 = 0; i < len(list); i += 1 {
-        if list[i].module == c.module && same_span(c.tree, list[i].name, name) {
+    for i, item in list {
+        if item.module == c.module && same_span(c.tree, item.name, name) {
             return i as u32
         }
     }
@@ -451,8 +451,8 @@ fun find_enum_idx(c: *Checker, name: Span): u32 {
 
 fun find_const_idx(c: *Checker, name: Span): u32 {
     var list = c.tree.consts.as_slice()
-    for var i: i64 = 0; i < len(list); i += 1 {
-        if !list[i].local && list[i].module == c.module && same_span(c.tree, list[i].name, name) {
+    for i, item in list {
+        if !item.local && item.module == c.module && same_span(c.tree, item.name, name) {
             return i as u32
         }
     }
@@ -461,8 +461,8 @@ fun find_const_idx(c: *Checker, name: Span): u32 {
 
 fun find_fn_idx(c: *Checker, name: Span): u32 {
     var list = c.tree.functions.as_slice()
-    for var i: i64 = 0; i < len(list); i += 1 {
-        if list[i].owner_struct == (~0 as u32) && list[i].module == c.module && same_span(c.tree, list[i].name, name) {
+    for i, item in list {
+        if item.owner_struct == (~0 as u32) && item.module == c.module && same_span(c.tree, item.name, name) {
             return i as u32
         }
     }
@@ -471,8 +471,8 @@ fun find_fn_idx(c: *Checker, name: Span): u32 {
 
 fun find_method_idx(c: *Checker, struct_decl: u32, name: Span): u32 {
     var list = c.tree.functions.as_slice()
-    for var i: i64 = 0; i < len(list); i += 1 {
-        if list[i].owner_struct == struct_decl && same_span(c.tree, list[i].name, name) {
+    for i, item in list {
+        if item.owner_struct == struct_decl && same_span(c.tree, item.name, name) {
             return i as u32
         }
     }
@@ -641,8 +641,8 @@ fun resolve_primitive(name: []u8): TypeKind {
 
 fun same_type_args(c: *Checker, a: []SemaType, b: []SemaType): bool {
     if len(a) != len(b) { return false }
-    for var i: i64 = 0; i < len(a); i += 1 {
-        if !same_type(c, a[i], b[i]) { return false }
+    for i, x in a {
+        if !same_type(c, x, b[i]) { return false }
     }
     return true
 }
@@ -2789,8 +2789,8 @@ fun check_statement(c: *Checker, id: u32): bool {
         }
         if h.label.length > 0 && !c.has_error {
             var loops = c.loops.as_slice()
-            for var li: i64 = 0; li < len(loops); li += 1 {
-                if loops[li].label.length > 0 && same_span(c.tree, loops[li].label, h.label) {
+            for lp in loops {
+                if lp.label.length > 0 && same_span(c.tree, lp.label, h.label) {
                     fail_at(c, h.label.offset, "duplicate loop label")
                     break
                 }
@@ -2859,8 +2859,8 @@ fun check_statement(c: *Checker, id: u32): bool {
         }
         if h.label.length > 0 && !c.has_error {
             var loops = c.loops.as_slice()
-            for var li: i64 = 0; li < len(loops); li += 1 {
-                if loops[li].label.length > 0 && same_span(c.tree, loops[li].label, h.label) {
+            for lp in loops {
+                if lp.label.length > 0 && same_span(c.tree, lp.label, h.label) {
                     fail_at(c, h.label.offset, "duplicate loop label")
                     break
                 }
