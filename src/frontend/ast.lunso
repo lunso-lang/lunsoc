@@ -27,6 +27,7 @@ pub enum AstKind : u8 {
     MatchArm,
     For,
     ForCStyle,
+    ForIn,
     Break,
     Continue,
     Defer,
@@ -161,6 +162,14 @@ pub struct AstForHeader {
     label: Span
 }
 
+pub struct AstForInHeader {
+    index_name: Span
+    item_name: Span
+    iterable: u32
+    range_end: u32
+    label: Span
+}
+
 pub struct AstVariable {
     name_length: u32
     type_node: u32
@@ -204,6 +213,7 @@ pub struct Ast {
     imports: vec.Vec[AstImport]
     if_branches: vec.Vec[AstIfBranches]
     for_headers: vec.Vec[AstForHeader]
+    for_in_headers: vec.Vec[AstForInHeader]
     variables: vec.Vec[AstVariable]
     modules: vec.Vec[AstModuleScope]
     qualified: vec.Vec[AstQualified]
@@ -222,6 +232,7 @@ pub fun init(arena: *mem.Arena, source: []u8, out: *Ast): bool {
     if out.imports.init(arena, 16) < 0 { return false }
     if out.if_branches.init(arena, 32) < 0 { return false }
     if out.for_headers.init(arena, 16) < 0 { return false }
+    if out.for_in_headers.init(arena, 16) < 0 { return false }
     if out.variables.init(arena, 32) < 0 { return false }
     if out.modules.init(arena, 8) < 0 { return false }
     if out.qualified.init(arena, 16) < 0 { return false }

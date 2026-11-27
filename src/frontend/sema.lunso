@@ -2416,6 +2416,76 @@ fun check_statement(c: *Checker, id: u32): bool {
         c.scope_depth -= 1
         c.locals.len = saved_locals
         falls = h.condition != NODE_NONE || popped.has_break
+    } else if node.kind == AstKind.ForIn {
+        var saved_locals = c.locals.len
+        c.scope_depth += 1
+        var headers = c.tree.for_in_headers.as_slice()
+        var h = headers[node.a as i64]
+        var item_t = empty_type()
+        if h.range_end != NODE_NONE {
+            var start_t = check_expr(c, h.iterable, empty_type())
+            if !c.has_error && !is_integer(start_t.kind) {
+                fail(c, h.iterable, "range bounds must be integers")
+            }
+            if !c.has_error {
+                check_value(c, h.range_end, start_t)
+            }
+            item_t = start_t
+        } else {
+            var iter_t = check_expr(c, h.iterable, empty_type())
+            if !c.has_error {
+                if iter_t.kind != TypeKind.Slice && iter_t.kind != TypeKind.Array {
+                    fail(c, h.iterable, "for-in requires an array, slice, or range")
+                } else {
+                    item_t = c.sema.elements.data[iter_t.element_type as i64]
+                }
+            }
+        }
+        if !c.has_error {
+            if h.index_name.length > 0 {
+                var idx_slot = c.slot_count
+                c.slot_count += 1
+                var ilv = LocalVar {
+                    name: h.index_name,
+                    slot: idx_slot,
+                    type_info: simple_type(TypeKind.I64),
+                    is_const: false,
+                    const_idx: 0,
+                    depth: c.scope_depth,
+                }
+                c.locals.push(&ilv)
+            }
+            var item_slot = c.slot_count
+            c.slot_count += 1
+            var lv = LocalVar {
+                name: h.item_name,
+                slot: item_slot,
+                type_info: item_t,
+                is_const: false,
+                const_idx: 0,
+                depth: c.scope_depth,
+            }
+            c.locals.push(&lv)
+            node_info(c, id).binding = item_slot
+            node_info(c, id).type_info = item_t
+        }
+        if h.label.length > 0 && !c.has_error {
+            var loops = c.loops.as_slice()
+            for var li: i64 = 0; li < len(loops); li += 1 {
+                if loops[li].label.length > 0 && same_span(c.tree, loops[li].label, h.label) {
+                    fail_at(c, h.label.offset, "duplicate loop label")
+                    break
+                }
+            }
+        }
+        var le = LoopEntry { label: h.label, has_break: false }
+        c.loops.push(&le)
+        check_block(c, node.b)
+        var popped: LoopEntry
+        c.loops.pop(&popped)
+        c.scope_depth -= 1
+        c.locals.len = saved_locals
+        falls = true
     } else {
         check_expr(c, id, empty_type())
         falls = true

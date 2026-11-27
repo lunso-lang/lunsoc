@@ -651,6 +651,58 @@ fun parse_for_with_label(p: *Parser, label: ast.Span): u32 {
         return add_node(p, ast.AstKind.ForCStyle, kw, idx, body)
     }
 
+    if p.current.kind == lexer.TokenKind.Identifier {
+        var saved_lex = p.lex
+        var saved_cur = p.current
+        var first_ident = p.current
+        advance(p)
+        var is_for_in = false
+        var idx_sp = ast.Span { offset: 0, length: 0 }
+        var item_sp = source_span(p, first_ident)
+        if match_tok(p, lexer.TokenKind.Comma) {
+            if p.current.kind == lexer.TokenKind.Identifier {
+                var second_ident = p.current
+                advance(p)
+                if p.current.kind == lexer.TokenKind.Identifier && p.current.length == 2 &&
+                   p.lex.source[p.current.offset as i64] == 'i' && p.lex.source[(p.current.offset + 1) as i64] == 'n' {
+                    is_for_in = true
+                    idx_sp = item_sp
+                    item_sp = source_span(p, second_ident)
+                    advance(p)
+                }
+            }
+        } else if p.current.kind == lexer.TokenKind.Identifier && p.current.length == 2 &&
+                  p.lex.source[p.current.offset as i64] == 'i' && p.lex.source[(p.current.offset + 1) as i64] == 'n' {
+            is_for_in = true
+            advance(p)
+        }
+        if is_for_in {
+            var saved = p.disallow_struct_literal
+            p.disallow_struct_literal = true
+            var iterable = parse_expression(p, PREC_ASSIGNMENT)
+            var range_end = ast.NODE_NONE
+            if match_tok(p, lexer.TokenKind.DotDot) {
+                range_end = parse_expression(p, PREC_ASSIGNMENT)
+            }
+            p.disallow_struct_literal = saved
+            var body = parse_block(p)
+            var hdr = ast.AstForInHeader {
+                index_name: idx_sp,
+                item_name: item_sp,
+                iterable: iterable,
+                range_end: range_end,
+                label: label,
+            }
+            var idx = p.tree.for_in_headers.len as u32
+            if !p.has_error && p.tree.for_in_headers.push(&hdr) < 0 {
+                fail(p, "could not allocate AST storage")
+            }
+            return add_node(p, ast.AstKind.ForIn, kw, idx, body)
+        }
+        p.lex = saved_lex
+        p.current = saved_cur
+    }
+
     var declares_var = p.current.kind == lexer.TokenKind.Var
     var saved = p.disallow_struct_literal
     p.disallow_struct_literal = true

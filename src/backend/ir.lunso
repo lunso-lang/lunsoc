@@ -632,6 +632,119 @@ fun lower_loop(l: *Lowering, id: u32) {
     }
 }
 
+fun lower_for_in(l: *Lowering, id: u32) {
+    var nodes = l.tree.nodes.as_slice()
+    var node = nodes[id as i64]
+    var info = lower_node(l, id)
+    var item_t = info.type_info
+    var item_slot = info.binding
+    var hdrs = l.tree.for_in_headers.as_slice()
+    var h = hdrs[node.a as i64]
+
+    var start = new_label(l)
+    var body = new_label(l)
+    var cont = new_label(l)
+    var end = new_label(l)
+
+    var i64_t = simple_type(TypeKind.I64)
+    var bool_t = simple_type(TypeKind.Bool)
+
+    if h.range_end != NODE_NONE {
+        var start_val = lower_expression(l, h.iterable)
+        var end_val = lower_expression(l, h.range_end)
+        emit_store(l, item_t, item_slot, start_val)
+        var end_slot = l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count
+        l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count += 1
+        emit_store(l, item_t, end_slot, end_val)
+        if h.index_name.length > 0 {
+            var zero = emit_value(l, IrOp.Immediate, i64_t, 0, 0, 0)
+            emit_store(l, i64_t, item_slot - 1, zero)
+        }
+        emit_jump(l, start)
+        emit_label(l, start)
+        var cur = emit_value(l, IrOp.Load, item_t, item_slot, 0, 0)
+        var end_v = emit_value(l, IrOp.Load, item_t, end_slot, 0, 0)
+        var cond = emit_value(l, IrOp.Less, bool_t, cur, end_v, 0)
+        emit_branch(l, cond, body, end)
+        emit_label(l, body)
+        var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
+        l.loops.push(&le)
+        lower_statement(l, node.b)
+        var dummy: IrLoop
+        l.loops.pop(&dummy)
+        emit_label(l, cont)
+        var cur2 = emit_value(l, IrOp.Load, item_t, item_slot, 0, 0)
+        var one = emit_value(l, IrOp.Immediate, item_t, 1, 0, 0)
+        var next = emit_value(l, IrOp.Add, item_t, cur2, one, 0)
+        emit_store(l, item_t, item_slot, next)
+        if h.index_name.length > 0 {
+            var cidx = emit_value(l, IrOp.Load, i64_t, item_slot - 1, 0, 0)
+            var ione = emit_value(l, IrOp.Immediate, i64_t, 1, 0, 0)
+            var nidx = emit_value(l, IrOp.Add, i64_t, cidx, ione, 0)
+            emit_store(l, i64_t, item_slot - 1, nidx)
+        }
+        emit_jump(l, start)
+        emit_label(l, end)
+        return
+    }
+
+    var iter_t = lower_node(l, h.iterable).type_info
+    var iter_val = lower_expression(l, h.iterable)
+    var base_ptr: u32 = 0
+    var len_val: u32 = 0
+    if iter_t.kind == TypeKind.Array {
+        base_ptr = iter_val
+        len_val = emit_value(l, IrOp.Immediate, i64_t, iter_t.length, 0, 0)
+    } else {
+        base_ptr = emit_value(l, IrOp.Data, iter_t, iter_val, 0, 0)
+        len_val = emit_value(l, IrOp.Len, iter_t, iter_val, 0, 0)
+    }
+    var ptr_t = simple_type(TypeKind.U64)
+    var base_slot = l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count
+    l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count += 1
+    var len_slot = l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count
+    l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count += 1
+    var idx_slot: u32 = 0
+    if h.index_name.length > 0 {
+        idx_slot = item_slot - 1
+    } else {
+        idx_slot = l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count
+        l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count += 1
+    }
+    emit_store(l, ptr_t, base_slot, base_ptr)
+    emit_store(l, i64_t, len_slot, len_val)
+    var zero = emit_value(l, IrOp.Immediate, i64_t, 0, 0, 0)
+    emit_store(l, i64_t, idx_slot, zero)
+
+    emit_jump(l, start)
+    emit_label(l, start)
+    var cur_idx = emit_value(l, IrOp.Load, i64_t, idx_slot, 0, 0)
+    var max_len = emit_value(l, IrOp.Load, i64_t, len_slot, 0, 0)
+    var cond = emit_value(l, IrOp.Less, bool_t, cur_idx, max_len, 0)
+    emit_branch(l, cond, body, end)
+    emit_label(l, body)
+    var bp = emit_value(l, IrOp.Load, ptr_t, base_slot, 0, 0)
+    var elem_addr = emit_value(l, IrOp.PointerIndex, item_t, bp, cur_idx, 0)
+    if uses_storage(item_t) {
+        emit_store(l, item_t, item_slot, elem_addr)
+    } else {
+        var elem_val = emit_value(l, IrOp.MemoryLoad, item_t, elem_addr, 0, 0)
+        emit_store(l, item_t, item_slot, elem_val)
+    }
+    var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
+    l.loops.push(&le)
+    lower_statement(l, node.b)
+    var dummy: IrLoop
+    l.loops.pop(&dummy)
+    emit_label(l, cont)
+    var cidx = emit_value(l, IrOp.Load, i64_t, idx_slot, 0, 0)
+    var ione = emit_value(l, IrOp.Immediate, i64_t, 1, 0, 0)
+    var nidx = emit_value(l, IrOp.Add, i64_t, cidx, ione, 0)
+    emit_store(l, i64_t, idx_slot, nidx)
+    emit_jump(l, start)
+    emit_label(l, end)
+}
+
 fun emit_defers(l: *Lowering, base: u64) {
     var i = l.defers.len
     for i > base && !l.failed {
@@ -680,6 +793,8 @@ fun lower_statement(l: *Lowering, id: u32) {
         lower_match(l, id)
     } else if node.kind == AstKind.For || node.kind == AstKind.ForCStyle {
         lower_loop(l, id)
+    } else if node.kind == AstKind.ForIn {
+        lower_for_in(l, id)
     } else if node.kind == AstKind.Break {
         var loops = l.loops.as_slice()
         var target = loops[lower_node(l, id).binding as i64]
