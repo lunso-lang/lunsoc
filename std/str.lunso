@@ -1,6 +1,6 @@
 import std.mem
 
-pub fun equals(a: []u8, b: []u8): bool {
+pub fun equals(a: []const u8, b: []const u8): bool {
     if len(a) != len(b) {
         return false
     }
@@ -12,7 +12,7 @@ pub fun equals(a: []u8, b: []u8): bool {
     return true
 }
 
-pub fun starts_with(s: []u8, prefix: []u8): bool {
+pub fun starts_with(s: []const u8, prefix: []const u8): bool {
     if len(s) < len(prefix) {
         return false
     }
@@ -24,7 +24,7 @@ pub fun starts_with(s: []u8, prefix: []u8): bool {
     return true
 }
 
-pub fun ends_with(s: []u8, suffix: []u8): bool {
+pub fun ends_with(s: []const u8, suffix: []const u8): bool {
     if len(s) < len(suffix) {
         return false
     }
@@ -37,7 +37,7 @@ pub fun ends_with(s: []u8, suffix: []u8): bool {
     return true
 }
 
-pub fun index_of(s: []u8, needle: u8): i64 {
+pub fun index_of(s: []const u8, needle: u8): i64 {
     for var i: i64 = 0; i < len(s); i += 1 {
         if s[i] == needle {
             return i
@@ -46,7 +46,7 @@ pub fun index_of(s: []u8, needle: u8): i64 {
     return -1
 }
 
-pub fun last_index_of(s: []u8, needle: u8): i64 {
+pub fun last_index_of(s: []const u8, needle: u8): i64 {
     var i = len(s) - 1
     for i >= 0 {
         if s[i] == needle {
@@ -95,7 +95,7 @@ pub fun strip_suffix(s: []u8, suffix: []u8): []u8 {
     return s
 }
 
-pub fun concat(arena: *mem.Arena, a: []u8, b: []u8): []u8 {
+pub fun concat(arena: *mem.Arena, a: []const u8, b: []const u8): []u8 {
     var total = len(a) + len(b)
     if total == 0 { return "" }
     var buf: *u8
@@ -107,7 +107,7 @@ pub fun concat(arena: *mem.Arena, a: []u8, b: []u8): []u8 {
     return buf[0..total]
 }
 
-pub fun concat3(arena: *mem.Arena, a: []u8, b: []u8, c: []u8): []u8 {
+pub fun concat3(arena: *mem.Arena, a: []const u8, b: []const u8, c: []const u8): []u8 {
     var total = len(a) + len(b) + len(c)
     if total == 0 { return "" }
     var buf: *u8
@@ -121,7 +121,7 @@ pub fun concat3(arena: *mem.Arena, a: []u8, b: []u8, c: []u8): []u8 {
     return buf[0..total]
 }
 
-pub fun clone(arena: *mem.Arena, s: []u8): []u8 {
+pub fun clone(arena: *mem.Arena, s: []const u8): []u8 {
     var n = len(s)
     if n == 0 { return "" }
     var buf: *u8
@@ -134,7 +134,7 @@ pub fun clone(arena: *mem.Arena, s: []u8): []u8 {
     return buf[0..n]
 }
 
-pub fun hash(s: []u8): u64 {
+pub fun hash(s: []const u8): u64 {
     var h: u64 = 0xcbf29ce484222325
     for var i: i64 = 0; i < len(s); i += 1 {
         h ^= s[i] as u64
@@ -143,7 +143,7 @@ pub fun hash(s: []u8): u64 {
     return h
 }
 
-pub fun parse_u64(s: []u8, out: *u64): bool {
+pub fun parse_u64(s: []const u8, out: *u64): bool {
     if len(s) == 0 {
         return false
     }
@@ -164,7 +164,7 @@ pub fun parse_u64(s: []u8, out: *u64): bool {
     return true
 }
 
-pub fun parse_i64(s: []u8, out: *i64): bool {
+pub fun parse_i64(s: []const u8, out: *i64): bool {
     if len(s) == 0 {
         return false
     }

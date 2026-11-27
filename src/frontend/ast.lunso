@@ -213,24 +213,24 @@ pub struct Ast {
 pub fun init(arena: *mem.Arena, source: []u8, out: *Ast): bool {
     out.source = source
     out.declarations = NodeRange { first: 0, count: 0 }
-    if vec.init.[AstNode](&out.nodes, arena, 256) < 0 { return false }
-    if vec.init.[u32](&out.children, arena, 256) < 0 { return false }
-    if vec.init.[AstFunction](&out.functions, arena, 32) < 0 { return false }
-    if vec.init.[AstStruct](&out.structs, arena, 16) < 0 { return false }
-    if vec.init.[AstEnum](&out.enums, arena, 16) < 0 { return false }
-    if vec.init.[AstConst](&out.consts, arena, 16) < 0 { return false }
-    if vec.init.[AstImport](&out.imports, arena, 16) < 0 { return false }
-    if vec.init.[AstIfBranches](&out.if_branches, arena, 32) < 0 { return false }
-    if vec.init.[AstForHeader](&out.for_headers, arena, 16) < 0 { return false }
-    if vec.init.[AstVariable](&out.variables, arena, 32) < 0 { return false }
-    if vec.init.[AstModuleScope](&out.modules, arena, 8) < 0 { return false }
-    if vec.init.[AstQualified](&out.qualified, arena, 16) < 0 { return false }
+    if out.nodes.init(arena, 256) < 0 { return false }
+    if out.children.init(arena, 256) < 0 { return false }
+    if out.functions.init(arena, 32) < 0 { return false }
+    if out.structs.init(arena, 16) < 0 { return false }
+    if out.enums.init(arena, 16) < 0 { return false }
+    if out.consts.init(arena, 16) < 0 { return false }
+    if out.imports.init(arena, 16) < 0 { return false }
+    if out.if_branches.init(arena, 32) < 0 { return false }
+    if out.for_headers.init(arena, 16) < 0 { return false }
+    if out.variables.init(arena, 32) < 0 { return false }
+    if out.modules.init(arena, 8) < 0 { return false }
+    if out.qualified.init(arena, 16) < 0 { return false }
     var zero = AstNode { kind: AstKind.Invalid, a: 0, b: 0, pos: 0 }
-    return vec.push.[AstNode](&out.nodes, &zero) >= 0
+    return out.nodes.push(&zero) >= 0
 }
 
 pub fun find_qualified(tree: *Ast, node: u32, out: *AstQualified): bool {
-    var qs = vec.as_slice.[AstQualified](&tree.qualified)
+    var qs = tree.qualified.as_slice()
     var lo: i64 = 0
     var hi: i64 = len(qs)
     for lo < hi {
@@ -251,7 +251,7 @@ pub fun find_qualified(tree: *Ast, node: u32, out: *AstQualified): bool {
 pub fun add_node(ast: *Ast, kind: AstKind, pos: u32, a: u32, b: u32): u32 {
     var id = ast.nodes.len as u32
     var node = AstNode { kind: kind, a: a, b: b, pos: pos }
-    if vec.push.[AstNode](&ast.nodes, &node) < 0 {
+    if ast.nodes.push(&node) < 0 {
         return NODE_NONE
     }
     return id
@@ -263,8 +263,8 @@ pub fun finish_children(ast: *Ast, pending: *vec.Vec[u32], mark: u64): NodeRange
         return NodeRange { first: 0, count: 0 }
     }
     var first = ast.children.len as u32
-    var slice = vec.as_slice.[u32](pending)
-    if vec.append_slice.[u32](&ast.children, slice[(mark as i64)..len(slice)]) < 0 {
+    var slice = pending.as_slice()
+    if ast.children.append_slice(slice[(mark as i64)..len(slice)]) < 0 {
         pending.len = mark
         return NodeRange { first: 0, count: 0 }
     }

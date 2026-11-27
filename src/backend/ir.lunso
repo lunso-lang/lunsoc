@@ -129,7 +129,7 @@ fun binary_ir_op(kind: AstKind): IrOp {
 }
 
 fun emit(l: *Lowering, inst: IrInstruction) {
-    if !l.failed && vec.push.[IrInstruction](&l.mod.instructions, &inst) < 0 {
+    if !l.failed && l.mod.instructions.push(&inst) < 0 {
         l.failed = true
     }
 }
@@ -174,20 +174,20 @@ fun lower_node(l: *Lowering, id: u32): SemaNode {
     if l.current_fn < (l.sem.functions.len as u32) {
         var sf = &l.sem.functions.data[l.current_fn as i64]
         if sf.nodes.len > 0 {
-            var ast_fns = vec.as_slice.[AstFunction](&l.tree.functions)
+            var ast_fns = l.tree.functions.as_slice()
             var first = ast_fns[sf.declaration as i64].nodes.first
             return sf.nodes.data[(id - first) as i64]
         }
     }
-    var sn = vec.as_slice.[SemaNode](&l.sem.nodes)
+    var sn = l.sem.nodes.as_slice()
     return sn[id as i64]
 }
 
 fun lower_const(l: *Lowering, info: SemaNode): u32 {
-    var consts = vec.as_slice.[SemaConstant](&l.sem.constants)
+    var consts = l.sem.constants.as_slice()
     var sc = consts[info.binding as i64]
     if sc.str_node != NODE_NONE {
-        var nodes = vec.as_slice.[AstNode](&l.tree.nodes)
+        var nodes = l.tree.nodes.as_slice()
         var sn_node = nodes[sc.str_node as i64]
         var st = lower_node(l, sc.str_node).type_info
         var bytes = emit_value(l, IrOp.Bytes, st, sn_node.pos, sn_node.a, 0)
@@ -213,7 +213,7 @@ fun lower_index(l: *Lowering, id: u32): u32 {
 }
 
 fun lower_memory_address(l: *Lowering, id: u32): u32 {
-    var nodes = vec.as_slice.[AstNode](&l.tree.nodes)
+    var nodes = l.tree.nodes.as_slice()
     var node = nodes[id as i64]
     if node.kind == AstKind.Index {
         var base = lower_expression(l, node.a)
@@ -230,7 +230,7 @@ fun lower_memory_address(l: *Lowering, id: u32): u32 {
     }
     var bt = lower_node(l, node.a).type_info
     if bt.kind == TypeKind.Pointer {
-        var pts = vec.as_slice.[SemaType](&l.sem.pointees)
+        var pts = l.sem.pointees.as_slice()
         bt = pts[bt.pointee as i64]
     }
     return emit_value(l, IrOp.FieldAddress, bt, base_val, lower_node(l, id).binding, 0)
@@ -238,9 +238,9 @@ fun lower_memory_address(l: *Lowering, id: u32): u32 {
 
 fun lower_call(l: *Lowering, id: u32): u32 {
     var info = lower_node(l, id)
-    var nodes = vec.as_slice.[AstNode](&l.tree.nodes)
+    var nodes = l.tree.nodes.as_slice()
     var call = nodes[id as i64]
-    var children = vec.as_slice.[u32](&l.tree.children)
+    var children = l.tree.children.as_slice()
     if info.builtin == SemaBuiltin.SizeOf {
         return emit_value(l, IrOp.Immediate, info.type_info, info.binding, 0, 0)
     }
@@ -288,7 +288,7 @@ fun lower_call(l: *Lowering, id: u32): u32 {
     var total_count = count + arg_offset
     var first = l.mod.arguments.len as u32
     for var i: u32 = 0; i < total_count && !l.failed; i += 1 {
-        if vec.push_value.[u32](&l.mod.arguments, temp_vals[i as i64]) < 0 {
+        if l.mod.arguments.push_value(temp_vals[i as i64]) < 0 {
             l.failed = true
         }
     }
@@ -323,7 +323,7 @@ fun lower_logical(l: *Lowering, kind: AstKind, a: u32, b: u32, t: SemaType): u32
 
 fun lower_unconverted(l: *Lowering, id: u32): u32 {
     if l.failed { return 0 }
-    var nodes = vec.as_slice.[AstNode](&l.tree.nodes)
+    var nodes = l.tree.nodes.as_slice()
     var node = nodes[id as i64]
     var info = lower_node(l, id)
     if node.kind == AstKind.Identifier {
@@ -342,9 +342,9 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
     }
     if node.kind == AstKind.ArrayLiteral {
         var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
-        var elems = vec.as_slice.[SemaType](&l.sem.elements)
+        var elems = l.sem.elements.as_slice()
         var elem_t = elems[info.type_info.element_type as i64]
-        var children = vec.as_slice.[u32](&l.tree.children)
+        var children = l.tree.children.as_slice()
         for var i: u32 = 0; i < node.b && !l.failed; i += 1 {
             var idx = emit_value(l, IrOp.Immediate, simple_type(TypeKind.I64), i, 0, 0)
             var dst = emit_value(l, IrOp.ElementAddress, info.type_info, addr, idx, 0)
@@ -360,7 +360,7 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
     if node.kind == AstKind.StructLiteral {
         var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
         emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: 0, c: 0 })
-        var children = vec.as_slice.[u32](&l.tree.children)
+        var children = l.tree.children.as_slice()
         for var i: u32 = 1; i < node.b && !l.failed; i += 1 {
             var init_id = children[(node.a + i) as i64]
             var init_node = nodes[init_id as i64]
@@ -394,7 +394,7 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
             return lower_const(l, info)
         }
         if info.is_enum_case {
-            var evals = vec.as_slice.[u64](&l.sem.enum_values)
+            var evals = l.sem.enum_values.as_slice()
             var bits = evals[info.binding as i64]
             return emit_value(l, IrOp.Immediate, info.type_info, bits as u32, (bits >> 32) as u32, 0)
         }
@@ -501,9 +501,9 @@ fun lower_expression(l: *Lowering, id: u32): u32 {
 }
 
 fun lower_if(l: *Lowering, id: u32) {
-    var nodes = vec.as_slice.[AstNode](&l.tree.nodes)
+    var nodes = l.tree.nodes.as_slice()
     var node = nodes[id as i64]
-    var brs = vec.as_slice.[AstIfBranches](&l.tree.if_branches)
+    var brs = l.tree.if_branches.as_slice()
     var arms = brs[node.b as i64]
     var cond = lower_expression(l, node.a)
     var yes = new_label(l)
@@ -532,15 +532,15 @@ fun lower_if(l: *Lowering, id: u32) {
 }
 
 fun lower_match(l: *Lowering, id: u32) {
-    var nodes = vec.as_slice.[AstNode](&l.tree.nodes)
-    var children = vec.as_slice.[u32](&l.tree.children)
+    var nodes = l.tree.nodes.as_slice()
+    var children = l.tree.children.as_slice()
     var node = nodes[id as i64]
     var scrut_id = children[node.a as i64]
     var scrut = lower_expression(l, scrut_id)
     var st = lower_node(l, scrut_id).type_info
     var end_lbl = new_label(l)
     var arm_count = node.b - 1
-    var mvals = vec.as_slice.[u64](&l.sem.match_values)
+    var mvals = l.sem.match_values.as_slice()
 
     for var i: u32 = 0; i < arm_count && !l.failed; i += 1 {
         var arm_id = children[(node.a + 1 + i) as i64]
@@ -591,11 +591,11 @@ fun lower_match(l: *Lowering, id: u32) {
 }
 
 fun lower_loop(l: *Lowering, id: u32) {
-    var nodes = vec.as_slice.[AstNode](&l.tree.nodes)
+    var nodes = l.tree.nodes.as_slice()
     var node = nodes[id as i64]
     var header = AstForHeader { initializer: NODE_NONE, condition: node.a, step: NODE_NONE, label: Span { offset: 0, length: 0 } }
     if node.kind == AstKind.ForCStyle {
-        var hdrs = vec.as_slice.[AstForHeader](&l.tree.for_headers)
+        var hdrs = l.tree.for_headers.as_slice()
         header = hdrs[node.a as i64]
     }
     if header.initializer != NODE_NONE {
@@ -616,10 +616,10 @@ fun lower_loop(l: *Lowering, id: u32) {
         emit_label(l, body)
     }
     var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
-    vec.push.[IrLoop](&l.loops, &le)
+    l.loops.push(&le)
     lower_statement(l, node.b)
     var dummy: IrLoop
-    vec.pop.[IrLoop](&l.loops, &dummy)
+    l.loops.pop(&dummy)
     if header.step != NODE_NONE {
         emit_label(l, cont)
         lower_expression(l, header.step)
@@ -647,9 +647,9 @@ fun emit_defers(l: *Lowering, base: u64) {
 
 fun lower_statement(l: *Lowering, id: u32) {
     if l.failed || id == NODE_NONE { return }
-    var nodes = vec.as_slice.[AstNode](&l.tree.nodes)
+    var nodes = l.tree.nodes.as_slice()
     var node = nodes[id as i64]
-    var children = vec.as_slice.[u32](&l.tree.children)
+    var children = l.tree.children.as_slice()
     if node.kind == AstKind.Block {
         var defer_base = l.defers.len
         var fell = true
@@ -666,7 +666,7 @@ fun lower_statement(l: *Lowering, id: u32) {
         }
         l.defers.len = defer_base
     } else if node.kind == AstKind.Defer {
-        vec.push_value.[u32](&l.defers, node.a)
+        l.defers.push_value(node.a)
     } else if node.kind == AstKind.Return {
         var val: u32 = 0
         if node.a != NODE_NONE {
@@ -681,12 +681,12 @@ fun lower_statement(l: *Lowering, id: u32) {
     } else if node.kind == AstKind.For || node.kind == AstKind.ForCStyle {
         lower_loop(l, id)
     } else if node.kind == AstKind.Break {
-        var loops = vec.as_slice.[IrLoop](&l.loops)
+        var loops = l.loops.as_slice()
         var target = loops[lower_node(l, id).binding as i64]
         emit_defers(l, target.defer_base)
         emit_jump(l, target.break_label)
     } else if node.kind == AstKind.Continue {
-        var loops = vec.as_slice.[IrLoop](&l.loops)
+        var loops = l.loops.as_slice()
         var target = loops[lower_node(l, id).binding as i64]
         emit_defers(l, target.defer_base)
         emit_jump(l, target.continue_label)
@@ -694,7 +694,7 @@ fun lower_statement(l: *Lowering, id: u32) {
         return
     } else if node.kind == AstKind.Var {
         var info = lower_node(l, id)
-        var vars = vec.as_slice.[AstVariable](&l.tree.variables)
+        var vars = l.tree.variables.as_slice()
         var init_id = vars[node.a as i64].initializer
         if uses_storage(info.type_info) {
             var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
@@ -725,17 +725,17 @@ pub fun lower(arena: *mem.Arena, tree: *Ast, sem: *Sema, out: *IrModule): bool {
     out.module_count = tree.modules.len as u32
     out.pointees = sem.pointees
     out.elements = sem.elements
-    if vec.init.[Span](&out.struct_names, arena, sem.records.len + 1) < 0 { return false }
-    if vec.init.[IrFunction](&out.functions, arena, sem.functions.len + 1) < 0 { return false }
-    if vec.init.[SemaType](&out.parameters, arena, 32) < 0 { return false }
-    if vec.init.[IrInstruction](&out.instructions, arena, 256) < 0 { return false }
-    if vec.init.[u32](&out.arguments, arena, 64) < 0 { return false }
+    if out.struct_names.init(arena, sem.records.len + 1) < 0 { return false }
+    if out.functions.init(arena, sem.functions.len + 1) < 0 { return false }
+    if out.parameters.init(arena, 32) < 0 { return false }
+    if out.instructions.init(arena, 256) < 0 { return false }
+    if out.arguments.init(arena, 64) < 0 { return false }
 
-    var structs = vec.as_slice.[AstStruct](&tree.structs)
-    var recs = vec.as_slice.[SemaRecord](&sem.records)
+    var structs = tree.structs.as_slice()
+    var recs = sem.records.as_slice()
     for var i: i64 = 0; i < len(recs); i += 1 {
         var sp = structs[recs[i].declaration as i64].name
-        vec.push.[Span](&out.struct_names, &sp)
+        out.struct_names.push(&sp)
     }
 
     var l: Lowering
@@ -744,21 +744,21 @@ pub fun lower(arena: *mem.Arena, tree: *Ast, sem: *Sema, out: *IrModule): bool {
     l.mod = out
     l.current_fn = ~0 as u32
     l.failed = false
-    vec.init.[IrLoop](&l.loops, arena, 16)
-    vec.init.[u32](&l.defers, arena, 16)
+    l.loops.init(arena, 16)
+    l.defers.init(arena, 16)
 
-    var ast_fns = vec.as_slice.[AstFunction](&tree.functions)
-    var sema_fns = vec.as_slice.[SemaFunction](&sem.functions)
+    var ast_fns = tree.functions.as_slice()
+    var sema_fns = sem.functions.as_slice()
     for var i: i64 = 0; i < len(sema_fns) && !l.failed; i += 1 {
         var sf = sema_fns[i]
         var fdecl = ast_fns[sf.declaration as i64]
         var is_template = fdecl.type_parameters.count > 0 && sf.arguments.len == 0
         var is_spec = fdecl.type_parameters.count > 0 && sf.arguments.len > 0
         var first_param = out.parameters.len as u32
-        var ptypes = vec.as_slice.[SemaType](&sf.param_types)
+        var ptypes = sf.param_types.as_slice()
         for var p: i64 = 0; p < len(ptypes); p += 1 {
             var pt = ptypes[p]
-            vec.push.[SemaType](&out.parameters, &pt)
+            out.parameters.push(&pt)
         }
         var irf = IrFunction {
             name: fdecl.name,
@@ -773,7 +773,7 @@ pub fun lower(arena: *mem.Arena, tree: *Ast, sem: *Sema, out: *IrModule): bool {
             template_only: is_template,
             specialization: is_spec,
         }
-        vec.push.[IrFunction](&out.functions, &irf)
+        out.functions.push(&irf)
         if !is_template && fdecl.body != NODE_NONE {
             l.current_fn = i as u32
             l.next_value = 1
@@ -820,8 +820,8 @@ fun write_span(m: *IrModule, s: Span) {
 
 fun write_type(m: *IrModule, t_in: SemaType) {
     var t = t_in
-    var pts = vec.as_slice.[SemaType](&m.pointees)
-    var elems = vec.as_slice.[SemaType](&m.elements)
+    var pts = m.pointees.as_slice()
+    var elems = m.elements.as_slice()
     for {
         if t.kind == TypeKind.Pointer {
             io.print("*")
@@ -841,7 +841,7 @@ fun write_type(m: *IrModule, t_in: SemaType) {
         }
     }
     if t.kind == TypeKind.Struct {
-        var names = vec.as_slice.[Span](&m.struct_names)
+        var names = m.struct_names.as_slice()
         write_span(m, names[t.record as i64])
     } else {
         io.print(type_kind_name(t.kind))
@@ -978,8 +978,8 @@ fun write_inst(m: *IrModule, inst: IrInstruction) {
             write_val(inst.c)
         }
     } else if inst.op == IrOp.Call {
-        var fns = vec.as_slice.[IrFunction](&m.functions)
-        var args = vec.as_slice.[u32](&m.arguments)
+        var fns = m.functions.as_slice()
+        var args = m.arguments.as_slice()
         io.print("call.")
         write_type(m, inst.type_info)
         io.print(" @")
@@ -1021,9 +1021,9 @@ fun write_inst(m: *IrModule, inst: IrInstruction) {
 }
 
 pub fun write(m: *IrModule) {
-    var fns = vec.as_slice.[IrFunction](&m.functions)
-    var params = vec.as_slice.[SemaType](&m.parameters)
-    var insts = vec.as_slice.[IrInstruction](&m.instructions)
+    var fns = m.functions.as_slice()
+    var params = m.parameters.as_slice()
+    var insts = m.instructions.as_slice()
     for var i: i64 = 0; i < len(fns); i += 1 {
         var fn = fns[i]
         if fn.template_only { continue }

@@ -30,11 +30,11 @@ fun qbe_type(k: TypeKind): QbeType {
 }
 
 fun push_byte(out: *vec.Vec[u8], b: u8): bool {
-    return vec.push_value.[u8](out, b) >= 0
+    return out.push_value(b) >= 0
 }
 
 fun push_str(out: *vec.Vec[u8], s: []u8): bool {
-    return vec.append_slice.[u8](out, s) >= 0
+    return out.append_slice(s) >= 0
 }
 
 fun push_u64(out: *vec.Vec[u8], v: u64): bool {
@@ -58,7 +58,7 @@ fun entry_symbol(mod: *ir.IrModule, f: ir.IrFunction): bool {
 }
 
 fun write_symbol(out: *vec.Vec[u8], mod: *ir.IrModule, index: u32) {
-    var fns = vec.as_slice.[ir.IrFunction](&mod.functions)
+    var fns = mod.functions.as_slice()
     var f = fns[index as i64]
     push_byte(out, '$')
     if f.specialization || (mod.module_count > 1 && !f.external && !entry_symbol(mod, f)) {
@@ -150,7 +150,7 @@ fun next_literal_byte(text: []u8, end: i64, cursor: *i64, out_byte: *u8): bool {
 }
 
 fun write_data(out: *vec.Vec[u8], mod: *ir.IrModule): bool {
-    var insts = vec.as_slice.[ir.IrInstruction](&mod.instructions)
+    var insts = mod.instructions.as_slice()
     for var i: i64 = 0; i < len(insts); i += 1 {
         var inst = insts[i]
         if inst.op != ir.IrOp.Bytes {
@@ -262,9 +262,9 @@ fun write_store(out: *vec.Vec[u8], k: TypeKind, val_name: []u8, len_name: []u8, 
 }
 
 fun write_call(out: *vec.Vec[u8], mod: *ir.IrModule, inst: ir.IrInstruction) {
-    var fns = vec.as_slice.[ir.IrFunction](&mod.functions)
-    var params = vec.as_slice.[SemaType](&mod.parameters)
-    var args = vec.as_slice.[u32](&mod.arguments)
+    var fns = mod.functions.as_slice()
+    var params = mod.parameters.as_slice()
+    var args = mod.arguments.as_slice()
     var callee = fns[inst.a as i64]
     var res_qt = qbe_type(callee.result.kind)
     var sret = uses_sret(callee.result.kind)
@@ -696,7 +696,7 @@ fun write_cast(out: *vec.Vec[u8], result: u32, value: u32, source: TypeKind, des
 
 fun write_instruction(out: *vec.Vec[u8], mod: *ir.IrModule, index: u32,
                       addressed: []TypeKind, result: SemaType) {
-    var insts = vec.as_slice.[ir.IrInstruction](&mod.instructions)
+    var insts = mod.instructions.as_slice()
     var inst = insts[index as i64]
     if inst.op == ir.IrOp.Label {
         push_str(out, "@b")
@@ -870,7 +870,7 @@ fun write_instruction(out: *vec.Vec[u8], mod: *ir.IrModule, index: u32,
 }
 
 fun collect_addressed_slots(arena: *mem.Arena, mod: *ir.IrModule, f: ir.IrFunction, out: *[]TypeKind): bool {
-    var insts = vec.as_slice.[ir.IrInstruction](&mod.instructions)
+    var insts = mod.instructions.as_slice()
     var has_any = false
     for var i: u32 = 0; i < f.instruction_count; i += 1 {
         if insts[(f.first_instruction + i) as i64].op == ir.IrOp.LocalAddress {
@@ -882,11 +882,11 @@ fun collect_addressed_slots(arena: *mem.Arena, mod: *ir.IrModule, f: ir.IrFuncti
         return true
     }
     var slots: vec.Vec[TypeKind]
-    if vec.init.[TypeKind](&slots, arena, f.slot_count as u64) < 0 {
+    if slots.init(arena, f.slot_count as u64) < 0 {
         return false
     }
     for var s: u32 = 0; s < f.slot_count; s += 1 {
-        if vec.push_value.[TypeKind](&slots, TypeKind.Invalid) < 0 {
+        if slots.push_value(TypeKind.Invalid) < 0 {
             return false
         }
     }
@@ -896,12 +896,12 @@ fun collect_addressed_slots(arena: *mem.Arena, mod: *ir.IrModule, f: ir.IrFuncti
             slots.data[inst.a as i64] = inst.type_info.kind
         }
     }
-    *out = vec.as_slice.[TypeKind](&slots)
+    *out = slots.as_slice()
     return true
 }
 
 fun write_function(arena: *mem.Arena, out: *vec.Vec[u8], mod: *ir.IrModule, index: u32): bool {
-    var fns = vec.as_slice.[ir.IrFunction](&mod.functions)
+    var fns = mod.functions.as_slice()
     var f = fns[index as i64]
     var addressed: []TypeKind
     if !collect_addressed_slots(arena, mod, f, &addressed) {
@@ -922,7 +922,7 @@ fun write_function(arena: *mem.Arena, out: *vec.Vec[u8], mod: *ir.IrModule, inde
     if sret {
         push_str(out, "l %ret")
     }
-    var params = vec.as_slice.[SemaType](&mod.parameters)
+    var params = mod.parameters.as_slice()
     for var i: u32 = 0; i < f.parameter_count; i += 1 {
         if sret || i != 0 {
             push_str(out, ", ")
@@ -940,7 +940,7 @@ fun write_function(arena: *mem.Arena, out: *vec.Vec[u8], mod: *ir.IrModule, inde
         }
     }
     push_str(out, ") {\n")
-    var insts = vec.as_slice.[ir.IrInstruction](&mod.instructions)
+    var insts = mod.instructions.as_slice()
     var has_bounds_check = false
     for var i: u32 = 0; i < f.instruction_count; i += 1 {
         var idx = f.first_instruction + i
@@ -1061,13 +1061,13 @@ fun write_function(arena: *mem.Arena, out: *vec.Vec[u8], mod: *ir.IrModule, inde
 }
 
 pub fun write(arena: *mem.Arena, mod: *ir.IrModule, out: *vec.Vec[u8]): bool {
-    if vec.init.[u8](out, arena, 4096) < 0 {
+    if out.init(arena, 4096) < 0 {
         return false
     }
     if !write_data(out, mod) {
         return false
     }
-    var fns = vec.as_slice.[ir.IrFunction](&mod.functions)
+    var fns = mod.functions.as_slice()
     for var i: i64 = 0; i < len(fns); i += 1 {
         if !fns[i].template_only && !fns[i].external {
             if !write_function(arena, out, mod, i as u32) {

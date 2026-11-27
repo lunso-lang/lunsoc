@@ -5,11 +5,11 @@ import driver
 
 fun main(): i32 {
     var arena: mem.Arena
-    if mem.init(&arena, 65536) < 0 {
+    if arena.init(65536) < 0 {
         io.eprintln("lunsoc: could not initialize arena")
         return 1
     }
-    defer mem.deinit(&arena)
+    defer arena.deinit()
 
     var argv: [][]u8
     if args.load(&arena, &argv) < 0 {

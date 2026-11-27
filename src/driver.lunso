@@ -63,7 +63,7 @@ fun report_error(path: []u8, source: []u8, tok: lexer.Token, msg: []u8): i32 {
 
 fun dump_tokens(path: []u8, source: []u8, arena: *mem.Arena): i32 {
     var tokens: vec.Vec[lexer.Token]
-    if vec.init.[lexer.Token](&tokens, arena, 128) < 0 {
+    if tokens.init(arena, 128) < 0 {
         io.eprintln("lunsoc: out of memory")
         return 1
     }
@@ -77,7 +77,7 @@ fun dump_tokens(path: []u8, source: []u8, arena: *mem.Arena): i32 {
         return report_error(path, source, err_tok, msg)
     }
 
-    var slice = vec.as_slice.[lexer.Token](&tokens)
+    var slice = tokens.as_slice()
     for var i: i64 = 0; i < len(slice); i += 1 {
         var tok = slice[i]
         fmt.print_u64(1, tok.line)
@@ -203,7 +203,7 @@ fun run_compile(path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, a
             io.eprintln("lunsoc: could not emit QBE IL")
             return 1
         }
-        io.write_bytes(1, vec.as_slice.[u8](&out_buf))
+        io.write_bytes(1, out_buf.as_slice())
         return 0
     }
     if mode == Mode.Run {
@@ -261,7 +261,7 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
     var run_args_start: i64 = len(argv)
     var objects: vec.Vec[[]u8]
     var include_dirs: vec.Vec[[]u8]
-    if vec.init.[[]u8](&objects, arena, 4) < 0 || vec.init.[[]u8](&include_dirs, arena, 4) < 0 {
+    if objects.init(arena, 4) < 0 || include_dirs.init(arena, 4) < 0 {
         return 1
     }
 
@@ -322,9 +322,9 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
                     return 1
             }
             i += 1
-            vec.push_value.[[]u8](&include_dirs, argv[i])
+            include_dirs.push_value(argv[i])
         } else if !stop_options && len(arg) > 2 && str.equals(arg[0..2], "-I") {
-            vec.push_value.[[]u8](&include_dirs, arg[2..len(arg)])
+            include_dirs.push_value(arg[2..len(arg)])
         } else if !stop_options && len(arg) > 6 && str.equals(arg[0..6], "--std=") {
             if len(std_dir) > 0 || len(arg) == 6 {
                 io.eprintln("lunsoc: invalid --std option")
@@ -344,7 +344,7 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
                     return 1
             }
             i += 1
-            vec.push_value.[[]u8](&objects, argv[i])
+            objects.push_value(argv[i])
         } else if !stop_options && len(arg) > 1 && arg[0] == '-' {
             io.eprint("unknown option: ")
             io.eprintln(arg)
@@ -391,7 +391,7 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
         if allows_link && !nostdlib && objects.len == 0 {
             var std_obj = resolve_std_obj(arena)
             if len(std_obj) > 0 {
-                vec.push_value.[[]u8](&objects, std_obj)
+                objects.push_value(std_obj)
             }
         }
         var nkind = native.NativeKind.Exe
@@ -401,10 +401,10 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
             kind: nkind,
             nostdlib: nostdlib,
             output: output,
-            objects: vec.as_slice.[[]u8](&objects),
+            objects: objects.as_slice(),
         }
         var run_args = argv[run_args_start..len(argv)]
-        rc = run_compile(path, source, std_dir, vec.as_slice.[[]u8](&include_dirs), arena, mode, &opts, run_args)
+        rc = run_compile(path, source, std_dir, include_dirs.as_slice(), arena, mode, &opts, run_args)
     }
 
     return rc

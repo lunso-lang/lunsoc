@@ -25,7 +25,7 @@ pub struct NativeOptions {
 }
 
 fun has_entry_point(mod: *ir.IrModule): bool {
-    var fns = vec.as_slice.[ir.IrFunction](&mod.functions)
+    var fns = mod.functions.as_slice()
     for var i: i64 = 0; i < len(fns); i += 1 {
         var f = fns[i]
         var start = f.name.offset as i64
@@ -111,7 +111,7 @@ pub fun build(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *Na
         io.eprintln("lunsoc: could not generate QBE IL")
         return false
     }
-    if file.write_all(il_path, vec.as_slice.[u8](&qbe_buf)) < 0 {
+    if file.write_all(il_path, qbe_buf.as_slice()) < 0 {
         io.eprint(il_path)
         io.eprintln(": could not write QBE IL")
         return false
@@ -134,20 +134,20 @@ pub fun build(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *Na
     }
 
     var link_args: vec.Vec[[]u8]
-    if vec.init.[[]u8](&link_args, arena, (8 + len(opts.objects) * 2) as u64) < 0 {
+    if link_args.init(arena, (8 + len(opts.objects) * 2) as u64) < 0 {
         return false
     }
-    vec.push_value.[[]u8](&link_args, cc_bin)
+    link_args.push_value(cc_bin)
     if opts.nostdlib {
-        vec.push_value.[[]u8](&link_args, "-nostdlib")
+        link_args.push_value("-nostdlib")
     }
-    vec.push_value.[[]u8](&link_args, asm_path)
+    link_args.push_value(asm_path)
     for var i: i64 = 0; i < len(opts.objects); i += 1 {
-        vec.push_value.[[]u8](&link_args, opts.objects[i])
+        link_args.push_value(opts.objects[i])
     }
-    vec.push_value.[[]u8](&link_args, "-o")
-    vec.push_value.[[]u8](&link_args, opts.output)
-    return run_tool(cc_bin, vec.as_slice.[[]u8](&link_args))
+    link_args.push_value("-o")
+    link_args.push_value(opts.output)
+    return run_tool(cc_bin, link_args.as_slice())
 }
 
 pub fun run_exe(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *NativeOptions, run_args: [][]u8): i32 {
@@ -172,14 +172,14 @@ pub fun run_exe(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *
         return 1
     }
     var argv_buf: vec.Vec[[]u8]
-    if vec.init.[[]u8](&argv_buf, arena, (len(run_args) + 1) as u64) < 0 {
+    if argv_buf.init(arena, (len(run_args) + 1) as u64) < 0 {
         return 1
     }
-    vec.push_value.[[]u8](&argv_buf, exe_path)
+    argv_buf.push_value(exe_path)
     for var i: i64 = 0; i < len(run_args); i += 1 {
-        vec.push_value.[[]u8](&argv_buf, run_args[i])
+        argv_buf.push_value(run_args[i])
     }
-    var status = os.run(exe_path, vec.as_slice.[[]u8](&argv_buf))
+    var status = os.run(exe_path, argv_buf.as_slice())
     if status < 0 {
         io.eprint(exe_path)
         io.eprintln(": could not run program")

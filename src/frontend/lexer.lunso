@@ -404,7 +404,7 @@ pub fun tokenize_all(source: []u8, out: *vec.Vec[Token], err_tok: *Token): bool 
             *err_tok = tok
             return false
         }
-        if vec.push.[Token](out, &tok) < 0 {
+        if out.push(&tok) < 0 {
             *err_tok = tok
             return false
         }

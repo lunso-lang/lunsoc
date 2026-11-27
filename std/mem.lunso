@@ -8,17 +8,97 @@ pub struct Arena {
     head: *Block
     current: *Block
     block_size: u64
+
+    pub fun init(self: *Arena, block_size: u64): i64 {
+        if block_size == 0 || self.block_size != 0 {
+            return -22
+        }
+        self.block_size = block_size
+        return 0
+    }
+
+    pub fun alloc(self: *Arena, size: u64, align: u64, out: **u8): i64 {
+        if self.block_size == 0 || size == 0 || align == 0 {
+            return -22
+        }
+        var mask = align - 1
+        if (align & mask) != 0 {
+            return -22
+        }
+
+        var block = self.current
+        var tail: *Block
+        for (block as u64) != 0 {
+            if alloc_from(block, size, mask, out) {
+                self.current = block
+                return 0
+            }
+            tail = block
+            block = block.next
+        }
+
+        var header = size_of(*block)
+        var overhead = header + mask
+        var max: u64 = ~0
+        if size > max - overhead {
+            return -75
+        }
+        var capacity = size + overhead
+        if capacity < self.block_size {
+            capacity = self.block_size
+        }
+
+        var status = lunso_mem_map(capacity, &block)
+        if status < 0 {
+            return status
+        }
+        var end: *Block
+        block.next = end
+        block.size = capacity
+        block.used = header
+        // The new block includes room for the header, worst-case padding, and payload.
+        alloc_from(block, size, mask, out)
+        if (tail as u64) == 0 {
+            self.head = block
+        } else {
+            tail.next = block
+        }
+        self.current = block
+        return 0
+    }
+
+    pub fun reset(self: *Arena) {
+        var block = self.head
+        self.current = block
+        for (block as u64) != 0 {
+            block.used = size_of(*block)
+            block = block.next
+        }
+    }
+
+    pub fun deinit(self: *Arena): i64 {
+        var block = self.head
+        for (block as u64) != 0 {
+            var next = block.next
+            var status = lunso_mem_unmap(block, block.size)
+            if status < 0 {
+                self.current = block
+                return status
+            }
+            self.head = next
+            block = next
+        }
+        self.current = block
+        self.block_size = 0
+        return 0
+    }
 }
 
 ext fun lunso_mem_map(size: u64, out: **Block): i64
 ext fun lunso_mem_unmap(block: *Block, size: u64): i64
 
 pub fun init(arena: *Arena, block_size: u64): i64 {
-    if block_size == 0 || (*arena).block_size != 0 {
-        return -22
-    }
-    (*arena).block_size = block_size
-    return 0
+    return arena.init(block_size)
 }
 
 fun alloc_from(block: *Block, size: u64, mask: u64, out: **u8): bool {
@@ -38,62 +118,11 @@ fun alloc_from(block: *Block, size: u64, mask: u64, out: **u8): bool {
 }
 
 pub fun alloc(arena: *Arena, size: u64, align: u64, out: **u8): i64 {
-    if (*arena).block_size == 0 || size == 0 || align == 0 {
-        return -22
-    }
-    var mask = align - 1
-    if (align & mask) != 0 {
-        return -22
-    }
-
-    var block = (*arena).current
-    var tail: *Block
-    for (block as u64) != 0 {
-        if alloc_from(block, size, mask, out) {
-            (*arena).current = block
-            return 0
-        }
-        tail = block
-        block = (*block).next
-    }
-
-    var header = size_of(*block)
-    var overhead = header + mask
-    var max: u64 = ~0
-    if size > max - overhead {
-        return -75
-    }
-    var capacity = size + overhead
-    if capacity < (*arena).block_size {
-        capacity = (*arena).block_size
-    }
-
-    var status = lunso_mem_map(capacity, &block)
-    if status < 0 {
-        return status
-    }
-    var end: *Block
-    (*block).next = end
-    (*block).size = capacity
-    (*block).used = header
-    // The new block includes room for the header, worst-case padding, and payload.
-    alloc_from(block, size, mask, out)
-    if (tail as u64) == 0 {
-        (*arena).head = block
-    } else {
-        (*tail).next = block
-    }
-    (*arena).current = block
-    return 0
+    return arena.alloc(size, align, out)
 }
 
 pub fun reset(arena: *Arena) {
-    var block = (*arena).head
-    (*arena).current = block
-    for (block as u64) != 0 {
-        (*block).used = size_of(*block)
-        block = (*block).next
-    }
+    arena.reset()
 }
 
 pub fun align_for(size: u64): u64 {
@@ -132,22 +161,9 @@ pub fun alloc_many[T](arena: *Arena, count: u64, out: **T): i64 {
 }
 
 pub fun alloc_one[T](arena: *Arena, out: **T): i64 {
-    return alloc_many.[T](arena, 1, out)
+    return alloc_many(arena, 1, out)
 }
 
 pub fun deinit(arena: *Arena): i64 {
-    var block = (*arena).head
-    for (block as u64) != 0 {
-        var next = (*block).next
-        var status = lunso_mem_unmap(block, (*block).size)
-        if status < 0 {
-            (*arena).current = block
-            return status
-        }
-        (*arena).head = next
-        block = next
-    }
-    (*arena).current = block
-    (*arena).block_size = 0
-    return 0
+    return arena.deinit()
 }
