@@ -244,10 +244,8 @@ fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
 
 fun add_source(l: *Loader, path: []u8, source: []u8, offset: u32, out_base: *u32): bool {
     var base = l.source_buf.len as u32
-    for var i: i64 = 0; i < len(source); i += 1 {
-        if vec.push_value.[u8](&l.source_buf, source[i]) < 0 {
-            return err_at(l, offset, "could not allocate source storage")
-        }
+    if vec.append_slice.[u8](&l.source_buf, source) < 0 {
+        return err_at(l, offset, "could not allocate source storage")
     }
     if vec.push_value.[u8](&l.source_buf, '\n') < 0 {
         return err_at(l, offset, "could not allocate source storage")
