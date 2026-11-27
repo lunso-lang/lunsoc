@@ -2875,7 +2875,10 @@ fun check_statement(c: *Checker, id: u32): bool {
         c.locals.len = saved_locals
         falls = true
     } else {
-        check_expr(c, id, empty_type())
+        var et = check_expr(c, id, empty_type())
+        if !c.has_error && et.kind == TypeKind.Result {
+            fail_at(c, nodes[id as i64].pos, "unused error union result; handle it with '?' or 'or'")
+        }
         falls = true
     }
     node_info(c, id).falls_through = falls
