@@ -107,6 +107,7 @@ pub struct AstFunction {
     return_type: u32
     body: u32
     module: u32
+    owner_struct: u32
     public: bool
 }
 

@@ -254,23 +254,45 @@ fun lower_call(l: *Lowering, id: u32): u32 {
         return emit_value(l, op, lower_node(l, arg).type_info, val, 0, 0)
     }
     var count = call.b - 1
-    var arg_ids: vec.Vec[u32]
-    var dummy_arena: mem.Arena
     // Lower arguments first so nested calls do not interleave in mod.arguments.
     var temp_vals: [64]u32
+    var arg_offset: u32 = 0
+    if info.method_call != 0 {
+        var callee_id = children[call.a as i64]
+        if nodes[callee_id as i64].kind == AstKind.GenericCallee {
+            callee_id = children[nodes[callee_id as i64].a as i64]
+        }
+        var recv_id = nodes[callee_id as i64].a
+        var recv_val: u32 = 0
+        if info.method_call == 2 {
+            var target = lower_node(l, recv_id)
+            if uses_storage(target.type_info) || target.is_const {
+                recv_val = lower_expression(l, recv_id)
+            } else if nodes[recv_id as i64].kind != AstKind.Identifier {
+                recv_val = lower_memory_address(l, recv_id)
+            } else {
+                recv_val = emit_value(l, IrOp.LocalAddress, target.type_info, target.binding, 0, 0)
+            }
+        } else {
+            recv_val = lower_expression(l, recv_id)
+        }
+        temp_vals[0] = recv_val
+        arg_offset = 1
+    }
     for var i: u32 = 0; i < count && !l.failed; i += 1 {
         var val = lower_expression(l, children[(call.a + 1 + i) as i64])
-        if i < 64 {
-            temp_vals[i as i64] = val
+        if (arg_offset + i) < 64 {
+            temp_vals[(arg_offset + i) as i64] = val
         }
     }
+    var total_count = count + arg_offset
     var first = l.mod.arguments.len as u32
-    for var i: u32 = 0; i < count && !l.failed; i += 1 {
+    for var i: u32 = 0; i < total_count && !l.failed; i += 1 {
         if vec.push_value.[u32](&l.mod.arguments, temp_vals[i as i64]) < 0 {
             l.failed = true
         }
     }
-    return emit_value(l, IrOp.Call, info.type_info, info.binding, first, count)
+    return emit_value(l, IrOp.Call, info.type_info, info.binding, first, total_count)
 }
 
 fun lower_logical(l: *Lowering, kind: AstKind, a: u32, b: u32, t: SemaType): u32 {
