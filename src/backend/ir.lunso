@@ -664,7 +664,7 @@ fun lower_for_in(l: *Lowering, id: u32) {
         emit_label(l, start)
         var cur = emit_value(l, IrOp.Load, item_t, item_slot, 0, 0)
         var end_v = emit_value(l, IrOp.Load, item_t, end_slot, 0, 0)
-        var cond = emit_value(l, IrOp.Less, bool_t, cur, end_v, 0)
+        var cond = emit_value(l, IrOp.Less, item_t, cur, end_v, 0)
         emit_branch(l, cond, body, end)
         emit_label(l, body)
         var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
@@ -720,7 +720,7 @@ fun lower_for_in(l: *Lowering, id: u32) {
     emit_label(l, start)
     var cur_idx = emit_value(l, IrOp.Load, i64_t, idx_slot, 0, 0)
     var max_len = emit_value(l, IrOp.Load, i64_t, len_slot, 0, 0)
-    var cond = emit_value(l, IrOp.Less, bool_t, cur_idx, max_len, 0)
+    var cond = emit_value(l, IrOp.Less, i64_t, cur_idx, max_len, 0)
     emit_branch(l, cond, body, end)
     emit_label(l, body)
     var bp = emit_value(l, IrOp.Load, ptr_t, base_slot, 0, 0)
