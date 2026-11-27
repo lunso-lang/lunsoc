@@ -861,7 +861,8 @@ fun parse_type_parameters(p: *Parser): ast.NodeRange {
     return finish_children(p, mark)
 }
 
-fun parse_parameters(p: *Parser): ast.NodeRange {
+fun parse_parameters(p: *Parser, out_variadic: *bool): ast.NodeRange {
+    *out_variadic = false
     var mark = p.pending.len
     if p.has_error {
         return ast.NodeRange { first: 0, count: 0 }
@@ -875,8 +876,16 @@ fun parse_parameters(p: *Parser): ast.NodeRange {
         for {
             var name = expect_tok(p, lexer.TokenKind.Identifier, "expected a parameter name")
             expect_tok(p, lexer.TokenKind.Colon, "expected ':' after parameter name")
+            var variadic = match_tok(p, lexer.TokenKind.DotDotDot)
             var t = parse_type(p)
             push_child(p, add_node(p, ast.AstKind.Parameter, name, name.length as u32, t))
+            if variadic {
+                *out_variadic = true
+                if p.current.kind == lexer.TokenKind.Comma {
+                    fail(p, "variadic parameter must be the last parameter")
+                }
+                break
+            }
             if !match_tok(p, lexer.TokenKind.Comma) || p.current.kind == lexer.TokenKind.RightParen {
                 break
             }
@@ -897,7 +906,8 @@ fun parse_function(p: *Parser, public: bool): u32 {
     var name = expect_tok(p, lexer.TokenKind.Identifier, "expected a function name")
     var first_node = p.tree.nodes.len as u32
     var type_params = parse_type_parameters(p)
-    var params = parse_parameters(p)
+    var is_variadic = false
+    var params = parse_parameters(p, &is_variadic)
     var ret_type = ast.NODE_NONE
     if match_tok(p, lexer.TokenKind.Colon) {
         ret_type = parse_type(p)
@@ -918,6 +928,7 @@ fun parse_function(p: *Parser, public: bool): u32 {
         module: p.module,
         owner_struct: ~0 as u32,
         public: public,
+        is_variadic: is_variadic,
     }
     var idx = p.tree.functions.len as u32
     if !p.has_error && p.tree.functions.push(&fn) < 0 {

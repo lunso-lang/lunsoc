@@ -21,6 +21,7 @@ pub enum TypeKind : u8 {
     Array,
     Slice,
     Pointer,
+    Any,
 }
 
 pub struct SemaType {
@@ -48,6 +49,7 @@ pub struct SemaNode {
     builtin: SemaBuiltin
     promotion: TypeKind
     method_call: u8
+    box_any: bool
     is_boolean_literal: bool
     borrow_array: bool
     falls_through: bool
@@ -245,7 +247,7 @@ pub fun storage_size(t: SemaType): u32 {
     if t.kind == TypeKind.Struct {
         return t.record_size
     }
-    if t.kind == TypeKind.Slice {
+    if t.kind == TypeKind.Slice || t.kind == TypeKind.Any {
         return 16
     }
     return scalar_size(t.kind)
@@ -260,7 +262,7 @@ fun type_alignment(c: *Checker, t: SemaType): u32 {
         var recs = c.sema.records.data
         return recs[t.record as i64].alignment
     }
-    if t.kind == TypeKind.Slice {
+    if t.kind == TypeKind.Slice || t.kind == TypeKind.Any {
         return 8
     }
     var sz = scalar_size(t.kind)
@@ -594,6 +596,7 @@ fun resolve_primitive(name: []u8): TypeKind {
     if str.equals(name, "u64") { return TypeKind.U64 }
     if str.equals(name, "f32") { return TypeKind.F32 }
     if str.equals(name, "f64") { return TypeKind.F64 }
+    if str.equals(name, "any") { return TypeKind.Any }
     return TypeKind.Invalid
 }
 
@@ -898,6 +901,7 @@ fun resolve_struct_layout(c: *Checker, rec_idx: u32) {
             builtin: SemaBuiltin.None,
             promotion: TypeKind.Invalid,
             method_call: 0,
+            box_any: false,
             is_boolean_literal: false,
             borrow_array: false,
             falls_through: false,
@@ -1253,6 +1257,16 @@ fun check_value(c: *Checker, id: u32, expected: SemaType): SemaType {
     if same_type(c, t, expected) {
         return t
     }
+    if expected.kind == TypeKind.Any {
+        if t.kind == TypeKind.Array {
+            var sn = node_info(c, id)
+            sn.borrow_array = true
+            sn.box_any = true
+            return expected
+        }
+        node_info(c, id).box_any = true
+        return expected
+    }
     if expected.kind == TypeKind.Slice && t.kind == TypeKind.Array {
         var elems = c.sema.elements.as_slice()
         var te = elems[t.element_type as i64]
@@ -1327,6 +1341,17 @@ fun register_fn_sig(c: *Checker, fn_idx: u32) {
         var pid = children[(fdecl.parameters.first + p) as i64]
         var pn = nodes[pid as i64]
         var pt = resolve_type(c, pn.b)
+        if fdecl.is_variadic && p == fdecl.parameters.count - 1 && !c.has_error {
+            var st = simple_type(TypeKind.Slice)
+            st.element = pt.kind
+            st.element_type = add_element(c, pt)
+            st.element_size = storage_size(pt)
+            st.record = pt.record
+            st.record_size = pt.record_size
+            st.pointee = pt.pointee
+            st.read_only = true
+            pt = st
+        }
         (c.sema.functions.data[fn_idx as i64].param_types).push(&pt)
     }
     leave_type_scope(c, saved)
@@ -1364,6 +1389,7 @@ fun specialize_function_with_args(c: *Checker, site_id: u32, decl_idx: u32, args
         builtin: SemaBuiltin.None,
         promotion: TypeKind.Invalid,
         method_call: 0,
+        box_any: false,
         is_boolean_literal: false,
         borrow_array: false,
         falls_through: false,
@@ -1731,9 +1757,10 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                             if !c.has_error && fi != (~0 as u32) {
                                 var fns = c.sema.functions.data
                                 var sf = &fns[fi as i64]
+                                var is_var = fdecls[sf.declaration as i64].is_variadic
                                 if sf.param_types.len == 0 {
                                     res = fail(c, callee, "method must declare a receiver parameter")
-                                } else if node.b != (sf.param_types.len as u32) {
+                                } else if (!is_var && node.b != (sf.param_types.len as u32)) || (is_var && node.b + 1 < (sf.param_types.len as u32)) {
                                     res = fail(c, id, "wrong number of function arguments")
                                 } else {
                                     var ptypes = sf.param_types.as_slice()
@@ -1772,8 +1799,20 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                                         }
                                     }
                                     if !c.has_error {
-                                        for var i: u32 = 0; i < node.b - 1 && !c.has_error; i += 1 {
-                                            check_value(c, children[(node.a + 1 + i) as i64], ptypes[(i + 1) as i64])
+                                        if is_var {
+                                            var fixed = (sf.param_types.len as u32) - 2
+                                            for var i: u32 = 0; i < fixed && !c.has_error; i += 1 {
+                                                check_value(c, children[(node.a + 1 + i) as i64], ptypes[(i + 1) as i64])
+                                            }
+                                            var var_slice_t = ptypes[(sf.param_types.len - 1) as i64]
+                                            var var_elem_t = c.sema.elements.data[var_slice_t.element_type as i64]
+                                            for var i: u32 = fixed; i < node.b - 1 && !c.has_error; i += 1 {
+                                                check_value(c, children[(node.a + 1 + i) as i64], var_elem_t)
+                                            }
+                                        } else {
+                                            for var i: u32 = 0; i < node.b - 1 && !c.has_error; i += 1 {
+                                                check_value(c, children[(node.a + 1 + i) as i64], ptypes[(i + 1) as i64])
+                                            }
                                         }
                                         if !c.has_error {
                                             var sn = node_info(c, id)
@@ -1862,12 +1901,25 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                     if !c.has_error && fi != (~0 as u32) {
                         var fns = c.sema.functions.data
                         var sf = &fns[fi as i64]
-                        if node.b - 1 != (sf.param_types.len as u32) {
+                        var is_var = fdecls[sf.declaration as i64].is_variadic
+                        if (!is_var && node.b - 1 != (sf.param_types.len as u32)) || (is_var && node.b < (sf.param_types.len as u32)) {
                             res = fail(c, id, "wrong number of function arguments")
                         } else {
                             var ptypes = sf.param_types.as_slice()
-                            for var i: u32 = 0; i < node.b - 1 && !c.has_error; i += 1 {
-                                check_value(c, children[(node.a + 1 + i) as i64], ptypes[i as i64])
+                            if is_var {
+                                var fixed = (sf.param_types.len as u32) - 1
+                                for var i: u32 = 0; i < fixed && !c.has_error; i += 1 {
+                                    check_value(c, children[(node.a + 1 + i) as i64], ptypes[i as i64])
+                                }
+                                var var_slice_t = ptypes[fixed as i64]
+                                var var_elem_t = c.sema.elements.data[var_slice_t.element_type as i64]
+                                for var i: u32 = fixed; i < node.b - 1 && !c.has_error; i += 1 {
+                                    check_value(c, children[(node.a + 1 + i) as i64], var_elem_t)
+                                }
+                            } else {
+                                for var i: u32 = 0; i < node.b - 1 && !c.has_error; i += 1 {
+                                    check_value(c, children[(node.a + 1 + i) as i64], ptypes[i as i64])
+                                }
                             }
                             if !c.has_error {
                                 var sn = node_info(c, id)
@@ -2009,7 +2061,20 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                     var pts = c.sema.pointees.as_slice()
                     bt = pts[bt.pointee as i64]
                 }
-                if bt.kind != TypeKind.Struct {
+                if bt.kind == TypeKind.Any {
+                    var sn = node_info(c, id)
+                    if str.equals(span_bytes(c.tree, mname), "ptr") {
+                        res = simple_type(TypeKind.Pointer)
+                        res.pointee = add_pointee(c, simple_type(TypeKind.U8))
+                        res.read_only = true
+                        sn.binding = 0
+                    } else if str.equals(span_bytes(c.tree, mname), "tag") {
+                        res = simple_type(TypeKind.U64)
+                        sn.binding = 8
+                    } else {
+                        res = fail(c, id, "unknown field on any")
+                    }
+                } else if bt.kind != TypeKind.Struct {
                     res = fail(c, id, "member access requires a struct value")
                 } else {
                     resolve_struct_layout(c, bt.record)
@@ -2526,6 +2591,7 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
         builtin: SemaBuiltin.None,
         promotion: TypeKind.Invalid,
         method_call: 0,
+        box_any: false,
         is_boolean_literal: false,
         borrow_array: false,
         falls_through: false,

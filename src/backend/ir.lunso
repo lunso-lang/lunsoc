@@ -26,6 +26,8 @@ pub enum IrOp : u8 {
     Slice,
     PointerSlice,
     ArrayView,
+    MakeAny,
+    VariadicSlice,
     Len,
     Data,
     Cast,
@@ -286,6 +288,22 @@ fun lower_call(l: *Lowering, id: u32): u32 {
         }
     }
     var total_count = count + arg_offset
+    var sf = l.sem.functions.data[info.binding as i64]
+    var fdecl = l.tree.functions.data[sf.declaration as i64]
+    if fdecl.is_variadic && !l.failed {
+        var fixed_total = fdecl.parameters.count - 1
+        var var_count = total_count - fixed_total
+        var first_var = l.mod.arguments.len as u32
+        for var i: u32 = 0; i < var_count && !l.failed; i += 1 {
+            if l.mod.arguments.push_value(temp_vals[(fixed_total + i) as i64]) < 0 {
+                l.failed = true
+            }
+        }
+        var var_slice_t = sf.param_types.data[(sf.param_types.len - 1) as i64]
+        var var_val = emit_value(l, IrOp.VariadicSlice, var_slice_t, first_var, var_count, 0)
+        temp_vals[fixed_total as i64] = var_val
+        total_count = fixed_total + 1
+    }
     var first = l.mod.arguments.len as u32
     for var i: u32 = 0; i < total_count && !l.failed; i += 1 {
         if l.mod.arguments.push_value(temp_vals[i as i64]) < 0 {
@@ -398,6 +416,13 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
             var bits = evals[info.binding as i64]
             return emit_value(l, IrOp.Immediate, info.type_info, bits as u32, (bits >> 32) as u32, 0)
         }
+        if node.kind == AstKind.Member && lower_node(l, node.a).type_info.kind == TypeKind.Any {
+            var any_val = lower_expression(l, node.a)
+            if info.binding == 0 {
+                return emit_value(l, IrOp.Data, info.type_info, any_val, 0, 0)
+            }
+            return emit_value(l, IrOp.Len, simple_type(TypeKind.Any), any_val, 0, 0)
+        }
         var addr = lower_memory_address(l, id)
         if uses_storage(info.type_info) {
             return addr
@@ -488,14 +513,30 @@ fun lower_expression(l: *Lowering, id: u32): u32 {
     var val = lower_unconverted(l, id)
     var info = lower_node(l, id)
     if info.borrow_array {
-        return emit_value(l, IrOp.ArrayView, info.type_info, val, 0, 0)
+        val = emit_value(l, IrOp.ArrayView, info.type_info, val, 0, 0)
     }
     if info.promotion != TypeKind.Invalid {
         var dst = simple_type(info.promotion)
         if info.promotion == TypeKind.F64 && info.type_info.kind == TypeKind.F32 {
-            return emit_value(l, IrOp.FloatExtend, dst, val, 0, 0)
+            val = emit_value(l, IrOp.FloatExtend, dst, val, 0, 0)
+        } else {
+            val = emit_value(l, IrOp.Cast, dst, val, info.type_info.kind as u32, 0)
         }
-        return emit_value(l, IrOp.Cast, dst, val, info.type_info.kind as u32, 0)
+    }
+    if info.box_any {
+        var orig_t = info.type_info
+        if info.borrow_array {
+            orig_t.kind = TypeKind.Slice
+        } else if info.promotion != TypeKind.Invalid {
+            orig_t = simple_type(info.promotion)
+        }
+        var tag: u32 = orig_t.kind as u32
+        if orig_t.kind == TypeKind.Slice || orig_t.kind == TypeKind.Array {
+            tag |= (orig_t.element as u32) << 8
+        } else if orig_t.kind == TypeKind.Pointer {
+            tag |= (l.sem.pointees.data[orig_t.pointee as i64].kind as u32) << 8
+        }
+        val = emit_value(l, IrOp.MakeAny, simple_type(TypeKind.Any), val, tag, 0)
     }
     return val
 }

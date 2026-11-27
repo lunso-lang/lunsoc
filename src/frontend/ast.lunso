@@ -110,6 +110,7 @@ pub struct AstFunction {
     module: u32
     owner_struct: u32
     public: bool
+    is_variadic: bool
 }
 
 pub struct AstStruct {
