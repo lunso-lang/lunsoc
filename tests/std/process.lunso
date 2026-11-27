@@ -14,35 +14,49 @@ fun main(): i32 {
         return 2
     }
 
-    var orig_cwd: []u8
-    if process.cwd(&arena, &orig_cwd) < 0 || len(orig_cwd) == 0 {
+    var orig_cwd = process.cwd(&arena) or {
         return 3
     }
-    if process.chdir("/tmp") < 0 {
+    if len(orig_cwd) == 0 {
+        return 3
+    }
+    process.chdir("/tmp") or {
         return 4
     }
-    var tmp_cwd: []u8
-    if process.cwd(&arena, &tmp_cwd) < 0 || !str.equals(tmp_cwd, "/tmp") {
+    var tmp_cwd = process.cwd(&arena) or {
         return 5
     }
-    if process.chdir(orig_cwd) < 0 {
+    if !str.equals(tmp_cwd, "/tmp") {
+        return 5
+    }
+    process.chdir(orig_cwd) or {
         return 6
     }
 
     var cmd: process.Command
-    if cmd.init(&arena, "echo") < 0 {
+    cmd.init(&arena, "echo") or {
         return 7
     }
-    cmd.arg("hello")
-    cmd.arg("lunso")
+    cmd.arg("hello") or {
+        return 7
+    }
+    cmd.arg("lunso") or {
+        return 7
+    }
 
-    var out: []u8
-    if cmd.output(&out) != 0 {
+    var out = cmd.output() or {
         return 8
     }
     if !str.equals(str.trim(out), "hello lunso") {
         return 9
     }
 
-    return 0
+    var bad_cmd: process.Command
+    bad_cmd.init(&arena, "lunso_nonexistent_cmd_12345") or {
+        return 10
+    }
+    bad_cmd.output() or {
+        return 0
+    }
+    return 11
 }
