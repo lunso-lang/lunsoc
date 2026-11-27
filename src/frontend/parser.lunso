@@ -4,18 +4,19 @@ import frontend.ast
 import frontend.lexer
 
 const PREC_ASSIGNMENT: u32 = 1
-const PREC_LOGICAL_OR: u32 = 2
-const PREC_LOGICAL_AND: u32 = 3
-const PREC_BIT_OR: u32 = 4
-const PREC_BIT_XOR: u32 = 5
-const PREC_BIT_AND: u32 = 6
-const PREC_EQUALITY: u32 = 7
-const PREC_COMPARISON: u32 = 8
-const PREC_SHIFT: u32 = 9
-const PREC_SUM: u32 = 10
-const PREC_PRODUCT: u32 = 11
-const PREC_CAST: u32 = 12
-const PREC_PREFIX: u32 = 13
+const PREC_OR: u32 = 2
+const PREC_LOGICAL_OR: u32 = 3
+const PREC_LOGICAL_AND: u32 = 4
+const PREC_BIT_OR: u32 = 5
+const PREC_BIT_XOR: u32 = 6
+const PREC_BIT_AND: u32 = 7
+const PREC_EQUALITY: u32 = 8
+const PREC_COMPARISON: u32 = 9
+const PREC_SHIFT: u32 = 10
+const PREC_SUM: u32 = 11
+const PREC_PRODUCT: u32 = 12
+const PREC_CAST: u32 = 13
+const PREC_PREFIX: u32 = 14
 const MAX_RECURSION_DEPTH: u32 = 256
 
 pub struct ParseError {
@@ -371,6 +372,9 @@ fun parse_postfix(p: *Parser, base_in: u32): u32 {
                 base = add_node(p, ast.AstKind.Member, member, base, member.length as u32)
             }
             nodes = p.tree.nodes.as_slice()
+        } else if match_tok(p, lexer.TokenKind.Question) {
+            base = add_node(p, ast.AstKind.Try, tok, base, 0)
+            nodes = p.tree.nodes.as_slice()
         } else {
             return base
         }
@@ -438,6 +442,44 @@ fun parse_expression(p: *Parser, minimum: u32): u32 {
             left = add_node(p, ast.AstKind.Cast, tok, left, t)
             continue
         }
+        if tok.kind == lexer.TokenKind.Or && minimum <= PREC_OR {
+            advance(p)
+            var err_name = ast.Span { offset: 0, length: 0 }
+            var handler = ast.NODE_NONE
+            var is_block = false
+            if p.current.kind == lexer.TokenKind.LeftBrace {
+                is_block = true
+                handler = parse_block(p)
+            } else if p.current.kind == lexer.TokenKind.Identifier {
+                var saved_lex = p.lex
+                var saved_cur = p.current
+                var id_tok = p.current
+                advance(p)
+                if p.current.kind == lexer.TokenKind.LeftBrace {
+                    is_block = true
+                    err_name = source_span(p, id_tok)
+                    handler = parse_block(p)
+                } else {
+                    p.lex = saved_lex
+                    p.current = saved_cur
+                    handler = parse_expression(p, PREC_OR + 1)
+                }
+            } else {
+                handler = parse_expression(p, PREC_OR + 1)
+            }
+            var oe = ast.AstOrElse {
+                expr: left,
+                err_name: err_name,
+                handler: handler,
+                is_block: is_block,
+            }
+            var idx = p.tree.or_elses.len as u32
+            if !p.has_error && p.tree.or_elses.push(&oe) < 0 {
+                fail(p, "could not allocate AST storage")
+            }
+            left = add_node(p, ast.AstKind.OrElse, tok, idx, 0)
+            continue
+        }
         var prec = infix_prec(tok.kind)
         if prec < minimum {
             break
@@ -482,7 +524,36 @@ fun parse_type(p: *Parser): u32 {
     }
     var opening = p.current
     var res = ast.NODE_NONE
-    if match_tok(p, lexer.TokenKind.Star) {
+    if match_tok(p, lexer.TokenKind.Bang) {
+        var inner = parse_type(p)
+        res = add_node(p, ast.AstKind.ResultType, opening, inner, 0)
+    } else if match_tok(p, lexer.TokenKind.Fun) {
+        if p.current.kind != lexer.TokenKind.LeftParen {
+            fail(p, "expected '(' after 'fun'")
+        } else {
+            open_group(p)
+            var mark = p.pending.len
+            if p.current.kind != lexer.TokenKind.RightParen {
+                for !p.has_error {
+                    push_child(p, parse_type(p))
+                    if !match_tok(p, lexer.TokenKind.Comma) || p.current.kind == lexer.TokenKind.RightParen {
+                        break
+                    }
+                }
+            }
+            close_group(p, lexer.TokenKind.RightParen, "expected ')' after function type parameters")
+            var ret = ast.NODE_NONE
+            if match_tok(p, lexer.TokenKind.Colon) {
+                ret = parse_type(p)
+            }
+            var ft = ast.AstFuncType { params: finish_children(p, mark), return_type: ret }
+            var idx = p.tree.func_types.len as u32
+            if !p.has_error && p.tree.func_types.push(&ft) < 0 {
+                fail(p, "could not allocate AST storage")
+            }
+            res = add_node(p, ast.AstKind.FuncType, opening, idx, 0)
+        }
+    } else if match_tok(p, lexer.TokenKind.Star) {
         var read_only: u32 = 0
         if match_tok(p, lexer.TokenKind.Const) {
             read_only = 1

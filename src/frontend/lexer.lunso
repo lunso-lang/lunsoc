@@ -20,6 +20,7 @@ pub enum TokenKind : u16 {
     Continue,
     Defer,
     Var,
+    Or,
     Identifier,
     Integer,
     Float,
@@ -31,6 +32,7 @@ pub enum TokenKind : u16 {
     Colon,
     Comma,
     Semicolon,
+    Question,
     Dot,
     DotDot,
     DotDotDot,
@@ -183,6 +185,7 @@ fun keyword_or_ident(text: []u8): TokenKind {
     if str.equals(text, "continue") { return TokenKind.Continue }
     if str.equals(text, "defer") { return TokenKind.Defer }
     if str.equals(text, "var") { return TokenKind.Var }
+    if str.equals(text, "or") { return TokenKind.Or }
     return TokenKind.Identifier
 }
 
@@ -288,6 +291,7 @@ fun scan_token(l: *Lexer): TokenKind {
     if b == ':' { return TokenKind.Colon }
     if b == ',' { return TokenKind.Comma }
     if b == ';' { return TokenKind.Semicolon }
+    if b == '?' { return TokenKind.Question }
     if b == '.' {
         if match_byte(l, '.') {
             if match_byte(l, '.') { return TokenKind.DotDotDot }
@@ -438,6 +442,7 @@ pub fun token_name(kind: TokenKind): []u8 {
         TokenKind.Continue => return "CONTINUE"
         TokenKind.Defer => return "DEFER"
         TokenKind.Var => return "VAR"
+        TokenKind.Or => return "OR"
         TokenKind.Identifier => return "IDENTIFIER"
         TokenKind.Integer => return "INTEGER"
         TokenKind.Float => return "FLOAT"
@@ -449,6 +454,7 @@ pub fun token_name(kind: TokenKind): []u8 {
         TokenKind.Colon => return "COLON"
         TokenKind.Comma => return "COMMA"
         TokenKind.Semicolon => return "SEMICOLON"
+        TokenKind.Question => return "QUESTION"
         TokenKind.Dot => return "DOT"
         TokenKind.DotDot => return "DOT_DOT"
         TokenKind.DotDotDot => return "DOT_DOT_DOT"

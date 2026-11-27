@@ -1,9 +1,11 @@
 import std.file
 import std.fmt
+import std.fs
 import std.io
 import std.mem
 import std.os
 import std.path
+import std.process
 import std.str
 import std.vec
 import frontend.ast
@@ -15,9 +17,8 @@ import frontend.parser
 import backend.qbe
 import frontend.sema
 
-fun print_lexeme(bytes: []u8) {
-    for var i: i64 = 0; i < len(bytes); i += 1 {
-        var b = bytes[i]
+fun print_lexeme(bytes: []const u8) {
+    for i, b in bytes {
         if b == '\r' {
             io.print("\\r")
         } else if b == '\n' {
@@ -49,14 +50,8 @@ fun has_lexeme(kind: lexer.TokenKind): bool {
     }
 }
 
-fun report_error(path: []u8, source: []u8, tok: lexer.Token, msg: []u8): i32 {
-    io.eprint(path)
-    io.eprint(":")
-    fmt.print_u64(2, tok.line)
-    io.eprint(":")
-    fmt.print_u64(2, tok.column)
-    io.eprint(": ")
-    io.eprintln(msg)
+fun report_error(path: []const u8, source: []const u8, tok: lexer.Token, msg: []const u8): i32 {
+    io.eprintfln("{}:{}:{}: {}", path, tok.line, tok.column, msg)
     modules.print_caret(source, 0, len(source) as u32, tok.offset as u32, tok.line, tok.column)
     return 1
 }
@@ -77,14 +72,8 @@ fun dump_tokens(path: []u8, source: []u8, arena: *mem.Arena): i32 {
         return report_error(path, source, err_tok, msg)
     }
 
-    var slice = tokens.as_slice()
-    for var i: i64 = 0; i < len(slice); i += 1 {
-        var tok = slice[i]
-        fmt.print_u64(1, tok.line)
-        io.print(":")
-        fmt.print_u64(1, tok.column)
-        io.print(" ")
-        io.print(lexer.token_name(tok.kind))
+    for tok in tokens.as_slice() {
+        io.printf("{}:{} {}", tok.line, tok.column, lexer.token_name(tok.kind))
         if has_lexeme(tok.kind) {
             io.print(" ")
             var start = tok.offset as i64
@@ -110,15 +99,11 @@ fun run_parse(path: []u8, source: []u8, arena: *mem.Arena): i32 {
     if tree.nodes.len > 0 {
         nodes = tree.nodes.len - 1
     }
-    io.print("Parsed ")
-    fmt.print_u64(1, tree.functions.len)
-    io.print(" function(s), ")
-    fmt.print_u64(1, nodes)
-    io.println(" AST node(s)")
+    io.printfln("Parsed {} function(s), {} AST node(s)", tree.functions.len, nodes)
     return 0
 }
 
-const VERSION: []u8 = "lunsoc 0.3.3"
+const VERSION: []u8 = "lunsoc 0.4.0"
 
 enum Mode : u8 {
     Tokens,
@@ -183,9 +168,7 @@ fun run_compile(path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, a
         return 1
     }
     if mode == Mode.Check {
-        io.print("Checked ")
-        fmt.print_u64(1, prog.tree.functions.len)
-        io.println(" function(s)")
+        io.printfln("Checked {} function(s)", prog.tree.functions.len)
         return 0
     }
     var mod: ir.IrModule
@@ -217,25 +200,27 @@ fun run_compile(path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, a
 
 fun resolve_std_obj(arena: *mem.Arena): []u8 {
     var env_val: []u8
-    if os.getenv("LUNSO_STD_OBJ", arena, &env_val) == 0 && len(env_val) > 0 {
+    if process.getenv("LUNSO_STD_OBJ", arena, &env_val) == 0 && len(env_val) > 0 {
         return env_val
     }
-    if file.exists("build/std-linux-x86_64.o") {
+    if fs.exists("build/std-linux-x86_64.o") {
         return "build/std-linux-x86_64.o"
     }
     return ""
 }
 
-fun default_output_name(arena: *mem.Arena, src_path: []u8, mode: Mode): []u8 {
-    var base = path.basename(src_path)
-    var stem = str.strip_suffix(base, ".lunso")
-    var has_ext = len(stem) < len(base)
-    var suffix: []u8 = ""
+fun default_output_name(arena: *mem.Arena, src_path: []const u8, mode: Mode): []u8 {
+    var has_lunso = str.equals(path.extension(src_path), ".lunso")
+    var stem = path.basename(src_path)
+    if has_lunso {
+        stem = path.stem(src_path)
+    }
+    var suffix: []const u8 = ""
     if mode == Mode.EmitAsm {
         suffix = ".s"
     } else if mode == Mode.EmitObj {
         suffix = ".o"
-    } else if !has_ext {
+    } else if !has_lunso {
         suffix = ".out"
     }
     var out = str.concat(arena, stem, suffix)

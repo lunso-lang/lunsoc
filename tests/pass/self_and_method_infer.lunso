@@ -1,0 +1,67 @@
+// lunsoc-only
+import std.mem
+
+struct Point {
+    x: i32
+    y: i32
+
+    pub fun clone(self: *const Self): Self {
+        return Self { x: self.x, y: self.y }
+    }
+
+    pub fun add_in_place(self: *Self, dx: i32, dy: i32) {
+        self.x += dx
+        self.y += dy
+    }
+}
+
+struct Pair[T] {
+    first: T
+    second: T
+
+    pub fun swap_copy(self: *const Self): Self {
+        return Self { first: self.second, second: self.first }
+    }
+
+    pub fun write_second_as[U](self: *const Self, out: *U) {
+        *out = self.second as U
+    }
+}
+
+fun main(): i32 {
+    var p = Point { x: 3, y: 4 }
+    var p2 = p.clone()
+    p2.add_in_place(10, 20)
+    if p.x != 3 || p2.x != 13 || p2.y != 24 {
+        return 1
+    }
+
+    var pair = Pair[i32] { first: 1, second: 2 }
+    var sw = pair.swap_copy()
+    if sw.first != 2 || sw.second != 1 {
+        return 2
+    }
+
+    var wide: i64 = 0
+    pair.write_second_as(&wide)
+    if wide != 2 {
+        return 3
+    }
+
+    var arena: mem.Arena
+    if arena.init(4096) < 0 {
+        return 4
+    }
+    defer arena.deinit()
+
+    var ptr: *i32
+    if arena.alloc_one(&ptr) < 0 {
+        return 5
+    }
+    *ptr = 77
+    if *ptr != 77 {
+        return 6
+    }
+
+    return 0
+}

@@ -1,0 +1,52 @@
+// lunsoc-only
+struct Handler {
+    op: fun(i32, i32): i32
+}
+
+fun add(a: i32, b: i32): i32 {
+    return a + b
+}
+
+fun mul(a: i32, b: i32): i32 {
+    return a * b
+}
+
+fun apply(x: i32, y: i32, f: fun(i32, i32): i32): i32 {
+    return f(x, y)
+}
+
+fun bump(p: *i32) {
+    *p += 1
+}
+
+fun run_cb(p: *i32, cb: fun(*i32)) {
+    cb(p)
+}
+
+fun main(): i32 {
+    var f: fun(i32, i32): i32 = add
+    if f(3, 4) != 7 {
+        return 1
+    }
+    if apply(3, 4, mul) != 12 {
+        return 2
+    }
+
+    var h = Handler { op: add }
+    if h.op(10, 5) != 15 {
+        return 3
+    }
+
+    var arr: [2]fun(i32, i32): i32 = [add, mul]
+    if arr[1](5, 6) != 30 {
+        return 4
+    }
+
+    var x: i32 = 10
+    run_cb(&x, bump)
+    if x != 11 {
+        return 5
+    }
+
+    return 0
+}

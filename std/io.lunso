@@ -1,3 +1,6 @@
+import std.fmt
+import std.mem
+
 ext fun lunso_sys_read(fd: i32, buffer: *u8, count: u64): i64
 ext fun lunso_sys_write(fd: i32, buffer: *const u8, count: u64): i64
 
@@ -69,11 +72,11 @@ pub fun read_line(buffer: *u8, capacity: u64, out: *[]u8): i64 {
     }
 }
 
-pub fun write_bytes(fd: i32, bytes: []u8): i64 {
+pub fun write_bytes(fd: i32, bytes: []const u8): i64 {
     return lunso_sys_write(fd, data(bytes), len(bytes) as u64)
 }
 
-fun write_all_fd(fd: i32, text: []u8): i64 {
+fun write_all_fd(fd: i32, text: []const u8): i64 {
     var written: i64 = 0
     for written < len(text) {
         var count: i64 = write_bytes(fd, text[written..len(text)])
@@ -88,7 +91,7 @@ fun write_all_fd(fd: i32, text: []u8): i64 {
     return written
 }
 
-fun writeln_fd(fd: i32, text: []u8): i64 {
+fun writeln_fd(fd: i32, text: []const u8): i64 {
     var written: i64 = write_all_fd(fd, text)
     if written != len(text) {
         return written
@@ -100,18 +103,46 @@ fun writeln_fd(fd: i32, text: []u8): i64 {
     return written + newline
 }
 
-pub fun print(text: []u8): i64 {
+pub fun print(text: []const u8): i64 {
     return write_all_fd(1, text)
 }
 
-pub fun println(text: []u8): i64 {
+pub fun println(text: []const u8): i64 {
     return writeln_fd(1, text)
 }
 
-pub fun eprint(text: []u8): i64 {
+pub fun eprint(text: []const u8): i64 {
     return write_all_fd(2, text)
 }
 
-pub fun eprintln(text: []u8): i64 {
+pub fun eprintln(text: []const u8): i64 {
     return writeln_fd(2, text)
+}
+
+pub fun printf(fmt_str: []const u8, args: ...any): i64 {
+    var arena: mem.Arena
+    if arena.init(4096) < 0 { return -12 }
+    defer arena.deinit()
+    return write_all_fd(1, fmt.format_args(&arena, fmt_str, args))
+}
+
+pub fun printfln(fmt_str: []const u8, args: ...any): i64 {
+    var arena: mem.Arena
+    if arena.init(4096) < 0 { return -12 }
+    defer arena.deinit()
+    return writeln_fd(1, fmt.format_args(&arena, fmt_str, args))
+}
+
+pub fun eprintf(fmt_str: []const u8, args: ...any): i64 {
+    var arena: mem.Arena
+    if arena.init(4096) < 0 { return -12 }
+    defer arena.deinit()
+    return write_all_fd(2, fmt.format_args(&arena, fmt_str, args))
+}
+
+pub fun eprintfln(fmt_str: []const u8, args: ...any): i64 {
+    var arena: mem.Arena
+    if arena.init(4096) < 0 { return -12 }
+    defer arena.deinit()
+    return writeln_fd(2, fmt.format_args(&arena, fmt_str, args))
 }
