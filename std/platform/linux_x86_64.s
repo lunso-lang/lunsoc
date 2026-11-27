@@ -205,4 +205,52 @@ lunso_sys_rename:
     ret
 .size lunso_sys_rename, .-lunso_sys_rename
 
+.globl lunso_sys_getpid
+.type lunso_sys_getpid, @function
+lunso_sys_getpid:
+    mov $39, %eax          # getpid
+    syscall
+    ret
+.size lunso_sys_getpid, .-lunso_sys_getpid
+
+.globl lunso_sys_getppid
+.type lunso_sys_getppid, @function
+lunso_sys_getppid:
+    mov $110, %eax         # getppid
+    syscall
+    ret
+.size lunso_sys_getppid, .-lunso_sys_getppid
+
+.globl lunso_sys_getcwd
+.type lunso_sys_getcwd, @function
+lunso_sys_getcwd:
+    mov $79, %eax          # getcwd
+    syscall
+    ret
+.size lunso_sys_getcwd, .-lunso_sys_getcwd
+
+.globl lunso_sys_chdir
+.type lunso_sys_chdir, @function
+lunso_sys_chdir:
+    mov $80, %eax          # chdir
+    syscall
+    ret
+.size lunso_sys_chdir, .-lunso_sys_chdir
+
+.globl lunso_sys_pipe2
+.type lunso_sys_pipe2, @function
+lunso_sys_pipe2:
+    mov $293, %eax         # pipe2
+    syscall
+    ret
+.size lunso_sys_pipe2, .-lunso_sys_pipe2
+
+.globl lunso_sys_dup2
+.type lunso_sys_dup2, @function
+lunso_sys_dup2:
+    mov $33, %eax          # dup2
+    syscall
+    ret
+.size lunso_sys_dup2, .-lunso_sys_dup2
+
 .section .note.GNU-stack,"",@progbits
