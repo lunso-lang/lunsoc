@@ -1,0 +1,147 @@
+fun swap_elem[T](items: []T, a: i64, b: i64) {
+    if a == b {
+        return
+    }
+    var tmp = items[a]
+    items[a] = items[b]
+    items[b] = tmp
+}
+
+fun insertion_sort[T](items: []T, lo: i64, hi: i64, cmp: fun(T, T): i32) {
+    for var i: i64 = lo + 1; i <= hi; i += 1 {
+        var key = items[i]
+        var j = i - 1
+        for j >= lo && cmp(items[j], key) > 0 {
+            items[j + 1] = items[j]
+            j -= 1
+        }
+        items[j + 1] = key
+    }
+}
+
+fun quicksort_range[T](items: []T, lo_in: i64, hi_in: i64, cmp: fun(T, T): i32) {
+    var lo = lo_in
+    var hi = hi_in
+    for hi - lo > 16 {
+        var mid = lo + (hi - lo) / 2
+        if cmp(items[mid], items[lo]) < 0 {
+            swap_elem(items, lo, mid)
+        }
+        if cmp(items[hi], items[lo]) < 0 {
+            swap_elem(items, lo, hi)
+        }
+        if cmp(items[hi], items[mid]) < 0 {
+            swap_elem(items, mid, hi)
+        }
+        swap_elem(items, mid, hi - 1)
+        var pivot = items[hi - 1]
+        var i = lo
+        var j = hi - 1
+        for {
+            i += 1
+            for cmp(items[i], pivot) < 0 {
+                i += 1
+            }
+            j -= 1
+            for cmp(items[j], pivot) > 0 {
+                j -= 1
+            }
+            if i >= j {
+                break
+            }
+            swap_elem(items, i, j)
+        }
+        swap_elem(items, i, hi - 1)
+        if i - lo < hi - i {
+            quicksort_range(items, lo, i - 1, cmp)
+            lo = i + 1
+        } else {
+            quicksort_range(items, i + 1, hi, cmp)
+            hi = i - 1
+        }
+    }
+    if hi > lo {
+        insertion_sort(items, lo, hi, cmp)
+    }
+}
+
+pub fun sort[T](items: []T, cmp: fun(T, T): i32) {
+    var n = len(items)
+    if n <= 1 {
+        return
+    }
+    quicksort_range(items, 0, n - 1, cmp)
+}
+
+pub fun is_sorted[T](items: []const T, cmp: fun(T, T): i32): bool {
+    var n = len(items)
+    for var i: i64 = 1; i < n; i += 1 {
+        if cmp(items[i - 1], items[i]) > 0 {
+            return false
+        }
+    }
+    return true
+}
+
+pub fun reverse[T](items: []T) {
+    var n = len(items)
+    var i: i64 = 0
+    var j = n - 1
+    for i < j {
+        swap_elem(items, i, j)
+        i += 1
+        j -= 1
+    }
+}
+
+pub fun fill[T](items: []T, value: T) {
+    var n = len(items)
+    for var i: i64 = 0; i < n; i += 1 {
+        items[i] = value
+    }
+}
+
+pub fun find_by[T](items: []const T, pred: fun(T): bool): i64 {
+    for i, item in items {
+        if pred(item) {
+            return i
+        }
+    }
+    return -1
+}
+
+pub fun any_of[T](items: []const T, pred: fun(T): bool): bool {
+    return find_by(items, pred) >= 0
+}
+
+pub fun all_of[T](items: []const T, pred: fun(T): bool): bool {
+    for item in items {
+        if !pred(item) {
+            return false
+        }
+    }
+    return true
+}
+
+pub fun count_by[T](items: []const T, pred: fun(T): bool): i64 {
+    var count: i64 = 0
+    for item in items {
+        if pred(item) {
+            count += 1
+        }
+    }
+    return count
+}
+
+pub fun index_of[T](items: []const T, needle: T): i64 {
+    for i, item in items {
+        if item == needle {
+            return i
+        }
+    }
+    return -1
+}
+
+pub fun contains[T](items: []const T, needle: T): bool {
+    return index_of(items, needle) >= 0
+}
