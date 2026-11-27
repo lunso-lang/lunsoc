@@ -177,4 +177,24 @@ lunso_sys_getrandom:
     ret
 .size lunso_sys_getrandom, .-lunso_sys_getrandom
 
+.globl lunso_sys_open_dir
+.type lunso_sys_open_dir, @function
+lunso_sys_open_dir:
+    mov %rdi, %rsi         # pathname
+    mov $-100, %edi        # AT_FDCWD
+    mov $02200000, %edx    # O_RDONLY | O_DIRECTORY | O_CLOEXEC
+    xor %r10d, %r10d
+    mov $257, %eax         # openat
+    syscall
+    ret
+.size lunso_sys_open_dir, .-lunso_sys_open_dir
+
+.globl lunso_sys_getdents64
+.type lunso_sys_getdents64, @function
+lunso_sys_getdents64:
+    mov $217, %eax         # getdents64
+    syscall
+    ret
+.size lunso_sys_getdents64, .-lunso_sys_getdents64
+
 .section .note.GNU-stack,"",@progbits
