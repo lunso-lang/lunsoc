@@ -1,0 +1,15 @@
+// expect-stderr: cannot call mutating method on const pointer
+struct Counter {
+    n: i32
+
+    fun inc(self: *Counter) {
+        self.n += 1
+    }
+}
+
+fun main(): i32 {
+    var c = Counter { n: 0 }
+    var p: *const Counter = &c
+    p.inc()
+    return 0
+}

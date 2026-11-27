@@ -1,0 +1,81 @@
+// lunsoc-only
+struct Point {
+    x: i32
+    y: i32
+
+    pub fun move_by(self: *Point, dx: i32, dy: i32) {
+        self.x += dx
+        self.y += dy
+    }
+
+    pub fun sum(self: *const Point): i32 {
+        return self.x + self.y
+    }
+
+    pub fun scaled_sum(self: *const Point, factor: i32): i32 {
+        return self.sum() * factor
+    }
+
+    pub fun value_x(self: Point): i32 {
+        return self.x
+    }
+}
+
+struct Box[T] {
+    value: T
+
+    pub fun set(self: *Box[T], v: T) {
+        self.value = v
+    }
+
+    pub fun get(self: *const Box[T]): T {
+        return self.value
+    }
+}
+
+struct Other {
+    v: i32
+
+    pub fun get(self: *const Other): i32 {
+        return self.v + 100
+    }
+}
+
+fun main(): i32 {
+    var p = Point { x: 2, y: 3 }
+    p.move_by(4, 5)
+    if p.sum() != 14 {
+        return 1
+    }
+    if p.scaled_sum(2) != 28 {
+        return 2
+    }
+    if p.value_x() != 6 {
+        return 3
+    }
+
+    var ptr: *Point = &p
+    ptr.move_by(1, 2)
+    if ptr.sum() != 17 || ptr.value_x() != 7 {
+        return 4
+    }
+
+    var b = Box[i32] { value: 10 }
+    b.set(42)
+    if b.get() != 42 {
+        return 5
+    }
+
+    var o = Other { v: 5 }
+    if o.get() != 105 {
+        return 6
+    }
+
+    var cp_val = Point { x: 8, y: 9 }
+    var cp: *const Point = &cp_val
+    if cp.sum() != 17 {
+        return 7
+    }
+
+    return 0
+}

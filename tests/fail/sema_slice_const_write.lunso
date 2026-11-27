@@ -1,0 +1,9 @@
+// expect-stderr: cannot assign to non-writable target
+fun write_const(s: []const u8) {
+    s[0] = 'x'
+}
+
+fun main(): i32 {
+    write_const("abc")
+    return 0
+}

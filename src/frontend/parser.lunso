@@ -510,7 +510,11 @@ fun parse_type(p: *Parser): u32 {
             }
         }
         close_group(p, lexer.TokenKind.RightBracket, "expected ']' after array length")
+        var is_const = match_tok(p, lexer.TokenKind.Const)
         var elem = parse_type(p)
+        if is_const {
+            elem = add_node(p, ast.AstKind.ConstType, opening, elem, 0)
+        }
         res = add_node(p, ast.AstKind.ArrayType, opening, elem, count)
     }
     p.recursion_depth -= 1
@@ -860,6 +864,7 @@ fun parse_function(p: *Parser, public: bool): u32 {
         return_type: ret_type,
         body: body,
         module: p.module,
+        owner_struct: ~0 as u32,
         public: public,
     }
     var idx = p.tree.functions.len as u32
@@ -874,11 +879,44 @@ fun parse_struct(p: *Parser, public: bool): u32 {
     var name = expect_tok(p, lexer.TokenKind.Identifier, "expected a struct name")
     var type_params = parse_type_parameters(p)
     expect_tok(p, lexer.TokenKind.LeftBrace, "expected '{' after struct name")
+    var struct_idx = p.tree.structs.len as u32
     var mark = p.pending.len
     for !p.has_error && is_separator(p.current.kind) {
         advance(p)
     }
     for !p.has_error && p.current.kind != lexer.TokenKind.RightBrace && p.current.kind != lexer.TokenKind.Eof {
+        if p.current.kind == lexer.TokenKind.Pub || p.current.kind == lexer.TokenKind.Fun {
+            var m_pub = match_tok(p, lexer.TokenKind.Pub)
+            var fn_node = parse_function(p, m_pub)
+            if !p.has_error {
+                var fn_idx = p.tree.nodes.data[fn_node as i64].a
+                p.tree.functions.data[fn_idx as i64].owner_struct = struct_idx
+                if type_params.count > 0 {
+                    var own_tp = p.tree.functions.data[fn_idx as i64].type_parameters
+                    if own_tp.count == 0 {
+                        p.tree.functions.data[fn_idx as i64].type_parameters = type_params
+                    } else {
+                        var first_tp = p.tree.children.len as u32
+                        for var ti: u32 = 0; ti < type_params.count; ti += 1 {
+                            var cid = p.tree.children.data[(type_params.first + ti) as i64]
+                            vec.push.[u32](&p.tree.children, &cid)
+                        }
+                        for var ti: u32 = 0; ti < own_tp.count; ti += 1 {
+                            var cid = p.tree.children.data[(own_tp.first + ti) as i64]
+                            vec.push.[u32](&p.tree.children, &cid)
+                        }
+                        p.tree.functions.data[fn_idx as i64].type_parameters = ast.NodeRange {
+                            first: first_tp,
+                            count: type_params.count + own_tp.count,
+                        }
+                    }
+                }
+            }
+            for !p.has_error && is_separator(p.current.kind) {
+                advance(p)
+            }
+            continue
+        }
         var field = expect_tok(p, lexer.TokenKind.Identifier, "expected a field name")
         expect_tok(p, lexer.TokenKind.Colon, "expected ':' after field name")
         var t = parse_type(p)

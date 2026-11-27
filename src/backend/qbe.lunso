@@ -34,12 +34,7 @@ fun push_byte(out: *vec.Vec[u8], b: u8): bool {
 }
 
 fun push_str(out: *vec.Vec[u8], s: []u8): bool {
-    for var i: i64 = 0; i < len(s); i += 1 {
-        if vec.push_value.[u8](out, s[i]) < 0 {
-            return false
-        }
-    }
-    return true
+    return vec.append_slice.[u8](out, s) >= 0
 }
 
 fun push_u64(out: *vec.Vec[u8], v: u64): bool {

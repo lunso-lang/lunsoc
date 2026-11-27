@@ -1,6 +1,12 @@
 import std.file
 import std.mem
 import std.str
+import std.vec
+
+pub struct DirEntry {
+    name: []u8
+    is_dir: bool
+}
 
 ext fun lunso_sys_fork(): i64
 ext fun lunso_sys_execve(path: *const u8, argv: **u8, envp: **u8): i64
@@ -9,6 +15,9 @@ ext fun lunso_sys_wait4(pid: i64, status: *i32): i64
 ext fun lunso_sys_access(path: *const u8, mode: i32): i64
 ext fun lunso_sys_mkdir(path: *const u8): i64
 ext fun lunso_sys_unlink(path: *const u8, flags: i32): i64
+ext fun lunso_sys_open_dir(path: *const u8): i64
+ext fun lunso_sys_getdents64(fd: i32, dirp: *u8, count: u64): i64
+ext fun lunso_sys_file_close(fd: i32): i64
 
 pub fun exit(code: i32) {
     lunso_sys_exit(code)
@@ -254,4 +263,69 @@ pub fun run(program: []u8, argv: [][]u8): i64 {
         return ((wstatus >> 8) & 255) as i64
     }
     return (128 + (wstatus & 127)) as i64
+}
+
+pub fun list_dir(path: []u8, arena: *mem.Arena, out: *vec.Vec[DirEntry]): i64 {
+    if (arena as u64) == 0 || (out as u64) == 0 {
+        return -22
+    }
+    var cpath: [4096]u8
+    var status = with_cstr(path, &cpath[0], 4096)
+    if status < 0 {
+        return status
+    }
+    var fd = lunso_sys_open_dir(data(cpath))
+    for fd == -4 {
+        fd = lunso_sys_open_dir(data(cpath))
+    }
+    if fd < 0 {
+        return fd
+    }
+    defer lunso_sys_file_close(fd as i32)
+
+    if vec.init.[DirEntry](out, arena, 16) < 0 {
+        return -12
+    }
+    var buf: [4096]u8
+    for {
+        var nread = lunso_sys_getdents64(fd as i32, &buf[0], 4096)
+        if nread == -4 {
+            continue
+        }
+        if nread < 0 {
+            return nread
+        }
+        if nread == 0 {
+            break
+        }
+        var pos: i64 = 0
+        for pos + 19 <= nread {
+            var reclen = ((buf[pos + 16] as u64) | ((buf[pos + 17] as u64) << 8)) as i64
+            if reclen < 19 || pos + reclen > nread {
+                break
+            }
+            var dtype = buf[pos + 18]
+            var name_start = pos + 19
+            var name_end = name_start
+            for name_end < pos + reclen && buf[name_end] != 0 {
+                name_end += 1
+            }
+            var name_slice = buf[name_start..name_end]
+            if !str.equals(name_slice, ".") && !str.equals(name_slice, "..") {
+                var cloned = str.clone(arena, name_slice)
+                if len(name_slice) > 0 && len(cloned) == 0 {
+                    return -12
+                }
+                var entry = DirEntry {
+                    name: cloned,
+                    is_dir: dtype == 4,
+                }
+                if vec.push.[DirEntry](out, &entry) < 0 {
+                    return -12
+                }
+            }
+            pos += reclen
+        }
+    }
+    return out.len as i64
 }
