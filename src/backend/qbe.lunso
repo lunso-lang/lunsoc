@@ -151,8 +151,7 @@ fun next_literal_byte(text: []u8, end: i64, cursor: *i64, out_byte: *u8): bool {
 
 fun write_data(out: *vec.Vec[u8], mod: *ir.IrModule): bool {
     var insts = mod.instructions.as_slice()
-    for var i: i64 = 0; i < len(insts); i += 1 {
-        var inst = insts[i]
+    for i, inst in insts {
         if inst.op != ir.IrOp.Bytes {
             continue
         }
@@ -1202,8 +1201,8 @@ pub fun write(arena: *mem.Arena, mod: *ir.IrModule, out: *vec.Vec[u8]): bool {
         return false
     }
     var fns = mod.functions.as_slice()
-    for var i: i64 = 0; i < len(fns); i += 1 {
-        if !fns[i].template_only && !fns[i].external {
+    for i, f in fns {
+        if !f.template_only && !f.external {
             if !write_function(arena, out, mod, i as u32) {
                 return false
             }

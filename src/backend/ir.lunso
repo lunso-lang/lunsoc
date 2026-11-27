@@ -1062,8 +1062,8 @@ pub fun lower(arena: *mem.Arena, tree: *Ast, sem: *Sema, out: *IrModule): bool {
 
     var structs = tree.structs.as_slice()
     var recs = sem.records.as_slice()
-    for var i: i64 = 0; i < len(recs); i += 1 {
-        var sp = structs[recs[i].declaration as i64].name
+    for rec in recs {
+        var sp = structs[rec.declaration as i64].name
         out.struct_names.push(&sp)
     }
 
@@ -1078,16 +1078,16 @@ pub fun lower(arena: *mem.Arena, tree: *Ast, sem: *Sema, out: *IrModule): bool {
 
     var ast_fns = tree.functions.as_slice()
     var sema_fns = sem.functions.as_slice()
-    for var i: i64 = 0; i < len(sema_fns) && !l.failed; i += 1 {
-        var sf = sema_fns[i]
+    for i, sf in sema_fns {
+        if l.failed { break }
         var fdecl = ast_fns[sf.declaration as i64]
         var is_template = fdecl.type_parameters.count > 0 && sf.arguments.len == 0
         var is_spec = fdecl.type_parameters.count > 0 && sf.arguments.len > 0
         var first_param = out.parameters.len as u32
         var ptypes = sf.param_types.as_slice()
-        for var p: i64 = 0; p < len(ptypes); p += 1 {
-            var pt = ptypes[p]
-            out.parameters.push(&pt)
+        for pt in ptypes {
+            var pt_copy = pt
+            out.parameters.push(&pt_copy)
         }
         var irf = IrFunction {
             name: fdecl.name,
@@ -1353,8 +1353,7 @@ pub fun write(m: *IrModule) {
     var fns = m.functions.as_slice()
     var params = m.parameters.as_slice()
     var insts = m.instructions.as_slice()
-    for var i: i64 = 0; i < len(fns); i += 1 {
-        var fn = fns[i]
+    for i, fn in fns {
         if fn.template_only { continue }
         if i > 0 { io.println("") }
         if fn.external { io.print("ext fun @") } else { io.print("fun @") }
