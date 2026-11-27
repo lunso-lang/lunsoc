@@ -9,7 +9,7 @@ pub struct Arena {
     current: *Block
     block_size: u64
 
-    pub fun init(self: *Arena, block_size: u64): i64 {
+    pub fun init(self: *Self, block_size: u64): i64 {
         if block_size == 0 || self.block_size != 0 {
             return -22
         }
@@ -17,7 +17,7 @@ pub struct Arena {
         return 0
     }
 
-    pub fun alloc(self: *Arena, size: u64, align: u64, out: **u8): i64 {
+    pub fun alloc(self: *Self, size: u64, align: u64, out: **u8): i64 {
         if self.block_size == 0 || size == 0 || align == 0 {
             return -22
         }
@@ -67,7 +67,7 @@ pub struct Arena {
         return 0
     }
 
-    pub fun reset(self: *Arena) {
+    pub fun reset(self: *Self) {
         var block = self.head
         self.current = block
         for (block as u64) != 0 {
@@ -76,7 +76,7 @@ pub struct Arena {
         }
     }
 
-    pub fun deinit(self: *Arena): i64 {
+    pub fun deinit(self: *Self): i64 {
         var block = self.head
         for (block as u64) != 0 {
             var next = block.next
@@ -93,7 +93,7 @@ pub struct Arena {
         return 0
     }
 
-    pub fun alloc_many[T](self: *Arena, count: u64, out: **T): i64 {
+    pub fun alloc_many[T](self: *Self, count: u64, out: **T): i64 {
         if (out as u64) == 0 {
             return -22
         }
@@ -120,8 +120,8 @@ pub struct Arena {
         return 0
     }
 
-    pub fun alloc_one[T](self: *Arena, out: **T): i64 {
-        return self.alloc_many.[T](1, out)
+    pub fun alloc_one[T](self: *Self, out: **T): i64 {
+        return self.alloc_many(1, out)
     }
 }
 

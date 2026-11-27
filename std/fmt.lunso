@@ -188,26 +188,26 @@ pub fun format_f64(value: f64, decimals: i32, arena: *mem.Arena): []u8 {
 pub struct Builder {
     buf: vec.Vec[u8]
 
-    pub fun init(self: *Builder, arena: *mem.Arena): i64 {
+    pub fun init(self: *Self, arena: *mem.Arena): i64 {
         return self.buf.init(arena, 64)
     }
 
-    pub fun str(self: *Builder, s: []const u8): *Builder {
+    pub fun str(self: *Self, s: []const u8): *Self {
         self.buf.append_slice(s)
         return self
     }
 
-    pub fun ch(self: *Builder, c: u8): *Builder {
+    pub fun ch(self: *Self, c: u8): *Self {
         self.buf.push_value(c)
         return self
     }
 
-    pub fun nl(self: *Builder): *Builder {
+    pub fun nl(self: *Self): *Self {
         self.buf.push_value('\n')
         return self
     }
 
-    pub fun bool_val(self: *Builder, v: bool): *Builder {
+    pub fun bool_val(self: *Self, v: bool): *Self {
         if v {
             self.buf.append_slice("true")
         } else {
@@ -216,35 +216,35 @@ pub struct Builder {
         return self
     }
 
-    pub fun i64_val(self: *Builder, v: i64): *Builder {
+    pub fun i64_val(self: *Self, v: i64): *Self {
         var tmp: [32]u8
         var n = i64_to_buf(v, &tmp[0], 32)
         if n > 0 { self.buf.append_slice(tmp[0..n]) }
         return self
     }
 
-    pub fun u64_val(self: *Builder, v: u64): *Builder {
+    pub fun u64_val(self: *Self, v: u64): *Self {
         var tmp: [32]u8
         var n = u64_to_buf(v, &tmp[0], 32)
         if n > 0 { self.buf.append_slice(tmp[0..n]) }
         return self
     }
 
-    pub fun hex(self: *Builder, v: u64): *Builder {
+    pub fun hex(self: *Self, v: u64): *Self {
         var tmp: [16]u8
         var n = hex_to_buf(v, &tmp[0], 16)
         if n > 0 { self.buf.append_slice(tmp[0..n]) }
         return self
     }
 
-    pub fun f64_val(self: *Builder, v: f64, decimals: i32): *Builder {
+    pub fun f64_val(self: *Self, v: f64, decimals: i32): *Self {
         var tmp: [64]u8
         var n = f64_to_buf(v, decimals, &tmp[0], 64)
         if n > 0 { self.buf.append_slice(tmp[0..n]) }
         return self
     }
 
-    pub fun finish(self: *Builder): []u8 {
+    pub fun finish(self: *Self): []u8 {
         return self.buf.as_slice()
     }
 }

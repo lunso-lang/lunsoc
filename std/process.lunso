@@ -169,7 +169,7 @@ pub struct Command {
     program: []const u8
     argv: vec.Vec[[]u8]
 
-    pub fun init(self: *Command, arena: *mem.Arena, program: []const u8): i64 {
+    pub fun init(self: *Self, arena: *mem.Arena, program: []const u8): i64 {
         if (self as u64) == 0 || (arena as u64) == 0 || len(program) == 0 {
             return -22
         }
@@ -183,7 +183,7 @@ pub struct Command {
         return self.argv.push_value(prog_copy)
     }
 
-    pub fun arg(self: *Command, a: []const u8): i64 {
+    pub fun arg(self: *Self, a: []const u8): i64 {
         var copy = str.clone(self.arena, a)
         if len(a) > 0 && len(copy) == 0 {
             return -12
@@ -191,11 +191,11 @@ pub struct Command {
         return self.argv.push_value(copy)
     }
 
-    pub fun run(self: *const Command): i64 {
+    pub fun run(self: *const Self): i64 {
         return os.run(self.program, self.argv.data[0..self.argv.len])
     }
 
-    pub fun output(self: *const Command, out_stdout: *[]u8): i64 {
+    pub fun output(self: *const Self, out_stdout: *[]u8): i64 {
         if len(self.program) == 0 || (self.arena as u64) == 0 || (out_stdout as u64) == 0 {
             return -22
         }
