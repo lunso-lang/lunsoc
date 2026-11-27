@@ -103,7 +103,7 @@ fun run_parse(path: []u8, source: []u8, arena: *mem.Arena): i32 {
     return 0
 }
 
-const VERSION: []u8 = "lunsoc 0.3.3"
+const VERSION: []u8 = "lunsoc 0.4.0"
 
 enum Mode : u8 {
     Tokens,
