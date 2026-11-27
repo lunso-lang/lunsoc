@@ -23,7 +23,7 @@ pub fun exit(code: i32) {
     lunso_sys_exit(code)
 }
 
-fun to_cstr(arena: *mem.Arena, s: []u8, out: **u8): i64 {
+fun to_cstr(arena: *mem.Arena, s: []const u8, out: **u8): i64 {
     var n = len(s)
     var buf: *u8
     var status = mem.alloc(arena, (n as u64) + 1, 1, &buf)
@@ -41,7 +41,7 @@ fun to_cstr(arena: *mem.Arena, s: []u8, out: **u8): i64 {
     return 0
 }
 
-fun with_cstr(path: []u8, buf: *u8, cap: i64): i64 {
+fun with_cstr(path: []const u8, buf: *u8, cap: i64): i64 {
     var n = len(path)
     if n >= cap {
         return -36
@@ -56,7 +56,7 @@ fun with_cstr(path: []u8, buf: *u8, cap: i64): i64 {
     return 0
 }
 
-pub fun mkdir(path: []u8): i64 {
+pub fun mkdir(path: []const u8): i64 {
     var buf: [4096]u8
     var status = with_cstr(path, &buf[0], 4096)
     if status < 0 {
@@ -65,7 +65,7 @@ pub fun mkdir(path: []u8): i64 {
     return lunso_sys_mkdir(data(buf))
 }
 
-pub fun remove(path: []u8): i64 {
+pub fun remove(path: []const u8): i64 {
     var buf: [4096]u8
     var status = with_cstr(path, &buf[0], 4096)
     if status < 0 {
@@ -74,7 +74,7 @@ pub fun remove(path: []u8): i64 {
     return lunso_sys_unlink(data(buf), 0)
 }
 
-pub fun rmdir(path: []u8): i64 {
+pub fun rmdir(path: []const u8): i64 {
     var buf: [4096]u8
     var status = with_cstr(path, &buf[0], 4096)
     if status < 0 {
@@ -83,7 +83,7 @@ pub fun rmdir(path: []u8): i64 {
     return lunso_sys_unlink(data(buf), 0x200)
 }
 
-fun find_env_in_raw(raw: []u8, name: []u8, out: *[]u8): bool {
+fun find_env_in_raw(raw: []u8, name: []const u8, out: *[]u8): bool {
     var n = len(name)
     var raw_len = len(raw)
     var start: i64 = 0
@@ -100,7 +100,7 @@ fun find_env_in_raw(raw: []u8, name: []u8, out: *[]u8): bool {
     return false
 }
 
-pub fun getenv(name: []u8, arena: *mem.Arena, out: *[]u8): i64 {
+pub fun getenv(name: []const u8, arena: *mem.Arena, out: *[]u8): i64 {
     if len(name) == 0 {
         return -22
     }
@@ -115,7 +115,7 @@ pub fun getenv(name: []u8, arena: *mem.Arena, out: *[]u8): i64 {
     return -2
 }
 
-fun contains_slash(s: []u8): bool {
+fun contains_slash(s: []const u8): bool {
     for var i: i64 = 0; i < len(s); i += 1 {
         if s[i] == '/' {
             return true
@@ -156,7 +156,7 @@ fun build_envp(arena: *mem.Arena, raw: []u8, has_env: bool, out: ***u8): i64 {
     return 0
 }
 
-fun resolve_program(arena: *mem.Arena, program: []u8, raw: []u8, has_env: bool,
+fun resolve_program(arena: *mem.Arena, program: []const u8, raw: []u8, has_env: bool,
                     out: **u8): i64 {
     if contains_slash(program) {
         return to_cstr(arena, program, out)
@@ -199,7 +199,7 @@ fun resolve_program(arena: *mem.Arena, program: []u8, raw: []u8, has_env: bool,
     return -2
 }
 
-pub fun run(program: []u8, argv: [][]u8): i64 {
+pub fun run(program: []const u8, argv: [][]u8): i64 {
     if len(program) == 0 {
         return -22
     }
@@ -265,7 +265,7 @@ pub fun run(program: []u8, argv: [][]u8): i64 {
     return (128 + (wstatus & 127)) as i64
 }
 
-pub fun list_dir(path: []u8, arena: *mem.Arena, out: *vec.Vec[DirEntry]): i64 {
+pub fun list_dir(path: []const u8, arena: *mem.Arena, out: *vec.Vec[DirEntry]): i64 {
     if (arena as u64) == 0 || (out as u64) == 0 {
         return -22
     }

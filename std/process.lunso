@@ -1,0 +1,268 @@
+import std.file
+import std.mem
+import std.os
+import std.str
+import std.vec
+
+ext fun lunso_sys_getpid(): i64
+ext fun lunso_sys_getppid(): i64
+ext fun lunso_sys_getcwd(buf: *u8, size: u64): i64
+ext fun lunso_sys_chdir(path: *const u8): i64
+ext fun lunso_sys_pipe2(fds: *i32, flags: i32): i64
+ext fun lunso_sys_dup2(oldfd: i32, newfd: i32): i64
+ext fun lunso_sys_fork(): i64
+ext fun lunso_sys_execve(path: *const u8, argv: **u8, envp: **u8): i64
+ext fun lunso_sys_exit(code: i32)
+ext fun lunso_sys_wait4(pid: i64, status: *i32): i64
+ext fun lunso_sys_read(fd: i32, buffer: *u8, count: u64): i64
+ext fun lunso_sys_file_close(fd: i32): i64
+ext fun lunso_sys_access(path: *const u8, mode: i32): i64
+
+pub fun pid(): i64 {
+    return lunso_sys_getpid()
+}
+
+pub fun ppid(): i64 {
+    return lunso_sys_getppid()
+}
+
+pub fun exit(code: i32) {
+    os.exit(code)
+}
+
+pub fun getenv(name: []const u8, arena: *mem.Arena, out: *[]u8): i64 {
+    return os.getenv(name, arena, out)
+}
+
+pub fun cwd(arena: *mem.Arena, out: *[]u8): i64 {
+    var buf: [4096]u8
+    var r = lunso_sys_getcwd(&buf[0], 4096)
+    if r < 0 {
+        return r
+    }
+    var n: i64 = 0
+    for n < 4096 && buf[n] != '\0' {
+        n += 1
+    }
+    *out = str.clone(arena, buf[0..n])
+    if n > 0 && len(*out) == 0 {
+        return -12
+    }
+    return 0
+}
+
+pub fun chdir(path: []const u8): i64 {
+    var n = len(path)
+    if n >= 4096 {
+        return -36
+    }
+    var buf: [4096]u8
+    for var i: i64 = 0; i < n; i += 1 {
+        if path[i] == '\0' { return -22 }
+        buf[i] = path[i]
+    }
+    buf[n] = '\0'
+    return lunso_sys_chdir(data(buf))
+}
+
+pub fun run(program: []const u8, argv: [][]u8): i64 {
+    return os.run(program, argv)
+}
+
+fun to_cstr(arena: *mem.Arena, s: []const u8, out: **u8): i64 {
+    var n = len(s)
+    var buf: *u8
+    var st = arena.alloc((n as u64) + 1, 1, &buf)
+    if st < 0 { return st }
+    for var i: i64 = 0; i < n; i += 1 {
+        if s[i] == '\0' { return -22 }
+        buf[i] = s[i]
+    }
+    buf[n] = '\0'
+    *out = buf
+    return 0
+}
+
+fun find_env(raw: []u8, name: []const u8, out: *[]u8): bool {
+    var n = len(name)
+    var raw_len = len(raw)
+    var start: i64 = 0
+    for var i: i64 = 0; i < raw_len; i += 1 {
+        if raw[i] == '\0' {
+            var entry = raw[start..i]
+            if len(entry) > n && entry[n] == '=' && str.starts_with(entry, name) {
+                *out = raw[(start + n + 1)..i]
+                return true
+            }
+            start = i + 1
+        }
+    }
+    return false
+}
+
+fun build_envp(arena: *mem.Arena, raw: []u8, has_env: bool, out: ***u8): i64 {
+    var count: i64 = 0
+    var raw_len = len(raw)
+    if has_env {
+        for var i: i64 = 0; i < raw_len; i += 1 {
+            if raw[i] == '\0' { count += 1 }
+        }
+    }
+    var envp: **u8
+    var st = mem.alloc_many(arena, (count as u64) + 1, &envp)
+    if st < 0 { return st }
+    if has_env {
+        var idx: i64 = 0
+        var start: i64 = 0
+        for var i: i64 = 0; i < raw_len; i += 1 {
+            if raw[i] == '\0' {
+                envp[idx] = &raw[start]
+                idx += 1
+                start = i + 1
+            }
+        }
+    }
+    var null_ptr: *u8
+    envp[count] = null_ptr
+    *out = envp
+    return 0
+}
+
+fun resolve_prog(arena: *mem.Arena, program: []const u8, raw: []u8, has_env: bool, out: **u8): i64 {
+    if str.index_of(program, '/') >= 0 {
+        return to_cstr(arena, program, out)
+    }
+    var path_env: []u8
+    if !has_env || !find_env(raw, "PATH", &path_env) {
+        return -2
+    }
+    var plen = len(program)
+    var start: i64 = 0
+    for var i: i64 = 0; i <= len(path_env); i += 1 {
+        if i == len(path_env) || path_env[i] == ':' {
+            var dlen = i - start
+            var candidate: *u8
+            var extra: i64 = 1
+            if dlen == 0 { extra = 0 }
+            var st = arena.alloc(((dlen + extra + plen) as u64) + 1, 1, &candidate)
+            if st < 0 { return st }
+            for var j: i64 = 0; j < dlen; j += 1 {
+                candidate[j] = path_env[start + j]
+            }
+            if extra == 1 { candidate[dlen] = '/' }
+            for var j: i64 = 0; j < plen; j += 1 {
+                candidate[dlen + extra + j] = program[j]
+            }
+            candidate[dlen + extra + plen] = '\0'
+            if lunso_sys_access(candidate, 1) == 0 {
+                *out = candidate
+                return 0
+            }
+            start = i + 1
+        }
+    }
+    return -2
+}
+
+pub struct Command {
+    arena: *mem.Arena
+    program: []const u8
+    argv: vec.Vec[[]u8]
+
+    pub fun init(self: *Command, arena: *mem.Arena, program: []const u8): i64 {
+        if (self as u64) == 0 || (arena as u64) == 0 || len(program) == 0 {
+            return -22
+        }
+        self.arena = arena
+        self.program = program
+        if self.argv.init(arena, 8) < 0 {
+            return -12
+        }
+        var prog_copy = str.clone(arena, program)
+        if len(prog_copy) == 0 { return -12 }
+        return self.argv.push_value(prog_copy)
+    }
+
+    pub fun arg(self: *Command, a: []const u8): i64 {
+        var copy = str.clone(self.arena, a)
+        if len(a) > 0 && len(copy) == 0 {
+            return -12
+        }
+        return self.argv.push_value(copy)
+    }
+
+    pub fun run(self: *const Command): i64 {
+        return os.run(self.program, self.argv.data[0..self.argv.len])
+    }
+
+    pub fun output(self: *const Command, out_stdout: *[]u8): i64 {
+        if len(self.program) == 0 || (self.arena as u64) == 0 || (out_stdout as u64) == 0 {
+            return -22
+        }
+        var raw_env: []u8
+        var has_env = file.read_all("/proc/self/environ", self.arena, &raw_env) >= 0
+
+        var envp: **u8
+        var st = build_envp(self.arena, raw_env, has_env, &envp)
+        if st < 0 { return st }
+
+        var prog_cstr: *u8
+        st = resolve_prog(self.arena, self.program, raw_env, has_env, &prog_cstr)
+        if st < 0 { return st }
+
+        var argc = self.argv.len as i64
+        var c_argv: **u8
+        st = mem.alloc_many(self.arena, (argc as u64) + 1, &c_argv)
+        if st < 0 { return st }
+        for var i: i64 = 0; i < argc; i += 1 {
+            var ap: *u8
+            st = to_cstr(self.arena, self.argv.data[i], &ap)
+            if st < 0 { return st }
+            c_argv[i] = ap
+        }
+        var null_ptr: *u8
+        c_argv[argc] = null_ptr
+
+        var fds: [2]i32
+        st = lunso_sys_pipe2(&fds[0], 0x80000)
+        if st < 0 { return st }
+
+        var pid = lunso_sys_fork()
+        if pid < 0 {
+            lunso_sys_file_close(fds[0])
+            lunso_sys_file_close(fds[1])
+            return pid
+        }
+        if pid == 0 {
+            lunso_sys_file_close(fds[0])
+            lunso_sys_dup2(fds[1], 1)
+            lunso_sys_file_close(fds[1])
+            lunso_sys_execve(prog_cstr, c_argv, envp)
+            lunso_sys_exit(127)
+        }
+        lunso_sys_file_close(fds[1])
+
+        var out_buf: vec.Vec[u8]
+        out_buf.init(self.arena, 256)
+        var tmp: [1024]u8
+        for {
+            var n = lunso_sys_read(fds[0], &tmp[0], 1024)
+            if n == -4 { continue }
+            if n <= 0 { break }
+            out_buf.append_slice(tmp[0..n])
+        }
+        lunso_sys_file_close(fds[0])
+        *out_stdout = out_buf.as_slice()
+
+        var wstatus: i32 = 0
+        var waited = lunso_sys_wait4(pid, &wstatus)
+        for waited == -4 {
+            waited = lunso_sys_wait4(pid, &wstatus)
+        }
+        if waited < 0 { return waited }
+        if (wstatus & 127) == 0 {
+            return ((wstatus >> 8) & 255) as i64
+        }
+        return (128 + (wstatus & 127)) as i64
+    }
+}

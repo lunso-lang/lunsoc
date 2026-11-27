@@ -121,7 +121,7 @@ fun add_node(p: *Parser, kind: ast.AstKind, tok: lexer.Token, a: u32, b: u32): u
 
 fun push_child(p: *Parser, child: u32) {
     if !p.has_error {
-        if vec.push_value.[u32](&p.pending, child) < 0 {
+        if p.pending.push_value(child) < 0 {
             fail(p, "could not allocate AST storage")
         }
     }
@@ -316,12 +316,12 @@ fun parse_array_literal(p: *Parser): u32 {
 
 fun parse_postfix(p: *Parser, base_in: u32): u32 {
     var base = base_in
-    var nodes = vec.as_slice.[ast.AstNode](&p.tree.nodes)
+    var nodes = p.tree.nodes.as_slice()
     for !p.has_error {
         var tok = p.current
         if tok.kind == lexer.TokenKind.LeftParen {
             base = parse_call(p, base)
-            nodes = vec.as_slice.[ast.AstNode](&p.tree.nodes)
+            nodes = p.tree.nodes.as_slice()
         } else if tok.kind == lexer.TokenKind.LeftBrace {
             var base_kind = ast.AstKind.Invalid
             if base != ast.NODE_NONE {
@@ -332,14 +332,14 @@ fun parse_postfix(p: *Parser, base_in: u32): u32 {
                 return base
             }
             base = parse_struct_literal(p, base)
-            nodes = vec.as_slice.[ast.AstNode](&p.tree.nodes)
+            nodes = p.tree.nodes.as_slice()
         } else if tok.kind == lexer.TokenKind.LeftBracket {
             var base_kind = nodes[base as i64].kind
             if !p.disallow_struct_literal &&
                (base_kind == ast.AstKind.Identifier || base_kind == ast.AstKind.Member) &&
                bracket_before_initializer(p) {
                 base = parse_type_application(p, ast.AstKind.GenericType, base)
-                nodes = vec.as_slice.[ast.AstNode](&p.tree.nodes)
+                nodes = p.tree.nodes.as_slice()
                 continue
             }
             open_group(p)
@@ -355,7 +355,7 @@ fun parse_postfix(p: *Parser, base_in: u32): u32 {
                 close_group(p, lexer.TokenKind.RightBracket, "expected ']' after index")
                 base = add_node(p, ast.AstKind.Index, tok, base, idx)
             }
-            nodes = vec.as_slice.[ast.AstNode](&p.tree.nodes)
+            nodes = p.tree.nodes.as_slice()
         } else if tok.kind == lexer.TokenKind.Dot {
             advance(p)
             if p.current.kind == lexer.TokenKind.LeftBracket {
@@ -370,7 +370,7 @@ fun parse_postfix(p: *Parser, base_in: u32): u32 {
                 var member = expect_tok(p, lexer.TokenKind.Identifier, "expected member name after '.'")
                 base = add_node(p, ast.AstKind.Member, member, base, member.length as u32)
             }
-            nodes = vec.as_slice.[ast.AstNode](&p.tree.nodes)
+            nodes = p.tree.nodes.as_slice()
         } else {
             return base
         }
@@ -559,7 +559,7 @@ fun parse_if(p: *Parser): u32 {
         }
     }
     var idx = p.tree.if_branches.len as u32
-    if !p.has_error && vec.push.[ast.AstIfBranches](&p.tree.if_branches, &branches) < 0 {
+    if !p.has_error && p.tree.if_branches.push(&branches) < 0 {
         fail(p, "could not allocate AST storage")
     }
     p.recursion_depth -= 1
@@ -627,7 +627,7 @@ fun parse_variable(p: *Parser): u32 {
         fail(p, "expected ':' or '=' after variable name")
     }
     var idx = p.tree.variables.len as u32
-    if !p.has_error && vec.push.[ast.AstVariable](&p.tree.variables, &v) < 0 {
+    if !p.has_error && p.tree.variables.push(&v) < 0 {
         fail(p, "could not allocate AST storage")
     }
     return add_node(p, ast.AstKind.Var, name, idx, 0)
@@ -645,10 +645,62 @@ fun parse_for_with_label(p: *Parser, label: ast.Span): u32 {
         }
         var header = ast.AstForHeader { initializer: ast.NODE_NONE, condition: ast.NODE_NONE, step: ast.NODE_NONE, label: label }
         var idx = p.tree.for_headers.len as u32
-        if !p.has_error && vec.push.[ast.AstForHeader](&p.tree.for_headers, &header) < 0 {
+        if !p.has_error && p.tree.for_headers.push(&header) < 0 {
             fail(p, "could not allocate AST storage")
         }
         return add_node(p, ast.AstKind.ForCStyle, kw, idx, body)
+    }
+
+    if p.current.kind == lexer.TokenKind.Identifier {
+        var saved_lex = p.lex
+        var saved_cur = p.current
+        var first_ident = p.current
+        advance(p)
+        var is_for_in = false
+        var idx_sp = ast.Span { offset: 0, length: 0 }
+        var item_sp = source_span(p, first_ident)
+        if match_tok(p, lexer.TokenKind.Comma) {
+            if p.current.kind == lexer.TokenKind.Identifier {
+                var second_ident = p.current
+                advance(p)
+                if p.current.kind == lexer.TokenKind.Identifier && p.current.length == 2 &&
+                   p.lex.source[p.current.offset as i64] == 'i' && p.lex.source[(p.current.offset + 1) as i64] == 'n' {
+                    is_for_in = true
+                    idx_sp = item_sp
+                    item_sp = source_span(p, second_ident)
+                    advance(p)
+                }
+            }
+        } else if p.current.kind == lexer.TokenKind.Identifier && p.current.length == 2 &&
+                  p.lex.source[p.current.offset as i64] == 'i' && p.lex.source[(p.current.offset + 1) as i64] == 'n' {
+            is_for_in = true
+            advance(p)
+        }
+        if is_for_in {
+            var saved = p.disallow_struct_literal
+            p.disallow_struct_literal = true
+            var iterable = parse_expression(p, PREC_ASSIGNMENT)
+            var range_end = ast.NODE_NONE
+            if match_tok(p, lexer.TokenKind.DotDot) {
+                range_end = parse_expression(p, PREC_ASSIGNMENT)
+            }
+            p.disallow_struct_literal = saved
+            var body = parse_block(p)
+            var hdr = ast.AstForInHeader {
+                index_name: idx_sp,
+                item_name: item_sp,
+                iterable: iterable,
+                range_end: range_end,
+                label: label,
+            }
+            var idx = p.tree.for_in_headers.len as u32
+            if !p.has_error && p.tree.for_in_headers.push(&hdr) < 0 {
+                fail(p, "could not allocate AST storage")
+            }
+            return add_node(p, ast.AstKind.ForIn, kw, idx, body)
+        }
+        p.lex = saved_lex
+        p.current = saved_cur
     }
 
     var declares_var = p.current.kind == lexer.TokenKind.Var
@@ -672,7 +724,7 @@ fun parse_for_with_label(p: *Parser, label: ast.Span): u32 {
         }
         var header = ast.AstForHeader { initializer: ast.NODE_NONE, condition: first, step: ast.NODE_NONE, label: label }
         var idx = p.tree.for_headers.len as u32
-        if !p.has_error && vec.push.[ast.AstForHeader](&p.tree.for_headers, &header) < 0 {
+        if !p.has_error && p.tree.for_headers.push(&header) < 0 {
             fail(p, "could not allocate AST storage")
         }
         return add_node(p, ast.AstKind.ForCStyle, kw, idx, body)
@@ -689,7 +741,7 @@ fun parse_for_with_label(p: *Parser, label: ast.Span): u32 {
     p.disallow_struct_literal = saved
     var body = parse_block(p)
     var idx = p.tree.for_headers.len as u32
-    if !p.has_error && vec.push.[ast.AstForHeader](&p.tree.for_headers, &header) < 0 {
+    if !p.has_error && p.tree.for_headers.push(&header) < 0 {
         fail(p, "could not allocate AST storage")
     }
     return add_node(p, ast.AstKind.ForCStyle, kw, idx, body)
@@ -713,7 +765,7 @@ fun parse_const(p: *Parser, public: bool, local: bool): u32 {
         local: local,
     }
     var idx = p.tree.consts.len as u32
-    if !p.has_error && vec.push.[ast.AstConst](&p.tree.consts, &c) < 0 {
+    if !p.has_error && p.tree.consts.push(&c) < 0 {
         fail(p, "could not allocate AST storage")
     }
     return add_node(p, ast.AstKind.Const, kw, idx, 0)
@@ -809,7 +861,8 @@ fun parse_type_parameters(p: *Parser): ast.NodeRange {
     return finish_children(p, mark)
 }
 
-fun parse_parameters(p: *Parser): ast.NodeRange {
+fun parse_parameters(p: *Parser, out_variadic: *bool): ast.NodeRange {
+    *out_variadic = false
     var mark = p.pending.len
     if p.has_error {
         return ast.NodeRange { first: 0, count: 0 }
@@ -823,8 +876,16 @@ fun parse_parameters(p: *Parser): ast.NodeRange {
         for {
             var name = expect_tok(p, lexer.TokenKind.Identifier, "expected a parameter name")
             expect_tok(p, lexer.TokenKind.Colon, "expected ':' after parameter name")
+            var variadic = match_tok(p, lexer.TokenKind.DotDotDot)
             var t = parse_type(p)
             push_child(p, add_node(p, ast.AstKind.Parameter, name, name.length as u32, t))
+            if variadic {
+                *out_variadic = true
+                if p.current.kind == lexer.TokenKind.Comma {
+                    fail(p, "variadic parameter must be the last parameter")
+                }
+                break
+            }
             if !match_tok(p, lexer.TokenKind.Comma) || p.current.kind == lexer.TokenKind.RightParen {
                 break
             }
@@ -845,7 +906,8 @@ fun parse_function(p: *Parser, public: bool): u32 {
     var name = expect_tok(p, lexer.TokenKind.Identifier, "expected a function name")
     var first_node = p.tree.nodes.len as u32
     var type_params = parse_type_parameters(p)
-    var params = parse_parameters(p)
+    var is_variadic = false
+    var params = parse_parameters(p, &is_variadic)
     var ret_type = ast.NODE_NONE
     if match_tok(p, lexer.TokenKind.Colon) {
         ret_type = parse_type(p)
@@ -866,9 +928,10 @@ fun parse_function(p: *Parser, public: bool): u32 {
         module: p.module,
         owner_struct: ~0 as u32,
         public: public,
+        is_variadic: is_variadic,
     }
     var idx = p.tree.functions.len as u32
-    if !p.has_error && vec.push.[ast.AstFunction](&p.tree.functions, &fn) < 0 {
+    if !p.has_error && p.tree.functions.push(&fn) < 0 {
         fail(p, "could not allocate AST storage")
     }
     return add_node(p, ast.AstKind.Function, start, idx, 0)
@@ -899,11 +962,11 @@ fun parse_struct(p: *Parser, public: bool): u32 {
                         var first_tp = p.tree.children.len as u32
                         for var ti: u32 = 0; ti < type_params.count; ti += 1 {
                             var cid = p.tree.children.data[(type_params.first + ti) as i64]
-                            vec.push.[u32](&p.tree.children, &cid)
+                            p.tree.children.push(&cid)
                         }
                         for var ti: u32 = 0; ti < own_tp.count; ti += 1 {
                             var cid = p.tree.children.data[(own_tp.first + ti) as i64]
-                            vec.push.[u32](&p.tree.children, &cid)
+                            p.tree.children.push(&cid)
                         }
                         p.tree.functions.data[fn_idx as i64].type_parameters = ast.NodeRange {
                             first: first_tp,
@@ -935,7 +998,7 @@ fun parse_struct(p: *Parser, public: bool): u32 {
         public: public,
     }
     var idx = p.tree.structs.len as u32
-    if !p.has_error && vec.push.[ast.AstStruct](&p.tree.structs, &rec) < 0 {
+    if !p.has_error && p.tree.structs.push(&rec) < 0 {
         fail(p, "could not allocate AST storage")
     }
     return add_node(p, ast.AstKind.Struct, kw, idx, 0)
@@ -986,7 +1049,7 @@ fun parse_enum(p: *Parser, public: bool): u32 {
         public: public,
     }
     var idx = p.tree.enums.len as u32
-    if !p.has_error && vec.push.[ast.AstEnum](&p.tree.enums, &en) < 0 {
+    if !p.has_error && p.tree.enums.push(&en) < 0 {
         fail(p, "could not allocate AST storage")
     }
     return add_node(p, ast.AstKind.Enum, kw, idx, 0)
@@ -1036,7 +1099,7 @@ fun parse_import(p: *Parser): u32 {
     }
 
     var idx = p.tree.imports.len as u32
-    if !p.has_error && vec.push.[ast.AstImport](&p.tree.imports, &item) < 0 {
+    if !p.has_error && p.tree.imports.push(&item) < 0 {
         fail(p, "could not allocate AST storage")
     }
     return add_node(p, ast.AstKind.Import, kw, idx, 0)
@@ -1053,7 +1116,7 @@ pub fun parse_append(arena: *mem.Arena, tree: *ast.Ast, slice: []u8, source_base
     p.group_depth = 0
     p.recursion_depth = 0
     p.disallow_struct_literal = false
-    if vec.init.[u32](&p.pending, arena, 64) < 0 {
+    if p.pending.init(arena, 64) < 0 {
         *err = ParseError { token: lexer.Token { kind: lexer.TokenKind.Eof, offset: 0, length: 0, line: 1, column: 1 }, message: "could not allocate parser stack" }
         return false
     }

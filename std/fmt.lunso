@@ -1,6 +1,7 @@
 import std.io
 import std.mem
 import std.str
+import std.vec
 
 pub fun u64_to_buf(value: u64, buf: *u8, cap: i64): i64 {
     if cap <= 0 {
@@ -127,4 +128,122 @@ pub fun parse_u64(text: []u8, out: *u64): bool {
 
 pub fun parse_i64(text: []u8, out: *i64): bool {
     return str.parse_i64(str.trim(text), out)
+}
+
+pub fun f64_to_buf(value: f64, decimals: i32, buf: *u8, cap: i64): i64 {
+    if cap <= 0 {
+        return -22
+    }
+    var pos: i64 = 0
+    var v = value
+    if v < 0.0 {
+        buf[pos] = '-'
+        pos += 1
+        v = -v
+    }
+    var prec = decimals
+    if prec < 0 { prec = 0 }
+    if prec > 9 { prec = 9 }
+    var scale: f64 = 1.0
+    for var i: i32 = 0; i < prec; i += 1 {
+        scale *= 10.0
+    }
+    var scaled = (v * scale + 0.5) as u64
+    var divisor = scale as u64
+    var int_part = scaled / divisor
+    var frac_part = scaled % divisor
+
+    var n = u64_to_buf(int_part, &buf[pos], cap - pos)
+    if n < 0 { return n }
+    pos += n
+    if prec == 0 {
+        return pos
+    }
+    if pos >= cap { return -22 }
+    buf[pos] = '.'
+    pos += 1
+    if pos + (prec as i64) > cap { return -22 }
+    var ftmp: [16]u8
+    var fn_len = u64_to_buf(frac_part, &ftmp[0], 16)
+    var zeros = (prec as i64) - fn_len
+    for var z: i64 = 0; z < zeros; z += 1 {
+        buf[pos] = '0'
+        pos += 1
+    }
+    for var j: i64 = 0; j < fn_len; j += 1 {
+        buf[pos] = ftmp[j]
+        pos += 1
+    }
+    return pos
+}
+
+pub fun format_f64(value: f64, decimals: i32, arena: *mem.Arena): []u8 {
+    var tmp: [64]u8
+    var n = f64_to_buf(value, decimals, &tmp[0], 64)
+    if n < 0 { return "" }
+    return str.clone(arena, tmp[0..n])
+}
+
+pub struct Builder {
+    buf: vec.Vec[u8]
+
+    pub fun init(self: *Builder, arena: *mem.Arena): i64 {
+        return self.buf.init(arena, 64)
+    }
+
+    pub fun str(self: *Builder, s: []const u8): *Builder {
+        self.buf.append_slice(s)
+        return self
+    }
+
+    pub fun ch(self: *Builder, c: u8): *Builder {
+        self.buf.push_value(c)
+        return self
+    }
+
+    pub fun nl(self: *Builder): *Builder {
+        self.buf.push_value('\n')
+        return self
+    }
+
+    pub fun bool_val(self: *Builder, v: bool): *Builder {
+        if v {
+            self.buf.append_slice("true")
+        } else {
+            self.buf.append_slice("false")
+        }
+        return self
+    }
+
+    pub fun i64_val(self: *Builder, v: i64): *Builder {
+        var tmp: [32]u8
+        var n = i64_to_buf(v, &tmp[0], 32)
+        if n > 0 { self.buf.append_slice(tmp[0..n]) }
+        return self
+    }
+
+    pub fun u64_val(self: *Builder, v: u64): *Builder {
+        var tmp: [32]u8
+        var n = u64_to_buf(v, &tmp[0], 32)
+        if n > 0 { self.buf.append_slice(tmp[0..n]) }
+        return self
+    }
+
+    pub fun hex(self: *Builder, v: u64): *Builder {
+        var tmp: [16]u8
+        var n = hex_to_buf(v, &tmp[0], 16)
+        if n > 0 { self.buf.append_slice(tmp[0..n]) }
+        return self
+    }
+
+    pub fun f64_val(self: *Builder, v: f64, decimals: i32): *Builder {
+        var tmp: [64]u8
+        var n = f64_to_buf(v, decimals, &tmp[0], 64)
+        if n > 0 { self.buf.append_slice(tmp[0..n]) }
+        return self
+    }
+
+    pub fun finish(self: *Builder): []u8 {
+        return self.buf.as_slice()
+    }
 }

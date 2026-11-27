@@ -33,6 +33,7 @@ pub enum TokenKind : u16 {
     Semicolon,
     Dot,
     DotDot,
+    DotDotDot,
     LeftBrace,
     RightBrace,
     LeftBracket,
@@ -288,7 +289,10 @@ fun scan_token(l: *Lexer): TokenKind {
     if b == ',' { return TokenKind.Comma }
     if b == ';' { return TokenKind.Semicolon }
     if b == '.' {
-        if match_byte(l, '.') { return TokenKind.DotDot }
+        if match_byte(l, '.') {
+            if match_byte(l, '.') { return TokenKind.DotDotDot }
+            return TokenKind.DotDot
+        }
         return TokenKind.Dot
     }
     if b == '{' { return TokenKind.LeftBrace }
@@ -404,7 +408,7 @@ pub fun tokenize_all(source: []u8, out: *vec.Vec[Token], err_tok: *Token): bool 
             *err_tok = tok
             return false
         }
-        if vec.push.[Token](out, &tok) < 0 {
+        if out.push(&tok) < 0 {
             *err_tok = tok
             return false
         }
@@ -447,6 +451,7 @@ pub fun token_name(kind: TokenKind): []u8 {
         TokenKind.Semicolon => return "SEMICOLON"
         TokenKind.Dot => return "DOT"
         TokenKind.DotDot => return "DOT_DOT"
+        TokenKind.DotDotDot => return "DOT_DOT_DOT"
         TokenKind.LeftBrace => return "LEFT_BRACE"
         TokenKind.RightBrace => return "RIGHT_BRACE"
         TokenKind.LeftBracket => return "LEFT_BRACKET"

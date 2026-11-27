@@ -1,0 +1,185 @@
+import std.file
+import std.mem
+import std.os
+import std.str
+import std.vec
+
+ext fun lunso_sys_access(path: *const u8, mode: i32): i64
+ext fun lunso_sys_open_dir(path: *const u8): i64
+ext fun lunso_sys_file_close(fd: i32): i64
+ext fun lunso_sys_rename(old_path: *const u8, new_path: *const u8): i64
+
+fun copy_cstr(path: []const u8, buf: *u8, cap: i64): i64 {
+    var n = len(path)
+    if n >= cap {
+        return -36
+    }
+    for var i: i64 = 0; i < n; i += 1 {
+        if path[i] == '\0' {
+            return -22
+        }
+        buf[i] = path[i]
+    }
+    buf[n] = '\0'
+    return 0
+}
+
+pub fun read_file(path: []const u8, arena: *mem.Arena, out: *[]u8): i64 {
+    return file.read_all(path, arena, out)
+}
+
+pub fun write_file(path: []const u8, bytes: []const u8): i64 {
+    return file.write_all(path, bytes)
+}
+
+pub fun copy_file(src: []const u8, dst: []const u8): i64 {
+    var in_f: file.File
+    var status = file.open_read(src, &in_f)
+    if status < 0 {
+        return status
+    }
+    defer file.close(&in_f)
+
+    var out_f: file.File
+    status = file.open_write(dst, &out_f)
+    if status < 0 {
+        return status
+    }
+    defer file.close(&out_f)
+
+    var buf: [4096]u8
+    var total: i64 = 0
+    for {
+        var n = file.read_into(&in_f, &buf[0], 4096)
+        if n < 0 {
+            return n
+        }
+        if n == 0 {
+            break
+        }
+        var w = file.write_to(&out_f, buf[0..n])
+        if w < 0 {
+            return w
+        }
+        total += w
+    }
+    return total
+}
+
+pub fun exists(path: []const u8): bool {
+    var buf: [4096]u8
+    if copy_cstr(path, &buf[0], 4096) < 0 {
+        return false
+    }
+    var r = lunso_sys_access(data(buf), 0)
+    for r == -4 {
+        r = lunso_sys_access(data(buf), 0)
+    }
+    return r == 0
+}
+
+pub fun is_dir(path: []const u8): bool {
+    var buf: [4096]u8
+    if copy_cstr(path, &buf[0], 4096) < 0 {
+        return false
+    }
+    var fd = lunso_sys_open_dir(data(buf))
+    for fd == -4 {
+        fd = lunso_sys_open_dir(data(buf))
+    }
+    if fd < 0 {
+        return false
+    }
+    lunso_sys_file_close(fd as i32)
+    return true
+}
+
+pub fun is_file(path: []const u8): bool {
+    return exists(path) && !is_dir(path)
+}
+
+pub fun create_dir(path: []const u8): i64 {
+    return os.mkdir(path)
+}
+
+pub fun create_dir_all(path: []const u8): i64 {
+    var n = len(path)
+    if n == 0 {
+        return -22
+    }
+    if n >= 4096 {
+        return -36
+    }
+    var buf: [4096]u8
+    for var i: i64 = 0; i < n; i += 1 {
+        if path[i] == '\0' {
+            return -22
+        }
+        buf[i] = path[i]
+    }
+    for var i: i64 = 1; i < n; i += 1 {
+        if buf[i] == '/' && i > 0 {
+            var sub = buf[0..i]
+            var st = os.mkdir(sub)
+            if st < 0 && st != -17 {
+                return st
+            }
+        }
+    }
+    var st = os.mkdir(buf[0..n])
+    if st == -17 && is_dir(buf[0..n]) {
+        return 0
+    }
+    return st
+}
+
+pub fun remove_file(path: []const u8): i64 {
+    return os.remove(path)
+}
+
+pub fun remove_dir(path: []const u8): i64 {
+    return os.rmdir(path)
+}
+
+pub fun read_dir(path: []const u8, arena: *mem.Arena, out: *vec.Vec[os.DirEntry]): i64 {
+    return os.list_dir(path, arena, out)
+}
+
+pub fun rename(old_path: []const u8, new_path: []const u8): i64 {
+    var obuf: [4096]u8
+    var nbuf: [4096]u8
+    var st = copy_cstr(old_path, &obuf[0], 4096)
+    if st < 0 { return st }
+    st = copy_cstr(new_path, &nbuf[0], 4096)
+    if st < 0 { return st }
+    return lunso_sys_rename(data(obuf), data(nbuf))
+}
+
+pub fun remove_all(path: []const u8, arena: *mem.Arena): i64 {
+    if !exists(path) {
+        return 0
+    }
+    if !is_dir(path) {
+        return remove_file(path)
+    }
+    var entries: vec.Vec[os.DirEntry]
+    var n = read_dir(path, arena, &entries)
+    if n < 0 {
+        return n
+    }
+    var items = entries.as_slice()
+    for var i: i64 = 0; i < len(items); i += 1 {
+        var child = str.concat3(arena, path, "/", items[i].name)
+        if len(path) > 0 && path[len(path) - 1] == '/' {
+            child = str.concat(arena, path, items[i].name)
+        }
+        if items[i].is_dir {
+            var st = remove_all(child, arena)
+            if st < 0 { return st }
+        } else {
+            var st = remove_file(child)
+            if st < 0 { return st }
+        }
+    }
+    return remove_dir(path)
+}

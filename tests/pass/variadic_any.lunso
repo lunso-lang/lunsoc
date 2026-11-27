@@ -1,0 +1,44 @@
+// lunsoc-only
+fun sum_all(nums: ...i64): i64 {
+    var total: i64 = 0
+    for var i: i64 = 0; i < len(nums); i += 1 {
+        total += nums[i]
+    }
+    return total
+}
+
+fun count_any(prefix: i32, args: ...any): i32 {
+    var acc = prefix
+    for var i: i64 = 0; i < len(args); i += 1 {
+        var a = args[i]
+        var k = a.tag & 255
+        if k == 6 {
+            acc += (*(a.ptr as *const i64)) as i32
+        } else if k == 2 {
+            if *(a.ptr as *const bool) {
+                acc += 10
+            }
+        } else if k == 15 {
+            var s = *(a.ptr as *const []const u8)
+            acc += len(s) as i32
+        }
+    }
+    return acc
+}
+
+fun main(): i32 {
+    if sum_all() != 0 {
+        return 1
+    }
+    if sum_all(10, 20, 30) != 60 {
+        return 2
+    }
+    var n: i64 = 5
+    var ok = true
+    var s = "hello"
+    // 1 + 5 + 10 + 5 = 21
+    if count_any(1, n, ok, s) != 21 {
+        return 3
+    }
+    return 0
+}

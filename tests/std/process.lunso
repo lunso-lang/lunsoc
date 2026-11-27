@@ -1,0 +1,48 @@
+// expect-exit: 0
+import std.mem
+import std.process
+import std.str
+
+fun main(): i32 {
+    var arena: mem.Arena
+    if arena.init(8192) < 0 {
+        return 1
+    }
+    defer arena.deinit()
+
+    if process.pid() <= 0 || process.ppid() <= 0 {
+        return 2
+    }
+
+    var orig_cwd: []u8
+    if process.cwd(&arena, &orig_cwd) < 0 || len(orig_cwd) == 0 {
+        return 3
+    }
+    if process.chdir("/tmp") < 0 {
+        return 4
+    }
+    var tmp_cwd: []u8
+    if process.cwd(&arena, &tmp_cwd) < 0 || !str.equals(tmp_cwd, "/tmp") {
+        return 5
+    }
+    if process.chdir(orig_cwd) < 0 {
+        return 6
+    }
+
+    var cmd: process.Command
+    if cmd.init(&arena, "echo") < 0 {
+        return 7
+    }
+    cmd.arg("hello")
+    cmd.arg("lunso")
+
+    var out: []u8
+    if cmd.output(&out) != 0 {
+        return 8
+    }
+    if !str.equals(str.trim(out), "hello lunso") {
+        return 9
+    }
+
+    return 0
+}
