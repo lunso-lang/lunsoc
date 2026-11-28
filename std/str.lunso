@@ -293,7 +293,7 @@ pub fun lines(arena: *mem.Arena, s: []const u8, out: *Vec[[]const u8]): i64 {
     if out.len > 0 && len(s) > 0 && s[len(s) - 1] == '\n' {
         out.len -= 1
     }
-    for var i: u64 = 0; i < out.len; i += 1 {
+    for i in 0..out.len {
         var line = out.data[i]
         var n = len(line)
         if n > 0 && line[n - 1] == '\r' {
@@ -406,9 +406,9 @@ pub fun repeat(arena: *mem.Arena, s: []const u8, count: u64): []u8 {
         return ""
     }
     var pos: i64 = 0
-    for var c: u64 = 0; c < count; c += 1 {
-        for var i: i64 = 0; i < len(s); i += 1 {
-            buf[pos] = s[i]
+    for _ in 0..count {
+        for ch in s {
+            buf[pos] = ch
             pos += 1
         }
     }

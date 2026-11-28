@@ -23,11 +23,11 @@ fun open(path: []const u8, out: *File, writing: bool): i64 {
     if len(path) >= len(terminated) {
         return -36
     }
-    for var i = 0; i < len(path); i += 1 {
-        if path[i] == 0 {
+    for i, ch in path {
+        if ch == 0 {
             return -22
         }
-        terminated[i] = path[i]
+        terminated[i] = ch
     }
     terminated[len(path)] = 0
 
@@ -121,7 +121,7 @@ fun grow(arena: *mem.Arena, bytes: *ReadBuf, capacity: *i64): i64 {
     if status < 0 {
         return status
     }
-    for var i: i64 = 0; i < (*bytes).len; i += 1 {
+    for i in 0..(*bytes).len {
         ptr[i] = (*bytes).ptr[i]
     }
     (*bytes).ptr = ptr

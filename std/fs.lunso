@@ -14,11 +14,11 @@ fun copy_cstr(path: []const u8, buf: *u8, cap: i64): i64 {
     if n >= cap {
         return -36
     }
-    for var i: i64 = 0; i < n; i += 1 {
-        if path[i] == '\0' {
+    for i, ch in path {
+        if ch == '\0' {
             return -22
         }
-        buf[i] = path[i]
+        buf[i] = ch
     }
     buf[n] = '\0'
     return 0
