@@ -1,7 +1,7 @@
 import std.file
 import std.mem
 import std.str
-import std.collections { Vec }
+import std.collections.Vec
 
 pub struct DirEntry {
     name: []u8

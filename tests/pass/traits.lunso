@@ -1,0 +1,113 @@
+// exit: 0
+
+import std.mem
+
+pub trait Scorable {
+    fun score(self: *const Self): i32
+}
+
+struct Point : Eq, Hash {
+    x: i32
+    y: i32
+}
+
+struct NamedPoint : Eq, Hash, Scorable {
+    name: []const u8
+    pt: Point
+
+    pub fun score(self: *const Self): i32 {
+        return self.pt.x + self.pt.y
+    }
+}
+
+struct CustomEq : Eq, Hash {
+    id: i32
+    ignored: i32
+
+    pub fun eq(self: *const Self, other: *const Self): bool {
+        return self.id == other.id
+    }
+
+    pub fun hash(self: *const Self): u64 {
+        return self.id.hash()
+    }
+}
+
+enum Value : Eq, Hash {
+    None,
+    Int(i64),
+    Pair(i32, i32),
+}
+
+struct Entry[K: Eq + Hash, V] {
+    key: K
+    val: V
+    hash_val: u64
+
+    pub fun matches(self: *const Self, k: K): bool {
+        return self.hash_val == k.hash() && self.key == k
+    }
+}
+
+fun all_equal[T: Eq](a: T, b: T): bool {
+    return a == b && a.eq(&b)
+}
+
+fun get_score[T: Scorable](item: *const T): i32 {
+    return item.score()
+}
+
+fun main(): i32 {
+    // Byte slice equality and hash
+    var s1: []const u8 = "hello"
+    var s2: []const u8 = "hello"
+    var s3: []const u8 = "world"
+    if s1 != s2 { return 1 }
+    if s1 == s3 { return 2 }
+    if s1.hash() != s2.hash() { return 3 }
+
+    // Auto-Eq and Auto-Hash on structs
+    var p1 = Point { x: 10, y: 20 }
+    var p2 = Point { x: 10, y: 20 }
+    var p3 = Point { x: 10, y: 21 }
+    if p1 != p2 { return 4 }
+    if p1 == p3 { return 5 }
+    if p1.hash() != p2.hash() { return 6 }
+
+    // Nested struct + byte slice + custom trait
+    var np1 = NamedPoint { name: "origin", pt: p1 }
+    var np2 = NamedPoint { name: "origin", pt: p2 }
+    var np3 = NamedPoint { name: "other", pt: p1 }
+    if np1 != np2 { return 7 }
+    if np1 == np3 { return 8 }
+    if np1.hash() != np2.hash() { return 9 }
+    if get_score(&np1) != 30 { return 10 }
+
+    // Custom Eq/Hash override
+    var c1 = CustomEq { id: 7, ignored: 1 }
+    var c2 = CustomEq { id: 7, ignored: 999 }
+    if c1 != c2 { return 11 }
+    if c1.hash() != c2.hash() { return 12 }
+
+    // TaggedUnion auto-Eq and auto-Hash
+    var v1 = Value.Pair(3, 4)
+    var v2 = Value.Pair(3, 4)
+    var v3 = Value.Int(3)
+    if v1 != v2 { return 13 }
+    if v1 == v3 { return 14 }
+    if v1.hash() != v2.hash() { return 15 }
+
+    // Generic bounds [T: Eq] and [K: Eq + Hash, V]
+    if !all_equal(p1, p2) { return 16 }
+    if !all_equal(42, 42) { return 17 }
+    if !all_equal("abc", "abc") { return 18 }
+
+    var e1 = Entry[Point, i32] { key: p1, val: 123, hash_val: p1.hash() }
+    if !e1.matches(p2) { return 19 }
+    if e1.matches(p3) { return 20 }
+
+    var e2 = Entry[[]const u8, i32] { key: "key", val: 456, hash_val: ("key" as []const u8).hash() }
+    if !e2.matches("key") { return 21 }
+
+    return 0
+}

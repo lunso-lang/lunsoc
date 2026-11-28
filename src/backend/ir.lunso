@@ -1,7 +1,8 @@
 import std.fmt
 import std.io
 import std.mem
-import std.collections { Vec }
+import std.str
+import std.collections.Vec
 import frontend.ast.*
 import frontend.sema.*
 
@@ -172,7 +173,7 @@ fun emit_store(l: *Lowering, t: SemaType, slot: u32, val: u32) {
 }
 
 fun uses_storage(t: SemaType): bool {
-    return t.kind == TypeKind.Array || t.kind == TypeKind.Struct || t.kind == TypeKind.Result
+    return t.kind == TypeKind.Array || t.kind == TypeKind.Struct || t.kind == TypeKind.Result || t.kind == TypeKind.TaggedUnion
 }
 
 fun make_result_type(l: *Lowering, inner: SemaType): SemaType {
@@ -264,6 +265,290 @@ fun lower_memory_address(l: *Lowering, id: u32): u32 {
     return emit_value(l, IrOp.FieldAddress, bt, base_val, lower_node(l, id).binding, 0)
 }
 
+fun emit_u64_imm(l: *Lowering, v: u64): u32 {
+    return emit_value(l, IrOp.Immediate, simple_type(TypeKind.U64), v as u32, (v >> 32) as u32, 0)
+}
+
+fun emit_hash_mix(l: *Lowering, h: u32, x: u32): u32 {
+    var u64_t = simple_type(TypeKind.U64)
+    var xored = emit_value(l, IrOp.BitXor, u64_t, h, x, 0)
+    var prime = emit_u64_imm(l, 1099511628211)
+    return emit_value(l, IrOp.Multiply, u64_t, xored, prime, 0)
+}
+
+fun find_struct_method_ir(l: *Lowering, t: SemaType, name: []u8): u32 {
+    if t.kind != TypeKind.Struct { return ~0 as u32 }
+    var sr = &l.sem.records.data[t.record]
+    var fdecls = l.tree.functions.as_slice()
+    var fns = l.sem.functions.as_slice()
+    for i, sf in fns {
+        var fd = fdecls[sf.declaration]
+        if fd.owner_struct != sr.declaration { continue }
+        var fn_bytes = l.tree.source[(fd.name.offset as i64)..((fd.name.offset + fd.name.length) as i64)]
+        if !str.equals(fn_bytes, name) { continue }
+        if fd.type_parameters.count == 0 { return i as u32 }
+        if sf.arguments.len == sr.arguments.len {
+            var ok = true
+            for var ai: u64 = 0; ai < sf.arguments.len; ai += 1 {
+                if sf.arguments.data[ai].kind != sr.arguments.data[ai].kind ||
+                   sf.arguments.data[ai].record != sr.arguments.data[ai].record {
+                    ok = false
+                    break
+                }
+            }
+            if ok { return i as u32 }
+        }
+    }
+    return ~0 as u32
+}
+
+fun emit_call_2(l: *Lowering, ret_t: SemaType, fn_idx: u32, a0: u32, a1: u32): u32 {
+    var first = l.mod.arguments.len as u32
+    l.mod.arguments.push_value(a0)
+    l.mod.arguments.push_value(a1)
+    return emit_value(l, IrOp.Call, ret_t, fn_idx, first, 2)
+}
+
+fun emit_call_1(l: *Lowering, ret_t: SemaType, fn_idx: u32, a0: u32): u32 {
+    var first = l.mod.arguments.len as u32
+    l.mod.arguments.push_value(a0)
+    return emit_value(l, IrOp.Call, ret_t, fn_idx, first, 1)
+}
+
+fun emit_eq_values(l: *Lowering, t: SemaType, lhs: u32, rhs: u32): u32 {
+    var bool_t = simple_type(TypeKind.Bool)
+    if t.kind == TypeKind.Slice {
+        var u64_t = simple_type(TypeKind.U64)
+        var u8_t = simple_type(TypeKind.U8)
+        var ptr_t = simple_type(TypeKind.Pointer)
+        var res_slot = emit_value(l, IrOp.StorageAlloc, bool_t, 0, 0, 0)
+        var false_v = emit_value(l, IrOp.Bool, bool_t, 0, 0, 0)
+        var true_v = emit_value(l, IrOp.Bool, bool_t, 1, 0, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: res_slot, b: false_v, c: 0 })
+
+        var len_l = emit_value(l, IrOp.Len, t, lhs, 0, 0)
+        var len_r = emit_value(l, IrOp.Len, t, rhs, 0, 0)
+        var same_len = emit_value(l, IrOp.Equal, u64_t, len_l, len_r, 0)
+        var loop_init = new_label(l)
+        var done_lbl = new_label(l)
+        emit_branch(l, same_len, loop_init, done_lbl)
+
+        emit_label(l, loop_init)
+        var idx_slot = emit_value(l, IrOp.StorageAlloc, u64_t, 0, 0, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: u64_t, result: 0, a: idx_slot, b: emit_u64_imm(l, 0), c: 0 })
+        var data_l = emit_value(l, IrOp.Data, t, lhs, 0, 0)
+        var data_r = emit_value(l, IrOp.Data, t, rhs, 0, 0)
+        var loop_hdr = new_label(l)
+        var loop_body = new_label(l)
+        var set_true = new_label(l)
+        emit_jump(l, loop_hdr)
+
+        emit_label(l, loop_hdr)
+        var idx = emit_value(l, IrOp.MemoryLoad, u64_t, idx_slot, 0, 0)
+        var cond = emit_value(l, IrOp.Less, u64_t, idx, len_l, 0)
+        emit_branch(l, cond, loop_body, set_true)
+
+        emit_label(l, loop_body)
+        var pl = emit_value(l, IrOp.PointerIndex, ptr_t, data_l, idx, 1)
+        var pr = emit_value(l, IrOp.PointerIndex, ptr_t, data_r, idx, 1)
+        var bl = emit_value(l, IrOp.MemoryLoad, u8_t, pl, 0, 0)
+        var br = emit_value(l, IrOp.MemoryLoad, u8_t, pr, 0, 0)
+        var beq = emit_value(l, IrOp.Equal, u8_t, bl, br, 0)
+        var next_lbl = new_label(l)
+        emit_branch(l, beq, next_lbl, done_lbl)
+
+        emit_label(l, next_lbl)
+        var next_idx = emit_value(l, IrOp.Add, u64_t, idx, emit_u64_imm(l, 1), 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: u64_t, result: 0, a: idx_slot, b: next_idx, c: 0 })
+        emit_jump(l, loop_hdr)
+
+        emit_label(l, set_true)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: res_slot, b: true_v, c: 0 })
+        emit_jump(l, done_lbl)
+
+        emit_label(l, done_lbl)
+        return emit_value(l, IrOp.MemoryLoad, bool_t, res_slot, 0, 0)
+    }
+    if t.kind == TypeKind.Struct {
+        var sr = &l.sem.records.data[t.record]
+        if !sr.auto_eq {
+            var fi = find_struct_method_ir(l, t, "eq")
+            return emit_call_2(l, bool_t, fi, lhs, rhs)
+        }
+        var res_slot = emit_value(l, IrOp.StorageAlloc, bool_t, 0, 0, 0)
+        var false_v = emit_value(l, IrOp.Bool, bool_t, 0, 0, 0)
+        var true_v = emit_value(l, IrOp.Bool, bool_t, 1, 0, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: res_slot, b: false_v, c: 0 })
+        var done_lbl = new_label(l)
+        var ptr_t = simple_type(TypeKind.Pointer)
+        var fields = sr.fields.as_slice()
+        for f in fields {
+            var al = emit_value(l, IrOp.FieldAddress, ptr_t, lhs, f.binding, 0)
+            var ar = emit_value(l, IrOp.FieldAddress, ptr_t, rhs, f.binding, 0)
+            var vl = al
+            var vr = ar
+            if !uses_storage(f.type_info) {
+                vl = emit_value(l, IrOp.MemoryLoad, f.type_info, al, 0, 0)
+                vr = emit_value(l, IrOp.MemoryLoad, f.type_info, ar, 0, 0)
+            }
+            var feq = emit_eq_values(l, f.type_info, vl, vr)
+            var next_f = new_label(l)
+            emit_branch(l, feq, next_f, done_lbl)
+            emit_label(l, next_f)
+        }
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: res_slot, b: true_v, c: 0 })
+        emit_jump(l, done_lbl)
+        emit_label(l, done_lbl)
+        return emit_value(l, IrOp.MemoryLoad, bool_t, res_slot, 0, 0)
+    }
+    if t.kind == TypeKind.TaggedUnion {
+        var u32_t = simple_type(TypeKind.U32)
+        var ptr_t = simple_type(TypeKind.Pointer)
+        var res_slot = emit_value(l, IrOp.StorageAlloc, bool_t, 0, 0, 0)
+        var false_v = emit_value(l, IrOp.Bool, bool_t, 0, 0, 0)
+        var true_v = emit_value(l, IrOp.Bool, bool_t, 1, 0, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: res_slot, b: false_v, c: 0 })
+        var done_lbl = new_label(l)
+        var tl = emit_value(l, IrOp.MemoryLoad, u32_t, lhs, 0, 0)
+        var tr = emit_value(l, IrOp.MemoryLoad, u32_t, rhs, 0, 0)
+        var tag_eq = emit_value(l, IrOp.Equal, u32_t, tl, tr, 0)
+        var chk_vars = new_label(l)
+        emit_branch(l, tag_eq, chk_vars, done_lbl)
+
+        emit_label(l, chk_vars)
+        var su = &l.sem.unions.data[t.record]
+        for var vi: u32 = 0; vi < (su.variants.len as u32); vi += 1 {
+            var v_imm = emit_value(l, IrOp.Immediate, u32_t, vi, 0, 0)
+            var is_v = emit_value(l, IrOp.Equal, u32_t, tl, v_imm, 0)
+            var v_body = new_label(l)
+            var v_next = new_label(l)
+            emit_branch(l, is_v, v_body, v_next)
+            emit_label(l, v_body)
+            var fields = su.variants.data[vi].fields.as_slice()
+            for f in fields {
+                var al = emit_value(l, IrOp.FieldAddress, ptr_t, lhs, f.binding, 0)
+                var ar = emit_value(l, IrOp.FieldAddress, ptr_t, rhs, f.binding, 0)
+                var vl = al
+                var vr = ar
+                if !uses_storage(f.type_info) {
+                    vl = emit_value(l, IrOp.MemoryLoad, f.type_info, al, 0, 0)
+                    vr = emit_value(l, IrOp.MemoryLoad, f.type_info, ar, 0, 0)
+                }
+                var feq = emit_eq_values(l, f.type_info, vl, vr)
+                var next_f = new_label(l)
+                emit_branch(l, feq, next_f, done_lbl)
+                emit_label(l, next_f)
+            }
+            emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: res_slot, b: true_v, c: 0 })
+            emit_jump(l, done_lbl)
+            emit_label(l, v_next)
+        }
+        emit_jump(l, done_lbl)
+        emit_label(l, done_lbl)
+        return emit_value(l, IrOp.MemoryLoad, bool_t, res_slot, 0, 0)
+    }
+    return emit_value(l, IrOp.Equal, t, lhs, rhs, 0)
+}
+
+fun emit_hash_value(l: *Lowering, t: SemaType, val: u32): u32 {
+    var u64_t = simple_type(TypeKind.U64)
+    var fnv_init = emit_u64_imm(l, 14695981039346656037)
+    if t.kind == TypeKind.Slice {
+        var u8_t = simple_type(TypeKind.U8)
+        var ptr_t = simple_type(TypeKind.Pointer)
+        var h_slot = emit_value(l, IrOp.StorageAlloc, u64_t, 0, 0, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: u64_t, result: 0, a: h_slot, b: fnv_init, c: 0 })
+        var idx_slot = emit_value(l, IrOp.StorageAlloc, u64_t, 0, 0, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: u64_t, result: 0, a: idx_slot, b: emit_u64_imm(l, 0), c: 0 })
+        var length = emit_value(l, IrOp.Len, t, val, 0, 0)
+        var data_ptr = emit_value(l, IrOp.Data, t, val, 0, 0)
+        var loop_hdr = new_label(l)
+        var loop_body = new_label(l)
+        var done_lbl = new_label(l)
+        emit_jump(l, loop_hdr)
+
+        emit_label(l, loop_hdr)
+        var idx = emit_value(l, IrOp.MemoryLoad, u64_t, idx_slot, 0, 0)
+        var cond = emit_value(l, IrOp.Less, u64_t, idx, length, 0)
+        emit_branch(l, cond, loop_body, done_lbl)
+
+        emit_label(l, loop_body)
+        var p = emit_value(l, IrOp.PointerIndex, ptr_t, data_ptr, idx, 1)
+        var b = emit_value(l, IrOp.MemoryLoad, u8_t, p, 0, 0)
+        var b64 = emit_value(l, IrOp.Cast, u64_t, b, TypeKind.U8 as u32, 0)
+        var h = emit_value(l, IrOp.MemoryLoad, u64_t, h_slot, 0, 0)
+        var nh = emit_hash_mix(l, h, b64)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: u64_t, result: 0, a: h_slot, b: nh, c: 0 })
+        var next_idx = emit_value(l, IrOp.Add, u64_t, idx, emit_u64_imm(l, 1), 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: u64_t, result: 0, a: idx_slot, b: next_idx, c: 0 })
+        emit_jump(l, loop_hdr)
+
+        emit_label(l, done_lbl)
+        return emit_value(l, IrOp.MemoryLoad, u64_t, h_slot, 0, 0)
+    }
+    if t.kind == TypeKind.Struct {
+        var sr = &l.sem.records.data[t.record]
+        if !sr.auto_hash {
+            var fi = find_struct_method_ir(l, t, "hash")
+            return emit_call_1(l, u64_t, fi, val)
+        }
+        var ptr_t = simple_type(TypeKind.Pointer)
+        var h = fnv_init
+        var fields = sr.fields.as_slice()
+        for f in fields {
+            var fa = emit_value(l, IrOp.FieldAddress, ptr_t, val, f.binding, 0)
+            var fv = fa
+            if !uses_storage(f.type_info) {
+                fv = emit_value(l, IrOp.MemoryLoad, f.type_info, fa, 0, 0)
+            }
+            var fh = emit_hash_value(l, f.type_info, fv)
+            h = emit_hash_mix(l, h, fh)
+        }
+        return h
+    }
+    if t.kind == TypeKind.TaggedUnion {
+        var u32_t = simple_type(TypeKind.U32)
+        var ptr_t = simple_type(TypeKind.Pointer)
+        var tag = emit_value(l, IrOp.MemoryLoad, u32_t, val, 0, 0)
+        var tag64 = emit_value(l, IrOp.Cast, u64_t, tag, TypeKind.U32 as u32, 0)
+        var h_init = emit_hash_mix(l, fnv_init, tag64)
+        var h_slot = emit_value(l, IrOp.StorageAlloc, u64_t, 0, 0, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: u64_t, result: 0, a: h_slot, b: h_init, c: 0 })
+        var done_lbl = new_label(l)
+        var su = &l.sem.unions.data[t.record]
+        for var vi: u32 = 0; vi < (su.variants.len as u32); vi += 1 {
+            var v_imm = emit_value(l, IrOp.Immediate, u32_t, vi, 0, 0)
+            var is_v = emit_value(l, IrOp.Equal, u32_t, tag, v_imm, 0)
+            var v_body = new_label(l)
+            var v_next = new_label(l)
+            emit_branch(l, is_v, v_body, v_next)
+            emit_label(l, v_body)
+            var h = emit_value(l, IrOp.MemoryLoad, u64_t, h_slot, 0, 0)
+            var fields = su.variants.data[vi].fields.as_slice()
+            for f in fields {
+                var fa = emit_value(l, IrOp.FieldAddress, ptr_t, val, f.binding, 0)
+                var fv = fa
+                if !uses_storage(f.type_info) {
+                    fv = emit_value(l, IrOp.MemoryLoad, f.type_info, fa, 0, 0)
+                }
+                var fh = emit_hash_value(l, f.type_info, fv)
+                h = emit_hash_mix(l, h, fh)
+            }
+            emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: u64_t, result: 0, a: h_slot, b: h, c: 0 })
+            emit_jump(l, done_lbl)
+            emit_label(l, v_next)
+        }
+        emit_jump(l, done_lbl)
+        emit_label(l, done_lbl)
+        return emit_value(l, IrOp.MemoryLoad, u64_t, h_slot, 0, 0)
+    }
+    var v64 = val
+    if t.kind != TypeKind.U64 {
+        v64 = emit_value(l, IrOp.Cast, u64_t, val, t.kind as u32, 0)
+    }
+    return emit_hash_mix(l, fnv_init, v64)
+}
+
 fun lower_call(l: *Lowering, id: u32): u32 {
     var info = lower_node(l, id)
     var nodes = l.tree.nodes.as_slice()
@@ -275,6 +560,38 @@ fun lower_call(l: *Lowering, id: u32): u32 {
     if info.builtin == SemaBuiltin.Fail {
         return lower_expression(l, children[call.a + 1])
     }
+    if info.builtin == SemaBuiltin.Hash {
+        var recv_id = nodes[children[call.a]].a
+        var recv_t = lower_node(l, recv_id).type_info
+        var recv_val = lower_expression(l, recv_id)
+        if recv_t.kind == TypeKind.Pointer {
+            var base_t = l.sem.pointees.data[recv_t.pointee]
+            if !uses_storage(base_t) {
+                recv_val = emit_value(l, IrOp.MemoryLoad, base_t, recv_val, 0, 0)
+            }
+            return emit_hash_value(l, base_t, recv_val)
+        }
+        return emit_hash_value(l, recv_t, recv_val)
+    }
+    if info.builtin == SemaBuiltin.Eq {
+        var recv_id = nodes[children[call.a]].a
+        var arg_id = children[call.a + 1]
+        var recv_t = lower_node(l, recv_id).type_info
+        var lhs = lower_expression(l, recv_id)
+        var rhs_ptr = lower_expression(l, arg_id)
+        var base_t = recv_t
+        if recv_t.kind == TypeKind.Pointer {
+            base_t = l.sem.pointees.data[recv_t.pointee]
+            if !uses_storage(base_t) {
+                lhs = emit_value(l, IrOp.MemoryLoad, base_t, lhs, 0, 0)
+            }
+        }
+        var rhs = rhs_ptr
+        if !uses_storage(base_t) {
+            rhs = emit_value(l, IrOp.MemoryLoad, base_t, rhs_ptr, 0, 0)
+        }
+        return emit_eq_values(l, base_t, lhs, rhs)
+    }
     if info.builtin != SemaBuiltin.None {
         var arg = children[call.a + 1]
         var val = lower_expression(l, arg)
@@ -283,6 +600,27 @@ fun lower_call(l: *Lowering, id: u32): u32 {
             op = IrOp.Len
         }
         return emit_value(l, op, lower_node(l, arg).type_info, val, 0, 0)
+    }
+    if info.is_enum_case && info.type_info.kind == TypeKind.TaggedUnion {
+        var count = call.b - 1
+        var temp_vals: [64]u32
+        for var i: u32 = 0; i < count && !l.failed; i += 1 {
+            var val = lower_expression(l, children[call.a + 1 + i])
+            if i < 64 {
+                temp_vals[i] = val
+            }
+        }
+        var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
+        emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: 0, c: 0 })
+        var tag = emit_value(l, IrOp.Immediate, simple_type(TypeKind.U32), info.binding, 0, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: simple_type(TypeKind.U32), result: 0, a: addr, b: tag, c: 0 })
+        var uv = &l.sem.unions.data[info.type_info.record].variants.data[info.binding]
+        for var i: u32 = 0; i < count && !l.failed; i += 1 {
+            var fsn = uv.fields.data[i]
+            var faddr = emit_value(l, IrOp.FieldAddress, simple_type(TypeKind.Pointer), addr, fsn.binding, 0)
+            emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: fsn.type_info, result: 0, a: faddr, b: temp_vals[i], c: 0 })
+        }
+        return addr
     }
     var count = call.b - 1
     // Lower arguments first so nested calls do not interleave in mod.arguments.
@@ -478,6 +816,13 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
             return emit_value(l, IrOp.FnAddr, info.type_info, info.binding, 0, 0)
         }
         if info.is_enum_case {
+            if info.type_info.kind == TypeKind.TaggedUnion {
+                var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
+                emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: 0, c: 0 })
+                var tag = emit_value(l, IrOp.Immediate, simple_type(TypeKind.U32), info.binding, 0, 0)
+                emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: simple_type(TypeKind.U32), result: 0, a: addr, b: tag, c: 0 })
+                return addr
+            }
             var evals = l.sem.enum_values.as_slice()
             var bits = evals[info.binding]
             return emit_value(l, IrOp.Immediate, info.type_info, bits as u32, (bits >> 32) as u32, 0)
@@ -653,6 +998,18 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
     var left = lower_expression(l, node.a)
     var right = lower_expression(l, node.b)
     var linfo = lower_node(l, node.a)
+    if (node.kind == AstKind.Equal || node.kind == AstKind.NotEqual) && info.method_call != 0 {
+        var eq_res: u32 = 0
+        if info.method_call == 2 {
+            eq_res = emit_call_2(l, simple_type(TypeKind.Bool), info.binding, left, right)
+        } else {
+            eq_res = emit_eq_values(l, linfo.type_info, left, right)
+        }
+        if node.kind == AstKind.NotEqual {
+            eq_res = emit_value(l, IrOp.LogicalNot, simple_type(TypeKind.Bool), eq_res, 0, 0)
+        }
+        return eq_res
+    }
     var op_type = linfo.type_info
     if linfo.promotion != TypeKind.Invalid {
         op_type.kind = linfo.promotion
@@ -758,6 +1115,12 @@ fun lower_match(l: *Lowering, id: u32) {
     var scrut_id = children[node.a]
     var scrut = lower_expression(l, scrut_id)
     var st = lower_node(l, scrut_id).type_info
+    var cmp_t = st
+    var cmp_val = scrut
+    if st.kind == TypeKind.TaggedUnion {
+        cmp_t = simple_type(TypeKind.U32)
+        cmp_val = emit_value(l, IrOp.MemoryLoad, cmp_t, scrut, 0, 0)
+    }
     var end_lbl = new_label(l)
     var arm_count = node.b - 1
     var mvals = l.sem.match_values.as_slice()
@@ -784,9 +1147,9 @@ fun lower_match(l: *Lowering, id: u32) {
                 var pat = children[arm.a + p]
                 var bits = mvals[lower_node(l, pat).binding]
                 var op = IrOp.Immediate
-                if st.kind == TypeKind.Bool { op = IrOp.Bool }
-                var pval = emit_value(l, op, st, bits as u32, (bits >> 32) as u32, 0)
-                var cmp = emit_value(l, IrOp.Equal, st, scrut, pval, 0)
+                if cmp_t.kind == TypeKind.Bool { op = IrOp.Bool }
+                var pval = emit_value(l, op, cmp_t, bits as u32, (bits >> 32) as u32, 0)
+                var cmp = emit_value(l, IrOp.Equal, cmp_t, cmp_val, pval, 0)
                 var last_pat = p + 1 == arm.b - 1
                 var next_pat = next_arm
                 if !last_pat { next_pat = new_label(l) }
@@ -797,6 +1160,30 @@ fun lower_match(l: *Lowering, id: u32) {
             }
         }
         emit_label(l, arm_body)
+        if st.kind == TypeKind.TaggedUnion && arm.b == 2 {
+            var pat = children[arm.a]
+            var pat_node = nodes[pat]
+            if pat_node.kind == AstKind.Call {
+                var v_idx = mvals[lower_node(l, pat).binding] as u32
+                var uv = &l.sem.unions.data[st.record].variants.data[v_idx]
+                for var bi: u32 = 0; bi < pat_node.b - 1 && !l.failed; bi += 1 {
+                    var arg_id = children[pat_node.a + 1 + bi]
+                    var binfo = lower_node(l, arg_id)
+                    if binfo.binding != (~0 as u32) {
+                        var fsn = uv.fields.data[bi]
+                        var faddr = emit_value(l, IrOp.FieldAddress, simple_type(TypeKind.Pointer), scrut, fsn.binding, 0)
+                        if uses_storage(fsn.type_info) {
+                            var local_addr = emit_value(l, IrOp.StorageAlloc, fsn.type_info, 0, 0, 0)
+                            emit(l, IrInstruction { op: IrOp.StorageInit, type_info: fsn.type_info, result: 0, a: local_addr, b: faddr, c: 0 })
+                            emit_store(l, fsn.type_info, binfo.binding, local_addr)
+                        } else {
+                            var fval = emit_value(l, IrOp.MemoryLoad, fsn.type_info, faddr, 0, 0)
+                            emit_store(l, fsn.type_info, binfo.binding, fval)
+                        }
+                    }
+                }
+            }
+        }
         lower_statement(l, body)
         if lower_node(l, body).falls_through {
             emit_jump(l, end_lbl)

@@ -1,6 +1,6 @@
 import std.mem
 import std.str
-import std.collections { Vec }
+import std.collections.Vec
 
 pub fun is_abs(p: []const u8): bool {
     return len(p) > 0 && p[0] == '/'
@@ -18,8 +18,8 @@ pub fun join(arena: *mem.Arena, dir: []const u8, name: []const u8): []u8 {
 
 pub fun dir_prefix(p: []u8): []u8 {
     var last: i64 = -1
-    for var i: i64 = 0; i < len(p); i += 1 {
-        if p[i] == '/' { last = i }
+    for i, ch in p {
+        if ch == '/' { last = i }
     }
     if last < 0 { return "" }
     return p[0..(last + 1)]
@@ -35,7 +35,7 @@ pub fun dirname(p: []const u8): []const u8 {
         return "/"
     }
     var last: i64 = -1
-    for var i: i64 = 0; i < end; i += 1 {
+    for i in 0..end {
         if p[i] == '/' { last = i }
     }
     if last < 0 { return "." }
@@ -53,7 +53,7 @@ pub fun basename(p: []const u8): []const u8 {
         return "/"
     }
     var base_start: i64 = 0
-    for var i: i64 = 0; i < end; i += 1 {
+    for i in 0..end {
         if p[i] == '/' { base_start = i + 1 }
     }
     return p[base_start..end]

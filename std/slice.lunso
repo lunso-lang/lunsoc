@@ -95,8 +95,7 @@ pub fun reverse[T](items: []T) {
 }
 
 pub fun fill[T](items: []T, value: T) {
-    var n = len(items)
-    for var i: i64 = 0; i < n; i += 1 {
+    for i in 0..len(items) {
         items[i] = value
     }
 }

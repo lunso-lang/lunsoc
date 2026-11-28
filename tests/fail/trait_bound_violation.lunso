@@ -1,0 +1,12 @@
+struct NoHash : Eq {
+    x: i32
+}
+
+struct Box[K: Eq + Hash] {
+    key: K
+}
+
+fun main(): i32 {
+    var b = Box[NoHash] { key: NoHash { x: 1 } }
+    return b.key.x
+}

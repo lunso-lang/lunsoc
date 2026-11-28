@@ -7,7 +7,7 @@ import std.os
 import std.path
 import std.process
 import std.str
-import std.collections { Vec }
+import std.collections.Vec
 import frontend.ast
 import backend.ir
 import frontend.lexer
@@ -103,7 +103,7 @@ fun run_parse(path: []u8, source: []u8, arena: *mem.Arena): i32 {
     return 0
 }
 
-const VERSION: []u8 = "lunsoc 0.5.1"
+const VERSION: []u8 = "lunsoc 0.6.0"
 
 enum Mode : u8 {
     Tokens,

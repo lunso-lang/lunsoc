@@ -1,0 +1,12 @@
+enum Value {
+    None,
+    Int(i64),
+}
+
+fun main(): i32 {
+    var v = Value.Int(1)
+    match v {
+        Value.Int(n) => return n as i32
+    }
+    return 0
+}

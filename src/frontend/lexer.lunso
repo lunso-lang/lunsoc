@@ -1,11 +1,12 @@
 import std.str
-import std.collections { Vec }
+import std.collections.Vec
 
 pub enum TokenKind : u16 {
     Fun,
     Ext,
     Struct,
     Enum,
+    Trait,
     As,
     Const,
     Import,
@@ -172,6 +173,7 @@ fun keyword_or_ident(text: []u8): TokenKind {
     if str.equals(text, "ext") { return TokenKind.Ext }
     if str.equals(text, "struct") { return TokenKind.Struct }
     if str.equals(text, "enum") { return TokenKind.Enum }
+    if str.equals(text, "trait") { return TokenKind.Trait }
     if str.equals(text, "as") { return TokenKind.As }
     if str.equals(text, "const") { return TokenKind.Const }
     if str.equals(text, "import") { return TokenKind.Import }

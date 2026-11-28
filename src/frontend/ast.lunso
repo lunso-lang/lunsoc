@@ -1,5 +1,5 @@
 import std.mem
-import std.collections { Vec }
+import std.collections.Vec
 
 pub const NODE_NONE: u32 = 0
 
@@ -9,6 +9,7 @@ pub enum AstKind : u8 {
     Struct,
     Enum,
     EnumCase,
+    Trait,
     Const,
     Import,
     ImportItem,
@@ -120,20 +121,37 @@ pub struct AstFunction {
     is_variadic: bool
 }
 
+pub struct AstTrait {
+    name: Span
+    methods: NodeRange
+    module: u32
+    public: bool
+}
+
 pub struct AstStruct {
     name: Span
     fields: NodeRange
     type_parameters: NodeRange
+    traits: NodeRange
     module: u32
     public: bool
+}
+
+pub struct AstEnumCase {
+    fields: NodeRange
+    value: u32
+    has_payload: bool
 }
 
 pub struct AstEnum {
     name: Span
     cases: NodeRange
+    type_parameters: NodeRange
+    traits: NodeRange
     backing: u32
     module: u32
     public: bool
+    has_payload: bool
 }
 
 pub struct AstConst {
@@ -200,6 +218,7 @@ pub enum AstBindingKind : u8 {
     Function,
     Struct,
     Enum,
+    Trait,
     Const,
     Module,
 }
@@ -229,6 +248,9 @@ pub struct Ast {
     functions: Vec[AstFunction]
     structs: Vec[AstStruct]
     enums: Vec[AstEnum]
+    enum_cases: Vec[AstEnumCase]
+    traits: Vec[AstTrait]
+    type_bounds: Vec[NodeRange]
     consts: Vec[AstConst]
     imports: Vec[AstImport]
     if_branches: Vec[AstIfBranches]
@@ -250,6 +272,9 @@ pub fun init(arena: *mem.Arena, source: []u8, out: *Ast): bool {
     if out.functions.init(arena, 32) < 0 { return false }
     if out.structs.init(arena, 16) < 0 { return false }
     if out.enums.init(arena, 16) < 0 { return false }
+    if out.enum_cases.init(arena, 32) < 0 { return false }
+    if out.traits.init(arena, 16) < 0 { return false }
+    if out.type_bounds.init(arena, 16) < 0 { return false }
     if out.consts.init(arena, 16) < 0 { return false }
     if out.imports.init(arena, 16) < 0 { return false }
     if out.if_branches.init(arena, 32) < 0 { return false }
@@ -333,12 +358,10 @@ pub fun offset_to_pos(src: []u8, offset: u32): SourcePos {
 pub fun pos_to_offset(src: []u8, line: u64, col: u64): u32 {
     var cur_line: u64 = 1
     var cur_col: u64 = 1
-    var n = len(src)
-    for var i: i64 = 0; i < n; i += 1 {
+    for i, ch in src {
         if cur_line > line || (cur_line == line && cur_col >= col) {
             return i as u32
         }
-        var ch = src[i]
         if ch == '\n' {
             if cur_line == line {
                 return i as u32
@@ -349,5 +372,5 @@ pub fun pos_to_offset(src: []u8, line: u64, col: u64): u32 {
             cur_col += 1
         }
     }
-    return n as u32
+    return len(src) as u32
 }

@@ -84,7 +84,7 @@ pub struct Vec[T] {
         }
 
         var new_data = raw as *T
-        for var i: u64 = 0; i < self.len; i += 1 {
+        for i in 0..self.len {
             new_data[i] = self.data[i]
         }
         self.data = new_data
@@ -156,7 +156,7 @@ pub struct Vec[T] {
                 return status
             }
         }
-        for var i: u64 = 0; i < count; i += 1 {
+        for i in 0..count {
             self.data[self.len + i] = items[i]
         }
         self.len = needed
@@ -278,13 +278,13 @@ pub struct StrMap[V] {
         status = mem.alloc_many(self.arena, new_cap, &next_states)
         if status < 0 { return status }
 
-        for var i: u64 = 0; i < new_cap; i += 1 {
+        for i in 0..new_cap {
             next_states[i] = SLOT_EMPTY
         }
 
         var mask = new_cap - 1
         var old_cap = self.cap
-        for var i: u64 = 0; i < old_cap; i += 1 {
+        for i in 0..old_cap {
             if self.states[i] != SLOT_USED {
                 continue
             }
@@ -313,7 +313,7 @@ pub struct StrMap[V] {
         }
         var mask = self.cap - 1
         var idx = h & mask
-        for var step: u64 = 0; step < self.cap; step += 1 {
+        for _ in 0..self.cap {
             var st = self.states[idx]
             if st == SLOT_EMPTY {
                 return -1
@@ -348,7 +348,7 @@ pub struct StrMap[V] {
         var mask = self.cap - 1
         var idx = h & mask
         var first_tomb: i64 = -1
-        for var step: u64 = 0; step < self.cap; step += 1 {
+        for _ in 0..self.cap {
             var st = self.states[idx]
             if st == SLOT_EMPTY {
                 var dst = idx
@@ -423,7 +423,7 @@ pub struct StrMap[V] {
         if self == null {
             return
         }
-        for var i: u64 = 0; i < self.cap; i += 1 {
+        for i in 0..self.cap {
             self.states[i] = SLOT_EMPTY
         }
         self.len = 0

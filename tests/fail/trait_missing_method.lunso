@@ -1,0 +1,12 @@
+trait Printable {
+    fun show(self: *const Self): i32
+}
+
+struct Foo : Printable {
+    x: i32
+}
+
+fun main(): i32 {
+    var f = Foo { x: 1 }
+    return f.x
+}
