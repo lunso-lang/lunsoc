@@ -343,12 +343,10 @@ pub fun offset_to_pos(src: []u8, offset: u32): SourcePos {
 pub fun pos_to_offset(src: []u8, line: u64, col: u64): u32 {
     var cur_line: u64 = 1
     var cur_col: u64 = 1
-    var n = len(src)
-    for var i: i64 = 0; i < n; i += 1 {
+    for i, ch in src {
         if cur_line > line || (cur_line == line && cur_col >= col) {
             return i as u32
         }
-        var ch = src[i]
         if ch == '\n' {
             if cur_line == line {
                 return i as u32
@@ -359,5 +357,5 @@ pub fun pos_to_offset(src: []u8, line: u64, col: u64): u32 {
             cur_col += 1
         }
     }
-    return n as u32
+    return len(src) as u32
 }

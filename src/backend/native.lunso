@@ -39,9 +39,9 @@ fun has_entry_point(mod: *ir.IrModule): bool {
 
 fun make_temp_dir(arena: *mem.Arena): []u8 {
     var ns = time.monotonic_ns() as u64
-    for var attempt: u64 = 0; attempt < 64; attempt += 1 {
+    for attempt in 0..64 {
         var buf: [32]u8
-        var n = fmt.u64_to_buf(ns + attempt, &buf[0], 32)
+        var n = fmt.u64_to_buf(ns + (attempt as u64), &buf[0], 32)
         var dir = str.concat(arena, "/tmp/.lunso-", buf[0..n])
         if len(dir) > 0 && os.mkdir(dir) == 0 {
             return dir

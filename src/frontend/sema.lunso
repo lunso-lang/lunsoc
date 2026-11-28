@@ -3472,7 +3472,7 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
         is_enum_case: false,
         is_const: false,
     }
-    for var i: u64 = 0; i < tree.nodes.len; i += 1 {
+    for _ in 0..tree.nodes.len {
         out.nodes.push(&empty_sn)
     }
 
@@ -3494,7 +3494,7 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
     c.locals.init(arena, 64)
     c.loops.init(arena, 8)
 
-    for var i: u64 = 0; i < tree.structs.len; i += 1 {
+    for i in 0..tree.structs.len {
         var sr = SemaRecord {
             declaration: i as u32,
             size: 0,
@@ -3506,7 +3506,7 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
         sr.fields.init(arena, 8)
         out.records.push(&sr)
     }
-    for var i: u64 = 0; i < tree.enums.len; i += 1 {
+    for i in 0..tree.enums.len {
         var su = SemaUnion {
             declaration: i as u32,
             size: 0,
@@ -3518,7 +3518,7 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
         su.variants.init(arena, 8)
         out.unions.push(&su)
     }
-    for var i: u64 = 0; i < tree.consts.len; i += 1 {
+    for _ in 0..tree.consts.len {
         var sc = SemaConstant { type_info: empty_type(), bits: 0, str_node: NODE_NONE, state: 0 }
         out.constants.push(&sc)
     }
