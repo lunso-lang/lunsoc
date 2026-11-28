@@ -1003,7 +1003,11 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
         if info.method_call == 2 {
             eq_res = emit_call_2(l, simple_type(TypeKind.Bool), info.binding, left, right)
         } else {
-            eq_res = emit_eq_values(l, linfo.type_info, left, right)
+            var eq_t = linfo.type_info
+            if linfo.borrow_array {
+                eq_t = lower_node(l, node.b).type_info
+            }
+            eq_res = emit_eq_values(l, eq_t, left, right)
         }
         if node.kind == AstKind.NotEqual {
             eq_res = emit_value(l, IrOp.LogicalNot, simple_type(TypeKind.Bool), eq_res, 0, 0)

@@ -3249,7 +3249,15 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                     if rt.kind != cm { node_info(c, node.b).promotion = cm }
                     res = simple_type(TypeKind.Bool)
                 }
-            } else if is_byte_slice(lt) && is_byte_slice(rt) && (node.kind == AstKind.Equal || node.kind == AstKind.NotEqual) {
+            } else if (is_byte_slice(lt) && is_byte_slice(rt)) && (node.kind == AstKind.Equal || node.kind == AstKind.NotEqual) {
+                node_info(c, id).method_call = 1
+                res = simple_type(TypeKind.Bool)
+            } else if is_byte_slice(lt) && rt.kind == TypeKind.Array && rt.element == TypeKind.U8 && (node.kind == AstKind.Equal || node.kind == AstKind.NotEqual) {
+                node_info(c, node.b).borrow_array = true
+                node_info(c, id).method_call = 1
+                res = simple_type(TypeKind.Bool)
+            } else if is_byte_slice(rt) && lt.kind == TypeKind.Array && lt.element == TypeKind.U8 && (node.kind == AstKind.Equal || node.kind == AstKind.NotEqual) {
+                node_info(c, node.a).borrow_array = true
                 node_info(c, id).method_call = 1
                 res = simple_type(TypeKind.Bool)
             } else if lt.kind != TypeKind.Null && same_type(c, lt, rt) {
