@@ -260,7 +260,14 @@ fun parse_call(p: *Parser, callee: u32): u32 {
     var saved = p.disallow_struct_literal
     p.disallow_struct_literal = false
     for !p.has_error && p.current.kind != lexer.TokenKind.RightParen && p.current.kind != lexer.TokenKind.Eof {
-        push_child(p, parse_expression(p, PREC_ASSIGNMENT))
+        if p.current.kind == lexer.TokenKind.DotDotDot {
+            var sp_tok = p.current
+            advance(p)
+            var expr = parse_expression(p, PREC_ASSIGNMENT)
+            push_child(p, add_node(p, ast.AstKind.Spread, sp_tok, expr, 0))
+        } else {
+            push_child(p, parse_expression(p, PREC_ASSIGNMENT))
+        }
         if p.current.kind == lexer.TokenKind.RightParen || p.current.kind == lexer.TokenKind.Eof {
             break
         }

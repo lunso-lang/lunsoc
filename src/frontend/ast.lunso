@@ -50,6 +50,7 @@ pub enum AstKind : u8 {
     SliceRange,
     Member,
     Cast,
+    Spread,
     Try,
     OrElse,
     AddressOf,

@@ -328,7 +328,13 @@ fun lower_call(l: *Lowering, id: u32): u32 {
         arg_offset = 1
     }
     for var i: u32 = 0; i < count && !l.failed; i += 1 {
-        var val = lower_expression(l, children[call.a + 1 + i])
+        var arg_id = children[call.a + 1 + i]
+        var val: u32 = 0
+        if nodes[arg_id].kind == AstKind.Spread {
+            val = lower_expression(l, nodes[arg_id].a)
+        } else {
+            val = lower_expression(l, arg_id)
+        }
         if (arg_offset + i) < 64 {
             temp_vals[arg_offset + i] = val
         }
@@ -339,16 +345,21 @@ fun lower_call(l: *Lowering, id: u32): u32 {
     if fdecl.is_variadic && !l.failed {
         var fixed_total = fdecl.parameters.count - 1
         var var_count = total_count - fixed_total
-        var first_var = l.mod.arguments.len as u32
-        for var i: u32 = 0; i < var_count && !l.failed; i += 1 {
-            if l.mod.arguments.push_value(temp_vals[fixed_total + i]) < 0 {
-                l.failed = true
+        var is_spread = var_count == 1 && nodes[children[call.a + 1 + (fixed_total - arg_offset)]].kind == AstKind.Spread
+        if is_spread {
+            total_count = fixed_total + 1
+        } else {
+            var first_var = l.mod.arguments.len as u32
+            for var i: u32 = 0; i < var_count && !l.failed; i += 1 {
+                if l.mod.arguments.push_value(temp_vals[fixed_total + i]) < 0 {
+                    l.failed = true
+                }
             }
+            var var_slice_t = sf.param_types.data[sf.param_types.len - 1]
+            var var_val = emit_value(l, IrOp.VariadicSlice, var_slice_t, first_var, var_count, 0)
+            temp_vals[fixed_total] = var_val
+            total_count = fixed_total + 1
         }
-        var var_slice_t = sf.param_types.data[sf.param_types.len - 1]
-        var var_val = emit_value(l, IrOp.VariadicSlice, var_slice_t, first_var, var_count, 0)
-        temp_vals[fixed_total] = var_val
-        total_count = fixed_total + 1
     }
     var first = l.mod.arguments.len as u32
     for var i: u32 = 0; i < total_count && !l.failed; i += 1 {
