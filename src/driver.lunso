@@ -198,13 +198,109 @@ fun run_compile(path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, a
     return 0
 }
 
-fun resolve_std_obj(arena: *mem.Arena): []u8 {
+fun resolve_exe_dir(arena: *mem.Arena, prog_name: []u8): []u8 {
+    if str.index_of(prog_name, '/') >= 0 {
+        return path.dirname(prog_name)
+    }
+    var path_env: []u8
+    if os.getenv("PATH", arena, &path_env) != 0 || len(path_env) == 0 {
+        return ""
+    }
+    var n = len(path_env)
+    var start: i64 = 0
+    for var i: i64 = 0; i <= n; i += 1 {
+        if i == n || path_env[i] == ':' {
+            var dir = path_env[start..i]
+            if len(dir) > 0 {
+                var cand = path.join(arena, dir, prog_name)
+                if file.exists(cand) {
+                    return dir
+                }
+            }
+            start = i + 1
+        }
+    }
+    return ""
+}
+
+fun has_std_dir(arena: *mem.Arena, dir: []const u8): bool {
+    if len(dir) == 0 { return false }
+    return file.exists(path.join(arena, dir, "io.lunso"))
+}
+
+fun resolve_std_dir(arena: *mem.Arena, override: []u8, exe_dir: []u8): []u8 {
+    if len(override) > 0 {
+        return override
+    }
+    var env_val: []u8
+    if os.getenv("LUNSO_STD_DIR", arena, &env_val) == 0 && len(env_val) > 0 {
+        return env_val
+    }
+    if len(exe_dir) > 0 {
+        var c1 = path.join(arena, exe_dir, "std")
+        if has_std_dir(arena, c1) { return c1 }
+        var c2 = path.join(arena, exe_dir, "../std")
+        if has_std_dir(arena, c2) { return c2 }
+    }
+    if has_std_dir(arena, "std") {
+        return "std"
+    }
+    var home: []u8
+    if os.getenv("HOME", arena, &home) == 0 && len(home) > 0 {
+        var c3 = path.join(arena, home, ".local/share/lunso/std")
+        if has_std_dir(arena, c3) { return c3 }
+    }
+    if has_std_dir(arena, "/usr/local/share/lunso/std") {
+        return "/usr/local/share/lunso/std"
+    }
+    if has_std_dir(arena, "/usr/local/lib/lunso/std") {
+        return "/usr/local/lib/lunso/std"
+    }
+    return ""
+}
+
+fun resolve_std_obj(arena: *mem.Arena, exe_dir: []u8, std_dir: []u8): []u8 {
     var env_val: []u8
     if process.getenv("LUNSO_STD_OBJ", arena, &env_val) == 0 && len(env_val) > 0 {
         return env_val
     }
+    if len(exe_dir) > 0 {
+        var c1 = path.join(arena, exe_dir, "std-linux-x86_64.o")
+        if fs.exists(c1) { return c1 }
+        var c2 = path.join(arena, exe_dir, "../build/std-linux-x86_64.o")
+        if fs.exists(c2) { return c2 }
+    }
     if fs.exists("build/std-linux-x86_64.o") {
         return "build/std-linux-x86_64.o"
+    }
+    var home: []u8
+    if os.getenv("HOME", arena, &home) == 0 && len(home) > 0 {
+        var c3 = path.join(arena, home, ".local/share/lunso/std-linux-x86_64.o")
+        if fs.exists(c3) { return c3 }
+    }
+    if fs.exists("/usr/local/lib/lunso/std-linux-x86_64.o") {
+        return "/usr/local/lib/lunso/std-linux-x86_64.o"
+    }
+    if fs.exists("/usr/local/share/lunso/std-linux-x86_64.o") {
+        return "/usr/local/share/lunso/std-linux-x86_64.o"
+    }
+    if len(std_dir) > 0 {
+        var asm_src = path.join(arena, std_dir, "platform/linux_x86_64.s")
+        if fs.exists(asm_src) {
+            var cached: []u8 = "/tmp/lunsoc-std-linux-x86_64.o"
+            if !fs.exists(cached) {
+                var cc: []u8 = "cc"
+                var cc_env: []u8
+                if os.getenv("CC", arena, &cc_env) == 0 && len(cc_env) > 0 {
+                    cc = cc_env
+                }
+                var cc_args: [5][]u8 = [cc, "-c", asm_src, "-o", cached]
+                _ = os.run(cc, cc_args[0..5])
+            }
+            if fs.exists(cached) {
+                return cached
+            }
+        }
     }
     return ""
 }
@@ -370,11 +466,13 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
     } else if mode == Mode.Parse {
         rc = run_parse(path, source, arena)
     } else {
+        var exe_dir = resolve_exe_dir(arena, prog_name)
+        var resolved_std = resolve_std_dir(arena, std_dir, exe_dir)
         if allows_output && len(output) == 0 {
             output = default_output_name(arena, path, mode)
         }
         if allows_link && !nostdlib && objects.len == 0 {
-            var std_obj = resolve_std_obj(arena)
+            var std_obj = resolve_std_obj(arena, exe_dir, resolved_std)
             if len(std_obj) > 0 {
                 objects.push_value(std_obj)
             }
@@ -389,7 +487,7 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
             objects: objects.as_slice(),
         }
         var run_args = argv[run_args_start..len(argv)]
-        rc = run_compile(path, source, std_dir, include_dirs.as_slice(), arena, mode, &opts, run_args)
+        rc = run_compile(path, source, resolved_std, include_dirs.as_slice(), arena, mode, &opts, run_args)
     }
 
     return rc
