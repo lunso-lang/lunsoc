@@ -1247,7 +1247,7 @@ fun parse_enum(p: *Parser, public: bool): u32 {
         var val = ast.NODE_NONE
         var has_case_payload = false
         var case_fields = ast.NodeRange { first: 0, count: 0 }
-        if match_tok(p, lexer.TokenKind.LeftParen) {
+        if p.current.kind == lexer.TokenKind.LeftParen {
             has_case_payload = true
             has_any_payload = true
             open_group(p)
