@@ -2,6 +2,28 @@
 
 All notable changes to `lunsoc` are documented in this file.
 
+## [0.5.1] - 2026-11-28
+
+### Breaking Changes
+- **`std.collections`**: Merged `std.vec` and `std.map` into `std.collections` (`Vec[T]`, `StrMap[V]`) and removed `std/vec.lunso` and `std/map.lunso`.
+- **`std/` error unions**:
+  - `std.time`: `now`, `now_realtime`, `now_monotonic`, `sleep_ms` now return `!Instant` / `!void`.
+  - `std.rand`: `fill_bytes(buf: []u8)`, `u64_entropy`, `init` now return `!void` / `!u64`.
+  - `std.args`: `load(arena)` now returns `![][]u8`.
+  - `std.json`: `parse` and `stringify` now return `!JsonValue` / `![]u8`.
+  - `std.path`: `from_file_uri` and `to_file_uri` now return `![]u8`.
+
+### Language & Compiler
+- **Single-symbol imports**: Added `import mod.Symbol` (and `import mod.Symbol as Alias`) as shorthand for `import mod { Symbol }`.
+- **Minimum signed integer literals**: Fixed `-128` (`i8`), `-32768` (`i16`), `-2147483648` (`i32`), and `-9223372036854775808` (`i64`) in expressions.
+- **Range bound inference**: `for i in 0..n` now infers the type of `0` from `n` when `n` is typed (`i64`, `u32`, `u64`, etc.).
+- Refactored `src/` to adopt `null`, `_`, `pop(null)`, and `for ... in` loops.
+
+### Standard Library
+- **`std.parse`**: Added generic `parse[T](s: []const u8): !T` using `match type T` (`bool`, `i8..i64`, `u8..u64`, `f32`, `f64`).
+- **`std.collections`**: Added `Stack[T]` (`init`, `push`, `pop`, `peek`, `len`, `is_empty`, `clear`, `as_slice`).
+- Modernized `std/` (`null`, `match`, `for ... in`, and implicit `!void` returns).
+
 ## [0.5.0] - 2026-11-28
 
 ### Breaking Changes
