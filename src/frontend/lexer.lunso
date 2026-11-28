@@ -169,27 +169,27 @@ fun is_ident_continue(b: u8): bool {
 }
 
 fun keyword_or_ident(text: []u8): TokenKind {
-    if str.equals(text, "fun") { return TokenKind.Fun }
-    if str.equals(text, "ext") { return TokenKind.Ext }
-    if str.equals(text, "struct") { return TokenKind.Struct }
-    if str.equals(text, "enum") { return TokenKind.Enum }
-    if str.equals(text, "trait") { return TokenKind.Trait }
-    if str.equals(text, "as") { return TokenKind.As }
-    if str.equals(text, "const") { return TokenKind.Const }
-    if str.equals(text, "import") { return TokenKind.Import }
-    if str.equals(text, "pub") { return TokenKind.Pub }
-    if str.equals(text, "priv") { return TokenKind.Priv }
-    if str.equals(text, "return") { return TokenKind.Return }
-    if str.equals(text, "if") { return TokenKind.If }
-    if str.equals(text, "else") { return TokenKind.Else }
-    if str.equals(text, "match") { return TokenKind.Match }
-    if str.equals(text, "for") { return TokenKind.For }
-    if str.equals(text, "break") { return TokenKind.Break }
-    if str.equals(text, "continue") { return TokenKind.Continue }
-    if str.equals(text, "defer") { return TokenKind.Defer }
-    if str.equals(text, "var") { return TokenKind.Var }
-    if str.equals(text, "or") { return TokenKind.Or }
-    if str.equals(text, "null") { return TokenKind.Null }
+    if text == "fun" { return TokenKind.Fun }
+    if text == "ext" { return TokenKind.Ext }
+    if text == "struct" { return TokenKind.Struct }
+    if text == "enum" { return TokenKind.Enum }
+    if text == "trait" { return TokenKind.Trait }
+    if text == "as" { return TokenKind.As }
+    if text == "const" { return TokenKind.Const }
+    if text == "import" { return TokenKind.Import }
+    if text == "pub" { return TokenKind.Pub }
+    if text == "priv" { return TokenKind.Priv }
+    if text == "return" { return TokenKind.Return }
+    if text == "if" { return TokenKind.If }
+    if text == "else" { return TokenKind.Else }
+    if text == "match" { return TokenKind.Match }
+    if text == "for" { return TokenKind.For }
+    if text == "break" { return TokenKind.Break }
+    if text == "continue" { return TokenKind.Continue }
+    if text == "defer" { return TokenKind.Defer }
+    if text == "var" { return TokenKind.Var }
+    if text == "or" { return TokenKind.Or }
+    if text == "null" { return TokenKind.Null }
     return TokenKind.Identifier
 }
 

@@ -285,7 +285,7 @@ fun find_struct_method_ir(l: *Lowering, t: SemaType, name: []u8): u32 {
         var fd = fdecls[sf.declaration]
         if fd.owner_struct != sr.declaration { continue }
         var fn_bytes = l.tree.source[(fd.name.offset as i64)..((fd.name.offset + fd.name.length) as i64)]
-        if !str.equals(fn_bytes, name) { continue }
+        if fn_bytes != name { continue }
         if fd.type_parameters.count == 0 { return i as u32 }
         if sf.arguments.len == sr.arguments.len {
             var ok = true
