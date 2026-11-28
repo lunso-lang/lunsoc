@@ -328,37 +328,34 @@ fun parse_string(p: *Parser, out: *[]u8): bool {
         if p.pos >= end { return false }
         var esc = p.src[p.pos]
         p.pos += 1
-        if esc == '"' || esc == '\\' || esc == '/' {
-            if vec.push_value.[u8](&buf, esc) < 0 { return false }
-        } else if esc == 'b' {
-            if vec.push_value.[u8](&buf, 8 as u8) < 0 { return false }
-        } else if esc == 'f' {
-            if vec.push_value.[u8](&buf, 12 as u8) < 0 { return false }
-        } else if esc == 'n' {
-            if vec.push_value.[u8](&buf, '\n') < 0 { return false }
-        } else if esc == 'r' {
-            if vec.push_value.[u8](&buf, '\r') < 0 { return false }
-        } else if esc == 't' {
-            if vec.push_value.[u8](&buf, '\t') < 0 { return false }
-        } else if esc == 'u' {
-            var u1: u32 = 0
-            if !parse_hex4(p, &u1) { return false }
-            var cp = u1
-            if u1 >= 0xd800 && u1 <= 0xdbff {
-                if p.pos + 2 <= end && p.src[p.pos] == '\\' && p.src[p.pos + 1] == 'u' {
-                    p.pos += 2
-                    var u2: u32 = 0
-                    if !parse_hex4(p, &u2) || u2 < 0xdc00 || u2 > 0xdfff {
+        match esc {
+            '"', '\\', '/' => {
+                if vec.push_value.[u8](&buf, esc) < 0 { return false }
+            }
+            'b' => { if vec.push_value.[u8](&buf, 8 as u8) < 0 { return false } }
+            'f' => { if vec.push_value.[u8](&buf, 12 as u8) < 0 { return false } }
+            'n' => { if vec.push_value.[u8](&buf, '\n') < 0 { return false } }
+            'r' => { if vec.push_value.[u8](&buf, '\r') < 0 { return false } }
+            't' => { if vec.push_value.[u8](&buf, '\t') < 0 { return false } }
+            'u' => {
+                var u1: u32 = 0
+                if !parse_hex4(p, &u1) { return false }
+                var cp = u1
+                if u1 >= 0xd800 && u1 <= 0xdbff {
+                    if p.pos + 2 <= end && p.src[p.pos] == '\\' && p.src[p.pos + 1] == 'u' {
+                        p.pos += 2
+                        var u2: u32 = 0
+                        if !parse_hex4(p, &u2) || u2 < 0xdc00 || u2 > 0xdfff {
+                            return false
+                        }
+                        cp = 0x10000 + (((u1 - 0xd800) << 10) | (u2 - 0xdc00))
+                    } else {
                         return false
                     }
-                    cp = 0x10000 + (((u1 - 0xd800) << 10) | (u2 - 0xdc00))
-                } else {
-                    return false
                 }
+                if !push_utf8(&buf, cp) { return false }
             }
-            if !push_utf8(&buf, cp) { return false }
-        } else {
-            return false
+            else => return false
         }
     }
     p.pos = saved
@@ -630,27 +627,23 @@ pub fun parse(arena: *mem.Arena, text: []u8, out: *JsonValue): bool {
 pub fun write_escaped_str(s: []u8, out: *vec.Vec[u8]): i64 {
     if vec.push_value.[u8](out, '"') < 0 { return -12 }
     var hex = "0123456789abcdef"
-    for var i: i64 = 0; i < len(s); i += 1 {
-        var ch = s[i]
-        if ch == '"' {
-            if vec.append_slice.[u8](out, "\\\"") < 0 { return -12 }
-        } else if ch == '\\' {
-            if vec.append_slice.[u8](out, "\\\\") < 0 { return -12 }
-        } else if ch == '\n' {
-            if vec.append_slice.[u8](out, "\\n") < 0 { return -12 }
-        } else if ch == '\r' {
-            if vec.append_slice.[u8](out, "\\r") < 0 { return -12 }
-        } else if ch == '\t' {
-            if vec.append_slice.[u8](out, "\\t") < 0 { return -12 }
-        } else if ch == 8 {
-            if vec.append_slice.[u8](out, "\\b") < 0 { return -12 }
-        } else if ch == 12 {
-            if vec.append_slice.[u8](out, "\\f") < 0 { return -12 }
-        } else if ch < 0x20 {
-            var esc: [6]u8 = ['\\', 'u', '0', '0', hex[((ch >> 4) & 15) as i64], hex[(ch & 15) as i64]]
-            if vec.append_slice.[u8](out, esc[0..6]) < 0 { return -12 }
-        } else {
-            if vec.push_value.[u8](out, ch) < 0 { return -12 }
+    for ch in s {
+        match ch {
+            '"' => { if vec.append_slice.[u8](out, "\\\"") < 0 { return -12 } }
+            '\\' => { if vec.append_slice.[u8](out, "\\\\") < 0 { return -12 } }
+            '\n' => { if vec.append_slice.[u8](out, "\\n") < 0 { return -12 } }
+            '\r' => { if vec.append_slice.[u8](out, "\\r") < 0 { return -12 } }
+            '\t' => { if vec.append_slice.[u8](out, "\\t") < 0 { return -12 } }
+            8 => { if vec.append_slice.[u8](out, "\\b") < 0 { return -12 } }
+            12 => { if vec.append_slice.[u8](out, "\\f") < 0 { return -12 } }
+            else => {
+                if ch < 0x20 {
+                    var esc: [6]u8 = ['\\', 'u', '0', '0', hex[(ch >> 4) & 15], hex[ch & 15]]
+                    if vec.append_slice.[u8](out, esc[0..6]) < 0 { return -12 }
+                } else {
+                    if vec.push_value.[u8](out, ch) < 0 { return -12 }
+                }
+            }
         }
     }
     if vec.push_value.[u8](out, '"') < 0 { return -12 }
@@ -690,9 +683,9 @@ pub fun write(v: JsonValue, out: *vec.Vec[u8]): i64 {
         if vec.push_value.[u8](out, '[') < 0 { return -12 }
         if v.arr_val != null {
             var items = vec.as_slice.[JsonValue](arr_ptr(v))
-            for var i: i64 = 0; i < len(items); i += 1 {
+            for i, item in items {
                 if i > 0 && vec.push_value.[u8](out, ',') < 0 { return -12 }
-                var st = write(items[i], out)
+                var st = write(item, out)
                 if st < 0 { return st }
             }
         }
@@ -703,13 +696,13 @@ pub fun write(v: JsonValue, out: *vec.Vec[u8]): i64 {
         if v.obj_keys != null && v.obj_val != null {
             var op = obj_ptr(v)
             var keys = vec.as_slice.[[]u8](v.obj_keys)
-            for var i: i64 = 0; i < len(keys); i += 1 {
+            for i, key in keys {
                 if i > 0 && vec.push_value.[u8](out, ',') < 0 { return -12 }
-                var st = write_escaped_str(keys[i], out)
+                var st = write_escaped_str(key, out)
                 if st < 0 { return st }
                 if vec.push_value.[u8](out, ':') < 0 { return -12 }
                 var val: JsonValue
-                if map.get.[JsonValue](op, keys[i], &val) {
+                if map.get.[JsonValue](op, key, &val) {
                     st = write(val, out)
                     if st < 0 { return st }
                 } else {

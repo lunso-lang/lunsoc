@@ -252,34 +252,27 @@ pub struct Builder {
 fun write_any(b: *Builder, a: any) {
     var k = a.tag & 255
     var ek = (a.tag >> 8) & 255
-    if k == 2 {
-        b.bool_val(*(a.ptr as *const bool))
-    } else if k == 3 {
-        b.i64_val((*(a.ptr as *const i8)) as i64)
-    } else if k == 4 {
-        b.i64_val((*(a.ptr as *const i16)) as i64)
-    } else if k == 5 {
-        b.i64_val((*(a.ptr as *const i32)) as i64)
-    } else if k == 6 {
-        b.i64_val(*(a.ptr as *const i64))
-    } else if k == 7 {
-        b.u64_val((*(a.ptr as *const u8)) as u64)
-    } else if k == 8 {
-        b.u64_val((*(a.ptr as *const u16)) as u64)
-    } else if k == 9 {
-        b.u64_val((*(a.ptr as *const u32)) as u64)
-    } else if k == 10 {
-        b.u64_val(*(a.ptr as *const u64))
-    } else if k == 11 {
-        b.f64_val((*(a.ptr as *const f32)) as f64, 4)
-    } else if k == 12 {
-        b.f64_val(*(a.ptr as *const f64), 4)
-    } else if k == 15 && ek == 7 {
-        b.str(*(a.ptr as *const []const u8))
-    } else if k == 16 {
-        b.str("0x").hex(*(a.ptr as *const u64))
-    } else {
-        b.str("<value>")
+    match k {
+        2 => b.bool_val(*(a.ptr as *const bool))
+        3 => b.i64_val((*(a.ptr as *const i8)) as i64)
+        4 => b.i64_val((*(a.ptr as *const i16)) as i64)
+        5 => b.i64_val((*(a.ptr as *const i32)) as i64)
+        6 => b.i64_val(*(a.ptr as *const i64))
+        7 => b.u64_val((*(a.ptr as *const u8)) as u64)
+        8 => b.u64_val((*(a.ptr as *const u16)) as u64)
+        9 => b.u64_val((*(a.ptr as *const u32)) as u64)
+        10 => b.u64_val(*(a.ptr as *const u64))
+        11 => b.f64_val((*(a.ptr as *const f32)) as f64, 4)
+        12 => b.f64_val(*(a.ptr as *const f64), 4)
+        15 => {
+            if ek == 7 {
+                b.str(*(a.ptr as *const []const u8))
+            } else {
+                b.str("<value>")
+            }
+        }
+        16 => b.str("0x").hex(*(a.ptr as *const u64))
+        else => b.str("<value>")
     }
 }
 
