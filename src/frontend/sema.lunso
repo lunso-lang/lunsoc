@@ -26,6 +26,7 @@ pub enum TypeKind : u8 {
     Error,
     Func,
     Null,
+    TaggedUnion,
 }
 
 pub struct SemaType {
@@ -91,6 +92,19 @@ pub struct SemaRecord {
     arguments: Vec[SemaType]
 }
 
+pub struct SemaUnionVariant {
+    fields: Vec[SemaNode]
+}
+
+pub struct SemaUnion {
+    declaration: u32
+    size: u32
+    alignment: u32
+    state: u8
+    variants: Vec[SemaUnionVariant]
+    arguments: Vec[SemaType]
+}
+
 pub struct SemaFuncType {
     params: Vec[SemaType]
     result: SemaType
@@ -100,6 +114,7 @@ pub struct Sema {
     nodes: Vec[SemaNode]
     functions: Vec[SemaFunction]
     records: Vec[SemaRecord]
+    unions: Vec[SemaUnion]
     constants: Vec[SemaConstant]
     pointees: Vec[SemaType]
     elements: Vec[SemaType]
@@ -252,7 +267,7 @@ pub fun element_size(t: SemaType): u32 {
     if t.kind == TypeKind.Array || t.kind == TypeKind.Slice {
         return t.element_size
     }
-    if t.kind == TypeKind.Struct || t.kind == TypeKind.Result {
+    if t.kind == TypeKind.Struct || t.kind == TypeKind.Result || t.kind == TypeKind.TaggedUnion {
         return t.record_size
     }
     return scalar_size(t.kind)
@@ -262,7 +277,7 @@ pub fun storage_size(t: SemaType): u32 {
     if t.kind == TypeKind.Array {
         return t.length * t.element_size
     }
-    if t.kind == TypeKind.Struct || t.kind == TypeKind.Result {
+    if t.kind == TypeKind.Struct || t.kind == TypeKind.Result || t.kind == TypeKind.TaggedUnion {
         return t.record_size
     }
     if t.kind == TypeKind.Slice || t.kind == TypeKind.Any {
@@ -279,6 +294,10 @@ fun type_alignment(c: *Checker, t: SemaType): u32 {
     if t.kind == TypeKind.Struct {
         var recs = c.sema.records.data
         return recs[t.record].alignment
+    }
+    if t.kind == TypeKind.TaggedUnion {
+        var uns = c.sema.unions.data
+        return uns[t.record].alignment
     }
     if t.kind == TypeKind.Slice || t.kind == TypeKind.Any {
         return 8
@@ -705,25 +724,88 @@ fun specialize_record_with_args(c: *Checker, id: u32, decl: u32, args: Vec[SemaT
     return t
 }
 
+fun resolve_enum_backing(c: *Checker, edecl: AstEnum): SemaType {
+    if edecl.backing == NODE_NONE {
+        return simple_type(TypeKind.I32)
+    }
+    return resolve_type_inner(c, edecl.backing, false)
+}
+
+fun specialize_union_with_args(c: *Checker, id: u32, decl: u32, args: Vec[SemaType], allow_incomplete: bool): SemaType {
+    var arg_slice = args.as_slice()
+    var uns = c.sema.unions.data
+    for var i = c.tree.enums.len as i64; i < (c.sema.unions.len as i64); i += 1 {
+        if uns[i].declaration == decl && same_type_args(c, (uns[i].arguments).as_slice(), arg_slice) {
+            if !allow_incomplete {
+                resolve_union_layout(c, i as u32)
+            }
+            var t = simple_type(TypeKind.TaggedUnion)
+            t.record = i as u32
+            t.record_size = c.sema.unions.data[i].size
+            return t
+        }
+    }
+    if c.instantiation_depth >= 64 {
+        return fail(c, id, "generic instantiation nesting limit exceeded")
+    }
+    var u_idx = c.sema.unions.len as u32
+    var su = SemaUnion {
+        declaration: decl,
+        size: 0,
+        alignment: 4,
+        state: 0,
+        variants: Vec[SemaUnionVariant] { arena: c.arena },
+        arguments: args,
+    }
+    su.variants.init(c.arena, 8)
+    c.sema.unions.push(&su)
+    if !allow_incomplete {
+        resolve_union_layout(c, u_idx)
+    }
+    var t = simple_type(TypeKind.TaggedUnion)
+    t.record = u_idx
+    t.record_size = c.sema.unions.data[u_idx].size
+    return t
+}
+
 fun specialize_record(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
     var nodes = c.tree.nodes.as_slice()
     var children = c.tree.children.as_slice()
     var node = nodes[id]
     var base = children[node.a]
     var decl: u32 = ~0 as u32
+    var enum_decl: u32 = ~0 as u32
     var q: AstQualified
-    if find_qualified(c.tree, id, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
-        decl = q.index
-    } else if find_qualified(c.tree, base, &q) && q.kind == AstBindingKind.Struct && !q.inaccessible {
-        decl = q.index
+    if find_qualified(c.tree, id, &q) && !q.inaccessible {
+        if q.kind == AstBindingKind.Struct { decl = q.index }
+        else if q.kind == AstBindingKind.Enum { enum_decl = q.index }
+    } else if find_qualified(c.tree, base, &q) && !q.inaccessible {
+        if q.kind == AstBindingKind.Struct { decl = q.index }
+        else if q.kind == AstBindingKind.Enum { enum_decl = q.index }
     } else {
         var bnode = nodes[base]
         if bnode.kind == AstKind.Identifier || bnode.kind == AstKind.TypeName {
-            decl = find_struct_idx(c, node_span(c.tree, base, bnode.a))
+            var bname = node_span(c.tree, base, bnode.a)
+            decl = find_struct_idx(c, bname)
+            if decl == (~0 as u32) {
+                enum_decl = find_enum_idx(c, bname)
+            }
         }
     }
+    if enum_decl != (~0 as u32) {
+        var edecls = c.tree.enums.as_slice()
+        var count = edecls[enum_decl].type_parameters.count
+        if count == 0 {
+            return fail(c, id, "enum does not take type arguments")
+        }
+        var args: Vec[SemaType]
+        if !resolve_type_args(c, id, count, &args) {
+            return empty_type()
+        }
+        return specialize_union_with_args(c, id, enum_decl, args, allow_incomplete)
+    }
     if decl == (~0 as u32) {
-        return fail(c, id, "expected a generic struct")
+        return fail(c, id, "expected a generic struct or enum")
     }
     var sdecls = c.tree.structs.as_slice()
     var count = sdecls[decl].type_parameters.count
@@ -762,6 +844,12 @@ fun complete_type(c: *Checker, t: SemaType): SemaType {
         resolve_struct_layout(c, t.record)
         var res = t
         res.record_size = c.sema.records.data[t.record].size
+        return res
+    }
+    if t.kind == TypeKind.TaggedUnion {
+        resolve_union_layout(c, t.record)
+        var res = t
+        res.record_size = c.sema.unions.data[t.record].size
         return res
     }
     return t
@@ -805,7 +893,20 @@ fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
         var ei = find_enum_idx(c, name)
         if ei != (~0 as u32) {
             var enums = c.tree.enums.as_slice()
-            var backing = resolve_type_inner(c, enums[ei].backing, false)
+            var edecl = enums[ei]
+            if edecl.type_parameters.count > 0 {
+                return fail(c, id, "generic enum requires type arguments")
+            }
+            if edecl.has_payload {
+                if !allow_incomplete {
+                    resolve_union_layout(c, ei)
+                }
+                var t = simple_type(TypeKind.TaggedUnion)
+                t.record = ei
+                t.record_size = c.sema.unions.data[ei].size
+                return t
+            }
+            var backing = resolve_enum_backing(c, edecl)
             backing.record = ei + 1
             return backing
         }
@@ -818,7 +919,20 @@ fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
         }
         if q.kind == AstBindingKind.Enum {
             var enums = c.tree.enums.as_slice()
-            var backing = resolve_type_inner(c, enums[q.index].backing, false)
+            var edecl = enums[q.index]
+            if edecl.type_parameters.count > 0 {
+                return fail(c, id, "generic enum requires type arguments")
+            }
+            if edecl.has_payload {
+                if !allow_incomplete {
+                    resolve_union_layout(c, q.index)
+                }
+                var t = simple_type(TypeKind.TaggedUnion)
+                t.record = q.index
+                t.record_size = c.sema.unions.data[q.index].size
+                return t
+            }
+            var backing = resolve_enum_backing(c, edecl)
             backing.record = q.index + 1
             return backing
         }
@@ -1046,6 +1160,166 @@ fun resolve_struct_layout(c: *Checker, rec_idx: u32) {
     recs[rec_idx].state = 2
 }
 
+fun resolve_union_layout(c: *Checker, u_idx: u32) {
+    var uns = c.sema.unions.data
+    if uns[u_idx].state == 2 {
+        return
+    }
+    if uns[u_idx].state == 1 {
+        fail_at(c, 0, "recursive enum definition")
+        return
+    }
+    uns[u_idx].state = 1
+    var decl_idx = uns[u_idx].declaration
+    var decl = c.tree.enums.data[decl_idx]
+
+    var saved = enter_type_scope(c, decl.module, decl.type_parameters,
+                                 (uns[u_idx].arguments).as_slice(),
+                                 c.instantiation_depth + 1)
+    var max_size: u32 = 4
+    var max_align: u32 = 4
+    var children = c.tree.children.as_slice()
+    var nodes = c.tree.nodes.as_slice()
+    var cases = c.tree.enum_cases.as_slice()
+    for var m: u32 = 0; m < decl.cases.count && !c.has_error; m += 1 {
+        var cid = children[decl.cases.first + m]
+        var cn = nodes[cid]
+        var ec = cases[cn.b]
+        var uv = SemaUnionVariant { fields: Vec[SemaNode] { arena: c.arena } }
+        uv.fields.init(c.arena, (ec.fields.count + 1) as u64)
+        var offset: u32 = 4
+        for var fi: u32 = 0; fi < ec.fields.count && !c.has_error; fi += 1 {
+            var ft_node = children[ec.fields.first + fi]
+            var ft = resolve_type(c, ft_node)
+            if c.has_error {
+                leave_type_scope(c, saved)
+                return
+            }
+            var align = type_alignment(c, ft)
+            var sz = storage_size(ft)
+            var rem = offset % align
+            if rem != 0 {
+                offset += align - rem
+            }
+            var sn = SemaNode {
+                type_info: ft,
+                binding: offset,
+                builtin: SemaBuiltin.None,
+                promotion: TypeKind.Invalid,
+                method_call: 0,
+                result_wrap: 0,
+                box_any: false,
+                is_fn_ref: false,
+                is_indirect_call: false,
+                is_boolean_literal: false,
+                borrow_array: false,
+                falls_through: false,
+                is_enum_case: false,
+                is_const: false,
+            }
+            uv.fields.push(&sn)
+            offset += sz
+            if align > max_align {
+                max_align = align
+            }
+        }
+        if offset > max_size {
+            max_size = offset
+        }
+        uns = c.sema.unions.data
+        (uns[u_idx].variants).push(&uv)
+    }
+    leave_type_scope(c, saved)
+    var tail = max_size % max_align
+    if tail != 0 {
+        max_size += max_align - tail
+    }
+    var uns2 = c.sema.unions.data
+    uns2[u_idx].size = max_size
+    uns2[u_idx].alignment = max_align
+    uns2[u_idx].state = 2
+}
+
+fun find_enum_for_member(c: *Checker, member_id: u32): u32 {
+    var nodes = c.tree.nodes.as_slice()
+    var children = c.tree.children.as_slice()
+    var mnode = nodes[member_id]
+    if mnode.kind != AstKind.Member {
+        return ~0 as u32
+    }
+    var q: AstQualified
+    if find_qualified(c.tree, member_id, &q) && q.kind == AstBindingKind.Enum && !q.inaccessible {
+        return q.index
+    }
+    var base_id = mnode.a
+    var base_node = nodes[base_id]
+    if base_node.kind == AstKind.Identifier {
+        var ename = node_span(c.tree, base_id, base_node.a)
+        if find_local(c, ename, 0) < 0 {
+            return find_enum_idx(c, ename)
+        }
+    } else if base_node.kind == AstKind.GenericType {
+        if find_qualified(c.tree, base_id, &q) && q.kind == AstBindingKind.Enum && !q.inaccessible {
+            return q.index
+        }
+        var gbase = children[base_node.a]
+        if find_qualified(c.tree, gbase, &q) && q.kind == AstBindingKind.Enum && !q.inaccessible {
+            return q.index
+        }
+        var gbnode = nodes[gbase]
+        if gbnode.kind == AstKind.Identifier || gbnode.kind == AstKind.TypeName {
+            return find_enum_idx(c, node_span(c.tree, gbase, gbnode.a))
+        }
+    }
+    return ~0 as u32
+}
+
+fun resolve_enum_member_type(c: *Checker, id: u32, ei: u32, base_id: u32, mname: Span, expected: SemaType, allow_payload: bool): SemaType {
+    var nodes = c.tree.nodes.as_slice()
+    var enums = c.tree.enums.as_slice()
+    var edecl = enums[ei]
+    var children = c.tree.children.as_slice()
+    var cases = c.tree.enum_cases.as_slice()
+    for var i: u32 = 0; i < edecl.cases.count; i += 1 {
+        var cid = children[edecl.cases.first + i]
+        var cn = nodes[cid]
+        if same_span(c.tree, mname, node_span(c.tree, cid, cn.a)) {
+            if !edecl.has_payload {
+                var sn = node_info(c, id)
+                sn.is_enum_case = true
+                sn.binding = c.sema.nodes.data[cid].binding
+                var res = resolve_enum_backing(c, edecl)
+                res.record = ei + 1
+                return res
+            }
+            var ec = cases[cn.b]
+            if !allow_payload && ec.has_payload {
+                return fail(c, id, "enum variant requires payload arguments")
+            }
+            var ut: SemaType
+            if edecl.type_parameters.count == 0 {
+                resolve_union_layout(c, ei)
+                ut = simple_type(TypeKind.TaggedUnion)
+                ut.record = ei
+                ut.record_size = c.sema.unions.data[ei].size
+            } else if nodes[base_id].kind == AstKind.GenericType {
+                ut = specialize_record(c, base_id, false)
+            } else if expected.kind == TypeKind.TaggedUnion && c.sema.unions.data[expected.record].declaration == ei {
+                ut = expected
+            } else {
+                return fail(c, base_id, "generic enum requires type arguments")
+            }
+            if c.has_error { return empty_type() }
+            var sn = node_info(c, id)
+            sn.is_enum_case = true
+            sn.binding = i
+            sn.type_info = ut
+            return ut
+        }
+    }
+    return fail(c, id, "unknown enum member")
+}
+
 fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, out_str: *u32): SemaType {
     var nodes = c.tree.nodes.as_slice()
     var node = nodes[id]
@@ -1220,8 +1494,11 @@ fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, ou
                     var cid = children[edecl.cases.first + i]
                     var cn = nodes[cid]
                     if same_span(c.tree, mname, node_span(c.tree, cid, cn.a)) {
+                        if edecl.has_payload {
+                            return fail(c, id, "tagged union is not a constant expression")
+                        }
                         *out_bits = evals[sn[cid].binding]
-                        var et = resolve_type(c, edecl.backing)
+                        var et = resolve_enum_backing(c, edecl)
                         et.record = ei + 1
                         return et
                     }
@@ -1243,8 +1520,11 @@ fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, ou
                     var cid = children[edecl.cases.first + i]
                     var cn = nodes[cid]
                     if same_span(c.tree, mname, node_span(c.tree, cid, cn.a)) {
+                        if edecl.has_payload {
+                            return fail(c, id, "tagged union is not a constant expression")
+                        }
                         *out_bits = evals[sn[cid].binding]
-                        var et = resolve_type(c, edecl.backing)
+                        var et = resolve_enum_backing(c, edecl)
                         et.record = ei + 1
                         return et
                     }
@@ -1601,6 +1881,28 @@ fun unify_param_ast(c: *Checker, param_ast: u32, actual: SemaType, fdecl: AstFun
         } else if pnode.b != NODE_NONE && actual.kind == TypeKind.Array {
             var elems = c.sema.elements.as_slice()
             unify_param_ast(c, pnode.a, elems[actual.element_type], fdecl, inferred)
+        }
+        return
+    }
+    if pnode.kind == AstKind.GenericType && actual.kind == TypeKind.TaggedUnion {
+        var base = children[pnode.a]
+        var decl: u32 = ~0 as u32
+        var q: AstQualified
+        if find_qualified(c.tree, param_ast, &q) && q.kind == AstBindingKind.Enum && !q.inaccessible {
+            decl = q.index
+        } else if find_qualified(c.tree, base, &q) && q.kind == AstBindingKind.Enum && !q.inaccessible {
+            decl = q.index
+        } else {
+            var bnode = nodes[base]
+            if bnode.kind == AstKind.Identifier || bnode.kind == AstKind.TypeName {
+                decl = find_enum_idx(c, node_span(c.tree, base, bnode.a))
+            }
+        }
+        var su = &c.sema.unions.data[actual.record]
+        if decl != (~0 as u32) && su.declaration == decl && (pnode.b - 1) == (su.arguments.len as u32) {
+            for var i: u32 = 0; i < (su.arguments.len as u32); i += 1 {
+                unify_param_ast(c, children[pnode.a + 1 + i], su.arguments.data[i], fdecl, inferred)
+            }
         }
         return
     }
@@ -1987,7 +2289,38 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         var cnode = nodes[callee]
         var q: AstQualified
         var has_q = find_qualified(c.tree, id, &q) && q.kind == AstBindingKind.Function
-        if !has_q && cnode.kind == AstKind.Member {
+        var enum_ei = ~0 as u32
+        if !has_q && app == NODE_NONE && cnode.kind == AstKind.Member {
+            enum_ei = find_enum_for_member(c, callee)
+        }
+        if enum_ei != (~0 as u32) {
+            var mname = node_span(c.tree, callee, cnode.b)
+            var ut = resolve_enum_member_type(c, callee, enum_ei, cnode.a, mname, expected, true)
+            if !c.has_error {
+                if ut.kind != TypeKind.TaggedUnion {
+                    res = fail(c, id, "plain enum case cannot take arguments")
+                } else {
+                    var v_idx = node_info(c, callee).binding
+                    var uv = &c.sema.unions.data[ut.record].variants.data[v_idx]
+                    if uv.fields.len == 0 {
+                        res = fail(c, id, "unit enum variant does not take arguments")
+                    } else if (node.b - 1) != (uv.fields.len as u32) {
+                        res = fail(c, id, "wrong number of enum variant arguments")
+                    } else {
+                        for var i: u32 = 0; i < node.b - 1 && !c.has_error; i += 1 {
+                            check_value(c, children[node.a + 1 + i], uv.fields.data[i].type_info)
+                        }
+                        if !c.has_error {
+                            var sn = node_info(c, id)
+                            sn.is_enum_case = true
+                            sn.binding = v_idx
+                            sn.type_info = ut
+                            res = ut
+                        }
+                    }
+                }
+            }
+        } else if !has_q && cnode.kind == AstKind.Member {
             var recv_id = cnode.a
             var recv_t = check_expr(c, recv_id, empty_type())
             if !c.has_error {
@@ -2289,56 +2622,14 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                 handled = true
             } else if q.kind == AstBindingKind.Enum && !q.inaccessible {
                 handled = true
-                var ei = q.index
-                var enums = c.tree.enums.as_slice()
-                var edecl = enums[ei]
-                var children = c.tree.children.as_slice()
-                var found = false
-                for var i: u32 = 0; i < edecl.cases.count; i += 1 {
-                    var cid = children[edecl.cases.first + i]
-                    var cn = nodes[cid]
-                    if same_span(c.tree, mname, node_span(c.tree, cid, cn.a)) {
-                        var sn = node_info(c, id)
-                        sn.is_enum_case = true
-                        sn.binding = c.sema.nodes.data[cid].binding
-                        res = resolve_type(c, edecl.backing)
-                        res.record = ei + 1
-                        found = true
-                        break
-                    }
-                }
-                if !found {
-                    res = fail(c, id, "unknown enum member")
-                }
+                res = resolve_enum_member_type(c, id, q.index, node.a, mname, expected, false)
             }
         }
-        if !handled && base_node.kind == AstKind.Identifier {
-            var ename = node_span(c.tree, node.a, base_node.a)
-            if find_local(c, ename, 0) < 0 {
-                var ei = find_enum_idx(c, ename)
-                if ei != (~0 as u32) {
-                    handled = true
-                    var enums = c.tree.enums.as_slice()
-                    var edecl = enums[ei]
-                    var children = c.tree.children.as_slice()
-                    var found = false
-                    for var i: u32 = 0; i < edecl.cases.count; i += 1 {
-                        var cid = children[edecl.cases.first + i]
-                        var cn = nodes[cid]
-                        if same_span(c.tree, mname, node_span(c.tree, cid, cn.a)) {
-                            var sn = node_info(c, id)
-                            sn.is_enum_case = true
-                            sn.binding = c.sema.nodes.data[cid].binding
-                            res = resolve_type(c, edecl.backing)
-                            res.record = ei + 1
-                            found = true
-                            break
-                        }
-                    }
-                    if !found {
-                        res = fail(c, id, "unknown enum member")
-                    }
-                }
+        if !handled {
+            var ei = find_enum_for_member(c, id)
+            if ei != (~0 as u32) {
+                handled = true
+                res = resolve_enum_member_type(c, id, ei, node.a, mname, expected, false)
             }
         }
         if !handled {
@@ -2819,11 +3110,122 @@ fun check_statement(c: *Checker, id: u32): bool {
         for var i: u32 = 1; i < node.b && !c.has_error; i += 1 {
             var arm_id = children[node.a + i]
             var arm = nodes[arm_id]
+            var saved_locals = c.locals.len
+            var entered_scope = false
             if arm.b == 1 {
                 if i + 1 < node.b {
                     fail(c, arm_id, "else arm must be the last arm in match")
                 }
                 has_else = true
+            } else if st.kind == TypeKind.TaggedUnion {
+                var su = &c.sema.unions.data[st.record]
+                var edecl = c.tree.enums.data[su.declaration]
+                c.scope_depth += 1
+                entered_scope = true
+                for var p: u32 = 0; p < arm.b - 1 && !c.has_error; p += 1 {
+                    var pat_id = children[arm.a + p]
+                    var pat_node = nodes[pat_id]
+                    var mem_id = pat_id
+                    var is_call_pat = false
+                    if pat_node.kind == AstKind.Call {
+                        is_call_pat = true
+                        mem_id = children[pat_node.a]
+                    }
+                    var mem_node = nodes[mem_id]
+                    if mem_node.kind != AstKind.Member {
+                        fail(c, pat_id, "expected enum variant pattern")
+                        break
+                    }
+                    var ei = find_enum_for_member(c, mem_id)
+                    if ei != su.declaration {
+                        fail(c, pat_id, "match pattern enum mismatch")
+                        break
+                    }
+                    var mname = node_span(c.tree, mem_id, mem_node.b)
+                    var v_idx = ~0 as u32
+                    for var ci: u32 = 0; ci < edecl.cases.count; ci += 1 {
+                        var cid = children[edecl.cases.first + ci]
+                        var cn = nodes[cid]
+                        if same_span(c.tree, mname, node_span(c.tree, cid, cn.a)) {
+                            v_idx = ci
+                            break
+                        }
+                    }
+                    if v_idx == (~0 as u32) {
+                        fail(c, pat_id, "unknown enum variant")
+                        break
+                    }
+                    var uv = &su.variants.data[v_idx]
+                    if !is_call_pat {
+                        if uv.fields.len > 0 {
+                            fail(c, pat_id, "enum variant pattern requires payload bindings")
+                            break
+                        }
+                    } else {
+                        if uv.fields.len == 0 {
+                            fail(c, pat_id, "unit enum variant does not take pattern arguments")
+                            break
+                        }
+                        if (pat_node.b - 1) != (uv.fields.len as u32) {
+                            fail(c, pat_id, "wrong number of pattern bindings")
+                            break
+                        }
+                        if arm.b > 2 {
+                            fail(c, pat_id, "cannot bind variables in multi-pattern match arm")
+                            break
+                        }
+                        for var bi: u32 = 0; bi < pat_node.b - 1 && !c.has_error; bi += 1 {
+                            var arg_id = children[pat_node.a + 1 + bi]
+                            var arg_node = nodes[arg_id]
+                            if arg_node.kind != AstKind.Identifier {
+                                fail(c, arg_id, "expected identifier or '_' in pattern")
+                                break
+                            }
+                            var bname = node_span(c.tree, arg_id, arg_node.a)
+                            var bbytes = span_bytes(c.tree, bname)
+                            if str.equals(bbytes, "_") {
+                                node_info(c, arg_id).binding = ~0 as u32
+                            } else {
+                                if find_local(c, bname, c.scope_depth) >= 0 {
+                                    fail(c, arg_id, "duplicate binding name in match arm")
+                                    break
+                                }
+                                var slot = c.slot_count
+                                c.slot_count += 1
+                                var ft = uv.fields.data[bi].type_info
+                                var bsn = node_info(c, arg_id)
+                                bsn.binding = slot
+                                bsn.type_info = ft
+                                var lv = LocalVar {
+                                    name: bname,
+                                    slot: slot,
+                                    type_info: ft,
+                                    is_const: false,
+                                    const_idx: 0,
+                                    depth: c.scope_depth,
+                                }
+                                c.locals.push(&lv)
+                            }
+                        }
+                    }
+                    if !c.has_error {
+                        var mvals = c.sema.match_values.as_slice()
+                        for var prev = match_start as i64; prev < len(mvals); prev += 1 {
+                            if mvals[prev] == (v_idx as u64) {
+                                fail(c, pat_id, "duplicate match pattern")
+                                break
+                            }
+                        }
+                        if !c.has_error {
+                            var mv_idx = c.sema.match_values.len as u32
+                            c.sema.match_values.push_value(v_idx as u64)
+                            var psn = node_info(c, pat_id)
+                            psn.binding = mv_idx
+                            psn.type_info = st
+                        }
+                    }
+                    pattern_count += 1
+                }
             } else {
                 for var p: u32 = 0; p < arm.b - 1 && !c.has_error; p += 1 {
                     var pat_id = children[arm.a + p]
@@ -2857,9 +3259,20 @@ fun check_statement(c: *Checker, id: u32): bool {
             if !c.has_error && check_statement(c, body) {
                 arm_falls = true
             }
+            if entered_scope {
+                c.scope_depth -= 1
+                c.locals.len = saved_locals
+            }
         }
         if !c.has_error && !has_else {
-            if is_enum(st) {
+            if st.kind == TypeKind.TaggedUnion {
+                var su = &c.sema.unions.data[st.record]
+                if pattern_count >= (su.variants.len as u32) {
+                    has_else = true
+                } else {
+                    fail(c, id, "match does not cover all enum cases")
+                }
+            } else if is_enum(st) {
                 var enums = c.tree.enums.as_slice()
                 if pattern_count >= enums[st.record - 1].cases.count {
                     has_else = true
@@ -3035,6 +3448,7 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
     if out.nodes.init(arena, tree.nodes.len + 1) < 0 { return false }
     if out.functions.init(arena, tree.functions.len + 1) < 0 { return false }
     if out.records.init(arena, tree.structs.len + 1) < 0 { return false }
+    if out.unions.init(arena, tree.enums.len + 1) < 0 { return false }
     if out.constants.init(arena, tree.consts.len + 1) < 0 { return false }
     if out.pointees.init(arena, 32) < 0 { return false }
     if out.elements.init(arena, 32) < 0 { return false }
@@ -3092,6 +3506,18 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
         sr.fields.init(arena, 8)
         out.records.push(&sr)
     }
+    for var i: u64 = 0; i < tree.enums.len; i += 1 {
+        var su = SemaUnion {
+            declaration: i as u32,
+            size: 0,
+            alignment: 4,
+            state: 0,
+            variants: Vec[SemaUnionVariant] { arena: arena },
+            arguments: Vec[SemaType] { arena: arena },
+        }
+        su.variants.init(arena, 8)
+        out.unions.push(&su)
+    }
     for var i: u64 = 0; i < tree.consts.len; i += 1 {
         var sc = SemaConstant { type_info: empty_type(), bits: 0, str_node: NODE_NONE, state: 0 }
         out.constants.push(&sc)
@@ -3099,12 +3525,23 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
 
     // Resolve enums
     var enums = tree.enums.as_slice()
+    var enum_cases = tree.enum_cases.as_slice()
     var children = tree.children.as_slice()
     var nodes = tree.nodes.as_slice()
     for var i: i64 = 0; i < len(enums) && !c.has_error; i += 1 {
         var edecl = enums[i]
         c.module = edecl.module
-        var bt = resolve_type(&c, edecl.backing)
+        if edecl.has_payload {
+            if edecl.type_parameters.count == 0 {
+                resolve_union_layout(&c, i as u32)
+            }
+            continue
+        }
+        if edecl.type_parameters.count > 0 {
+            fail_at(&c, edecl.name.offset, "plain enum without payload cannot have type parameters")
+            break
+        }
+        var bt = resolve_enum_backing(&c, edecl)
         if !c.has_error && !is_integer(bt.kind) {
             fail(&c, edecl.backing, "enum backing type must be an integer")
             break
@@ -3113,10 +3550,11 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
         for var m: u32 = 0; m < edecl.cases.count && !c.has_error; m += 1 {
             var cid = children[edecl.cases.first + m]
             var cn = nodes[cid]
+            var ec = enum_cases[cn.b]
             var val = next_val
-            if cn.b != NODE_NONE {
+            if ec.value != NODE_NONE {
                 var dummy_str: u32 = 0
-                eval_const_expr(&c, cn.b, bt, &val, &dummy_str)
+                eval_const_expr(&c, ec.value, bt, &val, &dummy_str)
             }
             var ev_idx = out.enum_values.len as u32
             out.enum_values.push_value(val)

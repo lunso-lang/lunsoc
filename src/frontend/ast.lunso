@@ -128,12 +128,20 @@ pub struct AstStruct {
     public: bool
 }
 
+pub struct AstEnumCase {
+    fields: NodeRange
+    value: u32
+    has_payload: bool
+}
+
 pub struct AstEnum {
     name: Span
     cases: NodeRange
+    type_parameters: NodeRange
     backing: u32
     module: u32
     public: bool
+    has_payload: bool
 }
 
 pub struct AstConst {
@@ -229,6 +237,7 @@ pub struct Ast {
     functions: Vec[AstFunction]
     structs: Vec[AstStruct]
     enums: Vec[AstEnum]
+    enum_cases: Vec[AstEnumCase]
     consts: Vec[AstConst]
     imports: Vec[AstImport]
     if_branches: Vec[AstIfBranches]
@@ -250,6 +259,7 @@ pub fun init(arena: *mem.Arena, source: []u8, out: *Ast): bool {
     if out.functions.init(arena, 32) < 0 { return false }
     if out.structs.init(arena, 16) < 0 { return false }
     if out.enums.init(arena, 16) < 0 { return false }
+    if out.enum_cases.init(arena, 32) < 0 { return false }
     if out.consts.init(arena, 16) < 0 { return false }
     if out.imports.init(arena, 16) < 0 { return false }
     if out.if_branches.init(arena, 32) < 0 { return false }

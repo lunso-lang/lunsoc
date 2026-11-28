@@ -172,7 +172,7 @@ fun emit_store(l: *Lowering, t: SemaType, slot: u32, val: u32) {
 }
 
 fun uses_storage(t: SemaType): bool {
-    return t.kind == TypeKind.Array || t.kind == TypeKind.Struct || t.kind == TypeKind.Result
+    return t.kind == TypeKind.Array || t.kind == TypeKind.Struct || t.kind == TypeKind.Result || t.kind == TypeKind.TaggedUnion
 }
 
 fun make_result_type(l: *Lowering, inner: SemaType): SemaType {
@@ -283,6 +283,27 @@ fun lower_call(l: *Lowering, id: u32): u32 {
             op = IrOp.Len
         }
         return emit_value(l, op, lower_node(l, arg).type_info, val, 0, 0)
+    }
+    if info.is_enum_case && info.type_info.kind == TypeKind.TaggedUnion {
+        var count = call.b - 1
+        var temp_vals: [64]u32
+        for var i: u32 = 0; i < count && !l.failed; i += 1 {
+            var val = lower_expression(l, children[call.a + 1 + i])
+            if i < 64 {
+                temp_vals[i] = val
+            }
+        }
+        var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
+        emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: 0, c: 0 })
+        var tag = emit_value(l, IrOp.Immediate, simple_type(TypeKind.U32), info.binding, 0, 0)
+        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: simple_type(TypeKind.U32), result: 0, a: addr, b: tag, c: 0 })
+        var uv = &l.sem.unions.data[info.type_info.record].variants.data[info.binding]
+        for var i: u32 = 0; i < count && !l.failed; i += 1 {
+            var fsn = uv.fields.data[i]
+            var faddr = emit_value(l, IrOp.FieldAddress, simple_type(TypeKind.Pointer), addr, fsn.binding, 0)
+            emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: fsn.type_info, result: 0, a: faddr, b: temp_vals[i], c: 0 })
+        }
+        return addr
     }
     var count = call.b - 1
     // Lower arguments first so nested calls do not interleave in mod.arguments.
@@ -478,6 +499,13 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
             return emit_value(l, IrOp.FnAddr, info.type_info, info.binding, 0, 0)
         }
         if info.is_enum_case {
+            if info.type_info.kind == TypeKind.TaggedUnion {
+                var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
+                emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: 0, c: 0 })
+                var tag = emit_value(l, IrOp.Immediate, simple_type(TypeKind.U32), info.binding, 0, 0)
+                emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: simple_type(TypeKind.U32), result: 0, a: addr, b: tag, c: 0 })
+                return addr
+            }
             var evals = l.sem.enum_values.as_slice()
             var bits = evals[info.binding]
             return emit_value(l, IrOp.Immediate, info.type_info, bits as u32, (bits >> 32) as u32, 0)
@@ -758,6 +786,12 @@ fun lower_match(l: *Lowering, id: u32) {
     var scrut_id = children[node.a]
     var scrut = lower_expression(l, scrut_id)
     var st = lower_node(l, scrut_id).type_info
+    var cmp_t = st
+    var cmp_val = scrut
+    if st.kind == TypeKind.TaggedUnion {
+        cmp_t = simple_type(TypeKind.U32)
+        cmp_val = emit_value(l, IrOp.MemoryLoad, cmp_t, scrut, 0, 0)
+    }
     var end_lbl = new_label(l)
     var arm_count = node.b - 1
     var mvals = l.sem.match_values.as_slice()
@@ -784,9 +818,9 @@ fun lower_match(l: *Lowering, id: u32) {
                 var pat = children[arm.a + p]
                 var bits = mvals[lower_node(l, pat).binding]
                 var op = IrOp.Immediate
-                if st.kind == TypeKind.Bool { op = IrOp.Bool }
-                var pval = emit_value(l, op, st, bits as u32, (bits >> 32) as u32, 0)
-                var cmp = emit_value(l, IrOp.Equal, st, scrut, pval, 0)
+                if cmp_t.kind == TypeKind.Bool { op = IrOp.Bool }
+                var pval = emit_value(l, op, cmp_t, bits as u32, (bits >> 32) as u32, 0)
+                var cmp = emit_value(l, IrOp.Equal, cmp_t, cmp_val, pval, 0)
                 var last_pat = p + 1 == arm.b - 1
                 var next_pat = next_arm
                 if !last_pat { next_pat = new_label(l) }
@@ -797,6 +831,30 @@ fun lower_match(l: *Lowering, id: u32) {
             }
         }
         emit_label(l, arm_body)
+        if st.kind == TypeKind.TaggedUnion && arm.b == 2 {
+            var pat = children[arm.a]
+            var pat_node = nodes[pat]
+            if pat_node.kind == AstKind.Call {
+                var v_idx = mvals[lower_node(l, pat).binding] as u32
+                var uv = &l.sem.unions.data[st.record].variants.data[v_idx]
+                for var bi: u32 = 0; bi < pat_node.b - 1 && !l.failed; bi += 1 {
+                    var arg_id = children[pat_node.a + 1 + bi]
+                    var binfo = lower_node(l, arg_id)
+                    if binfo.binding != (~0 as u32) {
+                        var fsn = uv.fields.data[bi]
+                        var faddr = emit_value(l, IrOp.FieldAddress, simple_type(TypeKind.Pointer), scrut, fsn.binding, 0)
+                        if uses_storage(fsn.type_info) {
+                            var local_addr = emit_value(l, IrOp.StorageAlloc, fsn.type_info, 0, 0, 0)
+                            emit(l, IrInstruction { op: IrOp.StorageInit, type_info: fsn.type_info, result: 0, a: local_addr, b: faddr, c: 0 })
+                            emit_store(l, fsn.type_info, binfo.binding, local_addr)
+                        } else {
+                            var fval = emit_value(l, IrOp.MemoryLoad, fsn.type_info, faddr, 0, 0)
+                            emit_store(l, fsn.type_info, binfo.binding, fval)
+                        }
+                    }
+                }
+            }
+        }
         lower_statement(l, body)
         if lower_node(l, body).falls_through {
             emit_jump(l, end_lbl)

@@ -1115,11 +1115,15 @@ fun parse_struct(p: *Parser, public: bool): u32 {
 fun parse_enum(p: *Parser, public: bool): u32 {
     var kw = expect_tok(p, lexer.TokenKind.Enum, "expected 'enum'")
     var name = expect_tok(p, lexer.TokenKind.Identifier, "expected an enum name")
-    expect_tok(p, lexer.TokenKind.Colon, "expected ':' before enum backing type")
-    var t = expect_tok(p, lexer.TokenKind.Identifier, "expected an integer backing type")
-    var backing = add_node(p, ast.AstKind.TypeName, t, t.length as u32, 0)
-    expect_tok(p, lexer.TokenKind.LeftBrace, "expected '{' after enum backing type")
+    var type_params = parse_type_parameters(p)
+    var backing = ast.NODE_NONE
+    if match_tok(p, lexer.TokenKind.Colon) {
+        var t = expect_tok(p, lexer.TokenKind.Identifier, "expected an integer backing type")
+        backing = add_node(p, ast.AstKind.TypeName, t, t.length as u32, 0)
+    }
+    expect_tok(p, lexer.TokenKind.LeftBrace, "expected '{' after enum header")
 
+    var has_any_payload = false
     var mark = p.pending.len
     for !p.has_error && is_separator(p.current.kind) {
         advance(p)
@@ -1127,7 +1131,22 @@ fun parse_enum(p: *Parser, public: bool): u32 {
     for !p.has_error && p.current.kind != lexer.TokenKind.RightBrace && p.current.kind != lexer.TokenKind.Eof {
         var member = expect_tok(p, lexer.TokenKind.Identifier, "expected an enum member name")
         var val = ast.NODE_NONE
-        if match_tok(p, lexer.TokenKind.Equal) {
+        var has_case_payload = false
+        var case_fields = ast.NodeRange { first: 0, count: 0 }
+        if match_tok(p, lexer.TokenKind.LeftParen) {
+            has_case_payload = true
+            has_any_payload = true
+            open_group(p)
+            var fmark = p.pending.len
+            for !p.has_error && p.current.kind != lexer.TokenKind.RightParen && p.current.kind != lexer.TokenKind.Eof {
+                push_child(p, parse_type(p))
+                if !match_tok(p, lexer.TokenKind.Comma) || p.current.kind == lexer.TokenKind.RightParen {
+                    break
+                }
+            }
+            close_group(p, lexer.TokenKind.RightParen, "expected ')' after enum variant payload")
+            case_fields = finish_children(p, fmark)
+        } else if match_tok(p, lexer.TokenKind.Equal) {
             var sign = p.current
             var neg = match_tok(p, lexer.TokenKind.Minus)
             var lit = p.current
@@ -1141,7 +1160,16 @@ fun parse_enum(p: *Parser, public: bool): u32 {
                 val = add_node(p, ast.AstKind.Negate, sign, val, 0)
             }
         }
-        push_child(p, add_node(p, ast.AstKind.EnumCase, member, member.length as u32, val))
+        var ec = ast.AstEnumCase {
+            fields: case_fields,
+            value: val,
+            has_payload: has_case_payload,
+        }
+        var ec_idx = p.tree.enum_cases.len as u32
+        if !p.has_error && p.tree.enum_cases.push(&ec) < 0 {
+            fail(p, "could not allocate AST storage")
+        }
+        push_child(p, add_node(p, ast.AstKind.EnumCase, member, member.length as u32, ec_idx))
         if match_tok(p, lexer.TokenKind.Comma) {
             finish_item(p, lexer.TokenKind.RightBrace, "")
         } else {
@@ -1152,9 +1180,11 @@ fun parse_enum(p: *Parser, public: bool): u32 {
     var en = ast.AstEnum {
         name: source_span(p, name),
         cases: finish_children(p, mark),
+        type_parameters: type_params,
         backing: backing,
         module: p.module,
         public: public,
+        has_payload: has_any_payload,
     }
     var idx = p.tree.enums.len as u32
     if !p.has_error && p.tree.enums.push(&en) < 0 {

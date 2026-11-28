@@ -1,0 +1,80 @@
+// exit: 0
+
+enum Plain {
+    A,
+    B,
+    C = 10,
+}
+
+struct Point {
+    x: i32
+    y: i32
+}
+
+enum Value {
+    None,
+    Int(i64),
+    Pair(i32, i32),
+    Pt(Point),
+}
+
+enum Option[T] {
+    Some(T),
+    None,
+}
+
+fun eval_value(v: Value): i64 {
+    match v {
+        Value.None => return 0
+        Value.Int(n) => return n
+        Value.Pair(a, b) => return (a + b) as i64
+        Value.Pt(p) => return (p.x * 10 + p.y) as i64
+    }
+}
+
+fun unwrap_or[T](opt: Option[T], fallback: T): T {
+    match opt {
+        Option.Some(v) => return v
+        Option.None => return fallback
+    }
+}
+
+fun make_opt(flag: bool): Option[i32] {
+    if flag {
+        return Option.Some(99)
+    }
+    return Option.None
+}
+
+fun main(): i32 {
+    var p = Plain.C
+    if (p as i32) != 10 { return 1 }
+
+    var v0 = Value.None
+    var v1 = Value.Int(42)
+    var v2 = Value.Pair(10, 20)
+    var v3 = Value.Pt(Point { x: 3, y: 4 })
+
+    if eval_value(v0) != 0 { return 2 }
+    if eval_value(v1) != 42 { return 3 }
+    if eval_value(v2) != 30 { return 4 }
+    if eval_value(v3) != 34 { return 5 }
+
+    // Wildcard and else arm
+    match v2 {
+        Value.Pair(x, _) => {
+            if x != 10 { return 6 }
+        }
+        else => return 7
+    }
+
+    // Generic tagged union (explicit & inferred)
+    var o1 = Option[i32].Some(77)
+    var o2: Option[i32] = Option.None
+    if unwrap_or(o1, 0) != 77 { return 8 }
+    if unwrap_or(o2, 55) != 55 { return 9 }
+    if unwrap_or(make_opt(true), 0) != 99 { return 10 }
+    if unwrap_or(make_opt(false), 12) != 12 { return 11 }
+
+    return 0
+}
