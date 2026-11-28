@@ -498,3 +498,201 @@ pub struct Stack[T] {
         return self.items.as_slice()
     }
 }
+
+pub struct HashMap[K: Eq + Hash, V] {
+    keys: *K
+    values: *V
+    hashes: *u64
+    states: *u8
+    len: u64
+    used: u64
+    cap: u64
+    arena: *mem.Arena
+
+    pub fun init(self: *Self, arena: *mem.Arena, initial_cap: u64): i64 {
+        if self == null || arena == null {
+            return -22
+        }
+        self.keys = null
+        self.values = null
+        self.hashes = null
+        self.states = null
+        self.len = 0
+        self.used = 0
+        self.cap = 0
+        self.arena = arena
+        if initial_cap == 0 {
+            return 0
+        }
+        return self.reserve(initial_cap)
+    }
+
+    pub fun reserve(self: *Self, min_cap: u64): i64 {
+        if self == null || self.arena == null {
+            return -22
+        }
+        var new_cap = next_pow2(min_cap)
+        if new_cap == 0 {
+            return -75
+        }
+        if new_cap <= self.cap && self.used == self.len {
+            return 0
+        }
+
+        var next_keys: *K
+        var next_values: *V
+        var next_hashes: *u64
+        var next_states: *u8
+        var status = mem.alloc_many(self.arena, new_cap, &next_keys)
+        if status < 0 { return status }
+        status = mem.alloc_many(self.arena, new_cap, &next_values)
+        if status < 0 { return status }
+        status = mem.alloc_many(self.arena, new_cap, &next_hashes)
+        if status < 0 { return status }
+        status = mem.alloc_many(self.arena, new_cap, &next_states)
+        if status < 0 { return status }
+
+        for i in 0..new_cap {
+            next_states[i] = SLOT_EMPTY
+        }
+
+        var mask = new_cap - 1
+        var old_cap = self.cap
+        for i in 0..old_cap {
+            if self.states[i] != SLOT_USED {
+                continue
+            }
+            var idx = self.hashes[i] & mask
+            for next_states[idx] == SLOT_USED {
+                idx = (idx + 1) & mask
+            }
+            next_keys[idx] = self.keys[i]
+            next_values[idx] = self.values[i]
+            next_hashes[idx] = self.hashes[i]
+            next_states[idx] = SLOT_USED
+        }
+
+        self.keys = next_keys
+        self.values = next_values
+        self.hashes = next_hashes
+        self.states = next_states
+        self.cap = new_cap
+        self.used = self.len
+        return 0
+    }
+
+    fun find_index(self: *const Self, key: K, h: u64): i64 {
+        if self == null || self.cap == 0 || self.len == 0 {
+            return -1
+        }
+        var mask = self.cap - 1
+        var idx = h & mask
+        for _ in 0..self.cap {
+            var st = self.states[idx]
+            if st == SLOT_EMPTY {
+                return -1
+            }
+            if st == SLOT_USED && self.hashes[idx] == h && self.keys[idx] == key {
+                return idx as i64
+            }
+            idx = (idx + 1) & mask
+        }
+        return -1
+    }
+
+    pub fun contains(self: *const Self, key: K): bool {
+        var h = key.hash()
+        return self.find_index(key, h) >= 0
+    }
+
+    pub fun get(self: *const Self, key: K, out: *V): bool {
+        var h = key.hash()
+        var idx = self.find_index(key, h)
+        if idx < 0 {
+            return false
+        }
+        if out != null {
+            *out = self.values[idx]
+        }
+        return true
+    }
+
+    pub fun get_mut(self: *Self, key: K): *V {
+        var h = key.hash()
+        var idx = self.find_index(key, h)
+        if idx < 0 {
+            return null
+        }
+        return &self.values[idx]
+    }
+
+    pub fun put(self: *Self, key: K, value: V): i64 {
+        if self == null || self.arena == null {
+            return -22
+        }
+        if self.cap == 0 || (self.used + 1) * 10 >= self.cap * 7 {
+            var next_cap = self.cap * 2
+            if next_cap < 8 {
+                next_cap = 8
+            }
+            var status = self.reserve(next_cap)
+            if status < 0 {
+                return status
+            }
+        }
+
+        var h = key.hash()
+        var mask = self.cap - 1
+        var idx = h & mask
+        var first_tombstone: i64 = -1
+        for _ in 0..self.cap {
+            var st = self.states[idx]
+            if st == SLOT_EMPTY {
+                var target = idx
+                if first_tombstone >= 0 {
+                    target = first_tombstone as u64
+                } else {
+                    self.used += 1
+                }
+                self.keys[target] = key
+                self.values[target] = value
+                self.hashes[target] = h
+                self.states[target] = SLOT_USED
+                self.len += 1
+                return 0
+            }
+            if st == SLOT_TOMBSTONE {
+                if first_tombstone < 0 {
+                    first_tombstone = idx as i64
+                }
+            } else if self.hashes[idx] == h && self.keys[idx] == key {
+                self.values[idx] = value
+                return 0
+            }
+            idx = (idx + 1) & mask
+        }
+        return -12
+    }
+
+    pub fun remove(self: *Self, key: K): bool {
+        var h = key.hash()
+        var idx = self.find_index(key, h)
+        if idx < 0 {
+            return false
+        }
+        self.states[idx] = SLOT_TOMBSTONE
+        self.len -= 1
+        return true
+    }
+
+    pub fun clear(self: *Self) {
+        if self == null {
+            return
+        }
+        for i in 0..self.cap {
+            self.states[i] = SLOT_EMPTY
+        }
+        self.len = 0
+        self.used = 0
+    }
+}
