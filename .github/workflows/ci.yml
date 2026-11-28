@@ -29,13 +29,13 @@ jobs:
           make -C /tmp/qbe-1.3 -j"$(nproc)"
           sudo make -C /tmp/qbe-1.3 install PREFIX=/usr/local
 
-      - name: Download lunsoc v0.5.1
+      - name: Download lunsoc v0.6.1
         run: |
-          curl -fsSL https://github.com/lunso-lang/lunsoc/releases/download/v0.5.1/lunsoc-linux-x86_64 -o /tmp/lunsoc-v0.5.1
-          chmod +x /tmp/lunsoc-v0.5.1
+          curl -fsSL https://github.com/lunso-lang/lunsoc/releases/download/v0.6.1/lunsoc-linux-x86_64 -o /tmp/lunsoc-v0.6.1
+          chmod +x /tmp/lunsoc-v0.6.1
 
       - name: Build and run test suite
-        run: make test LUNSO=/tmp/lunsoc-v0.5.1
+        run: make test LUNSO=/tmp/lunsoc-v0.6.1
 
       - name: Build and run fuzzer
-        run: make fuzz FUZZ_ITERS=50000 LUNSO=/tmp/lunsoc-v0.5.1
+        run: make fuzz FUZZ_ITERS=50000 LUNSO=/tmp/lunsoc-v0.6.1
