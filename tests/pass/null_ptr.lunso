@@ -1,0 +1,54 @@
+// lunsoc-only
+// expect-exit: 0
+struct Node {
+    val: i32
+    next: *Node
+}
+
+const NULL_BYTE_PTR: *const u8 = null
+
+fun take_ptr(p: *i32): i32 {
+    if p == null {
+        return 10
+    }
+    return *p
+}
+
+fun maybe_ptr(flag: bool, x: *i32): *i32 {
+    if flag {
+        return x
+    }
+    return null
+}
+
+fun main(): i32 {
+    var p: *i32 = null
+    if p != null { return 1 }
+    if null != p { return 2 }
+    if !(p == null) { return 3 }
+    if !(null == p) { return 4 }
+
+    var x: i32 = 42
+    p = &x
+    if p == null { return 5 }
+    if null == p { return 6 }
+    if take_ptr(null) != 10 { return 7 }
+    if take_ptr(p) != 42 { return 8 }
+
+    if maybe_ptr(false, &x) != null { return 9 }
+    if maybe_ptr(true, &x) == null { return 10 }
+
+    var n = Node { val: 7, next: null }
+    if n.next != null { return 11 }
+    if NULL_BYTE_PTR != null { return 12 }
+
+    var cp: *const i32 = null
+    if cp != null { return 13 }
+
+    p = null
+    if p != null { return 14 }
+
+    if (null as *u8) != null { return 15 }
+
+    return 0
+}

@@ -21,6 +21,7 @@ pub enum TokenKind : u16 {
     Defer,
     Var,
     Or,
+    Null,
     Identifier,
     Integer,
     Float,
@@ -186,6 +187,7 @@ fun keyword_or_ident(text: []u8): TokenKind {
     if str.equals(text, "defer") { return TokenKind.Defer }
     if str.equals(text, "var") { return TokenKind.Var }
     if str.equals(text, "or") { return TokenKind.Or }
+    if str.equals(text, "null") { return TokenKind.Null }
     return TokenKind.Identifier
 }
 
@@ -443,6 +445,7 @@ pub fun token_name(kind: TokenKind): []u8 {
         TokenKind.Defer => return "DEFER"
         TokenKind.Var => return "VAR"
         TokenKind.Or => return "OR"
+        TokenKind.Null => return "NULL"
         TokenKind.Identifier => return "IDENTIFIER"
         TokenKind.Integer => return "INTEGER"
         TokenKind.Float => return "FLOAT"

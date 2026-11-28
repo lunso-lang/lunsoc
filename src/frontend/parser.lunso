@@ -419,6 +419,9 @@ fun parse_operand(p: *Parser): u32 {
     } else if tok.kind == lexer.TokenKind.String {
         advance(p)
         return parse_postfix(p, add_node(p, ast.AstKind.String, tok, tok.length as u32, 0))
+    } else if tok.kind == lexer.TokenKind.Null {
+        advance(p)
+        return parse_postfix(p, add_node(p, ast.AstKind.Null, tok, 0, 0))
     } else {
         fail(p, "expected an expression")
         return ast.NODE_NONE

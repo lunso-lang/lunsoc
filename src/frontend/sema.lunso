@@ -25,6 +25,7 @@ pub enum TypeKind : u8 {
     Result,
     Error,
     Func,
+    Null,
 }
 
 pub struct SemaType {
@@ -1049,6 +1050,13 @@ fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, ou
     var nodes = c.tree.nodes.as_slice()
     var node = nodes[id]
     *out_str = NODE_NONE
+    if node.kind == AstKind.Null {
+        if expected.kind == TypeKind.Pointer {
+            *out_bits = 0
+            return expected
+        }
+        return fail(c, id, "null requires a pointer type")
+    }
     if node.kind == AstKind.Integer {
         var text = span_bytes(c.tree, node_span(c.tree, id, node.a))
         var bits: u64 = 0
@@ -1692,7 +1700,7 @@ fun is_literal_expr(tree: *Ast, id: u32): bool {
     var cur = id
     for cur != NODE_NONE {
         var n = nodes[cur]
-        if n.kind == AstKind.Integer || n.kind == AstKind.Float {
+        if n.kind == AstKind.Integer || n.kind == AstKind.Float || n.kind == AstKind.Null {
             return true
         }
         if n.kind == AstKind.Positive || n.kind == AstKind.Negate {
@@ -1839,6 +1847,12 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         res.element_size = 1
         res.element_type = add_element(c, simple_type(TypeKind.U8))
         res.length = decoded_string_len(span_bytes(c.tree, node_span(c.tree, id, node.a)))
+    } else if node.kind == AstKind.Null {
+        if expected.kind == TypeKind.Pointer {
+            res = expected
+        } else {
+            res = simple_type(TypeKind.Null)
+        }
     } else if node.kind == AstKind.ArrayLiteral {
         if expected.kind == TypeKind.Array && node.b != expected.length {
             res = fail(c, id, "array initializer length mismatch")
@@ -2428,10 +2442,16 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
             var op_node = nodes[node.a]
             if op_node.kind == AstKind.Integer {
                 hint = simple_type(TypeKind.U64)
+            } else if op_node.kind == AstKind.Null && dst.kind == TypeKind.Pointer {
+                hint = dst
             }
-            check_expr(c, node.a, hint)
+            var src_t = check_expr(c, node.a, hint)
             if !c.has_error {
-                res = dst
+                if src_t.kind == TypeKind.Null && dst.kind != TypeKind.Pointer {
+                    res = fail(c, id, "null requires a pointer type")
+                } else {
+                    res = dst
+                }
             }
         }
     } else if node.kind == AstKind.AddressOf {
@@ -2508,7 +2528,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                     if rt.kind != cm { node_info(c, node.b).promotion = cm }
                     res = simple_type(TypeKind.Bool)
                 }
-            } else if same_type(c, lt, rt) {
+            } else if lt.kind != TypeKind.Null && same_type(c, lt, rt) {
                 res = simple_type(TypeKind.Bool)
             } else {
                 res = fail(c, id, "incompatible comparison operands")
@@ -2651,6 +2671,9 @@ fun check_statement(c: *Checker, id: u32): bool {
             }
         } else {
             vt = check_expr(c, v.initializer, empty_type())
+            if !c.has_error && vt.kind == TypeKind.Null {
+                fail(c, v.initializer, "cannot infer type from null")
+            }
         }
         if c.has_error { return true }
         var slot = c.slot_count

@@ -1,0 +1,5 @@
+// expect-stderr: cannot infer type from null
+fun main(): i32 {
+    var p = null
+    return 0
+}

@@ -39,6 +39,7 @@ pub enum AstKind : u8 {
     Integer,
     Float,
     String,
+    Null,
     ArrayLiteral,
     StructLiteral,
     StructFieldInit,

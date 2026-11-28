@@ -407,6 +407,9 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
     if node.kind == AstKind.String {
         return emit_value(l, IrOp.Bytes, info.type_info, node.pos, node.a, 0)
     }
+    if node.kind == AstKind.Null {
+        return emit_value(l, IrOp.Immediate, info.type_info, 0, 0, 0)
+    }
     if node.kind == AstKind.ArrayLiteral {
         var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
         var elems = l.sem.elements.as_slice()
