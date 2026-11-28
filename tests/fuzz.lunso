@@ -5,7 +5,7 @@ import std.io
 import std.mem
 import std.rand
 import std.str
-import std.vec
+import std.collections { Vec }
 import frontend.ast
 import backend.ir
 import frontend.lexer
@@ -25,8 +25,8 @@ fun parse_u64(s: []u8, out: *u64): bool {
 }
 
 fun fuzz_one(arena: *mem.Arena, src: []u8) {
-    var tokens: vec.Vec[lexer.Token]
-    if vec.init.[lexer.Token](&tokens, arena, 64) < 0 { return }
+    var tokens: Vec[lexer.Token]
+    if tokens.init(arena, 64) < 0 { return }
     var err_tok: lexer.Token
     if !lexer.tokenize_all(src, &tokens, &err_tok) { return }
 
@@ -41,7 +41,7 @@ fun fuzz_one(arena: *mem.Arena, src: []u8) {
     var mod: ir.IrModule
     if !ir.lower(arena, &tree, &sem, &mod) { return }
 
-    var qbe_buf: vec.Vec[u8]
+    var qbe_buf: Vec[u8]
     qbe.write(arena, &mod, &qbe_buf)
 }
 
@@ -95,8 +95,8 @@ fun main(): i32 {
     }
 
     var iters: u64 = 20000
-    var seeds: vec.Vec[[]u8]
-    vec.init.[[]u8](&seeds, &arena, 32)
+    var seeds: Vec[[]u8]
+    seeds.init(&arena, 32)
 
     for var i: i64 = 1; i < len(argv); i += 1 {
         var arg = argv[i]
@@ -109,18 +109,18 @@ fun main(): i32 {
         } else {
             var raw: []u8
             if file.read_all(arg, &arena, &raw) >= 0 {
-                vec.push_value.[[]u8](&seeds, raw)
+                seeds.push_value(raw)
             }
         }
     }
     if seeds.len == 0 {
-        vec.push_value.[[]u8](&seeds, "fun main(): i32 { return 0 }\n")
+        seeds.push_value("fun main(): i32 { return 0 }\n")
     }
 
     var rng: rand.Rng
     rand.seed(&rng, 0x123456789abcdef0)
     var scratch: [16384]u8
-    var seed_slice = vec.as_slice.[[]u8](&seeds)
+    var seed_slice = seeds.as_slice()
 
     for var it: u64 = 0; it < iters; it += 1 {
         var idx = rand.range_i64(&rng, 0, len(seed_slice) - 1)

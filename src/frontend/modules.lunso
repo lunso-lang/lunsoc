@@ -1,12 +1,11 @@
 import std.file
 import std.fmt
 import std.io
-import std.map
+import std.collections { Vec, StrMap }
 import std.mem
 import std.os
 import std.path
 import std.str
-import std.vec
 import frontend.ast.*
 import frontend.lexer
 import frontend.parser
@@ -19,7 +18,7 @@ pub struct ModuleFile {
 
 pub struct ModuleProgram {
     tree: Ast
-    files: vec.Vec[ModuleFile]
+    files: Vec[ModuleFile]
     quiet: bool
     has_error: bool
     err_offset: u32
@@ -44,12 +43,12 @@ struct ModuleEntry {
 struct Loader {
     arena: *mem.Arena
     program: *ModuleProgram
-    source_buf: vec.Vec[u8]
+    source_buf: Vec[u8]
     root: []u8
     std_root: []u8
     include_dirs: [][]u8
-    overlays: *map.StrMap[[]u8]
-    modules: vec.Vec[ModuleEntry]
+    overlays: *StrMap[[]u8]
+    modules: Vec[ModuleEntry]
     depth: u32
 }
 
@@ -227,7 +226,7 @@ fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
         state: LoadState.Unloaded,
         parent: NO_MODULE,
         declarations: NodeRange { first: 0, count: 0 },
-        scope: AstModuleScope { bindings: vec.Vec[AstBinding] { arena: l.arena } },
+        scope: AstModuleScope { bindings: Vec[AstBinding] { arena: l.arena } },
     }
     if entry.scope.bindings.init(l.arena, 16) < 0 {
         return err_at(l, offset, "could not allocate module scope")
@@ -685,7 +684,7 @@ fun finish_module(l: *Loader, mod_id: u32, first: u32, end: u32): bool {
     if first >= end {
         return true
     }
-    var prefixes: vec.Vec[bool]
+    var prefixes: Vec[bool]
     var count = (end - first) as u64
     if prefixes.init(l.arena, count) < 0 {
         return err_at(l, nodes[first].pos, "could not allocate prefix table")
@@ -773,8 +772,8 @@ fun select_std_root(arena: *mem.Arena, override: []u8): []u8 {
 }
 
 pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, std_dir: []u8,
-                              include_dirs: [][]u8, overlays: *map.StrMap[[]u8], out: *ModuleProgram): bool {
-    var _overlay_layout: map.StrMap[[]u8]
+                              include_dirs: [][]u8, overlays: *StrMap[[]u8], out: *ModuleProgram): bool {
+    var _overlay_layout: StrMap[[]u8]
     if !init(arena, source, &out.tree) {
         return false
     }
@@ -784,12 +783,12 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
     var l = Loader {
         arena: arena,
         program: out,
-        source_buf: vec.Vec[u8] { arena: arena },
+        source_buf: Vec[u8] { arena: arena },
         root: path.dir_prefix(entry_path),
         std_root: select_std_root(arena, std_dir),
         include_dirs: include_dirs,
         overlays: overlays,
-        modules: vec.Vec[ModuleEntry] { arena: arena },
+        modules: Vec[ModuleEntry] { arena: arena },
         depth: 1,
     }
     if l.source_buf.init(arena, (len(source) + 1024) as u64) < 0 {
@@ -804,7 +803,7 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
         state: LoadState.Loading,
         parent: NO_MODULE,
         declarations: NodeRange { first: 0, count: 0 },
-        scope: AstModuleScope { bindings: vec.Vec[AstBinding] { arena: arena } },
+        scope: AstModuleScope { bindings: Vec[AstBinding] { arena: arena } },
     }
     if entry.scope.bindings.init(arena, 16) < 0 {
         return false
@@ -829,5 +828,5 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
 }
 
 pub fun load(arena: *mem.Arena, entry_path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, out: *ModuleProgram): bool {
-    return load_with_overlays(arena, entry_path, source, std_dir, include_dirs, 0 as *map.StrMap[[]u8], out)
+    return load_with_overlays(arena, entry_path, source, std_dir, include_dirs, 0 as *StrMap[[]u8], out)
 }

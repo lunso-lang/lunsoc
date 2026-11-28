@@ -1,5 +1,5 @@
 import std.str
-import std.vec
+import std.collections { Vec }
 
 pub enum TokenKind : u16 {
     Fun,
@@ -405,7 +405,7 @@ pub fun error_message(kind: TokenKind): []u8 {
     }
 }
 
-pub fun tokenize_all(source: []u8, out: *vec.Vec[Token], err_tok: *Token): bool {
+pub fun tokenize_all(source: []u8, out: *Vec[Token], err_tok: *Token): bool {
     var l = init(source)
     for {
         var tok = next_token(&l)

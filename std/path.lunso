@@ -1,6 +1,6 @@
 import std.mem
 import std.str
-import std.vec
+import std.collections { Vec }
 
 pub fun is_abs(p: []const u8): bool {
     return len(p) > 0 && p[0] == '/'
@@ -97,7 +97,7 @@ pub fun with_extension(arena: *mem.Arena, p: []const u8, new_ext: []const u8): [
 
 pub fun normalize(arena: *mem.Arena, p: []const u8): []u8 {
     var abs = is_abs(p)
-    var parts: vec.Vec[[]const u8]
+    var parts: Vec[[]const u8]
     if parts.init(arena, 16) < 0 {
         return ""
     }
@@ -130,7 +130,7 @@ pub fun normalize(arena: *mem.Arena, p: []const u8): []u8 {
         if abs { return "/" }
         return "."
     }
-    var out: vec.Vec[u8]
+    var out: Vec[u8]
     if out.init(arena, (n + 2) as u64) < 0 {
         return ""
     }
@@ -171,7 +171,7 @@ pub fun from_file_uri(arena: *mem.Arena, uri: []const u8): ![]u8 {
     if len(rest) == 0 || rest[0] != '/' {
         return fail("invalid file URI path")
     }
-    var buf: vec.Vec[u8]
+    var buf: Vec[u8]
     if buf.init(arena, len(rest) as u64) < 0 {
         return fail("out of memory")
     }
@@ -203,7 +203,7 @@ pub fun to_file_uri(arena: *mem.Arena, p: []const u8): ![]u8 {
     if arena == null || len(p) == 0 || p[0] != '/' {
         return fail("path must be absolute")
     }
-    var buf: vec.Vec[u8]
+    var buf: Vec[u8]
     if buf.init(arena, (len(p) + 8) as u64) < 0 {
         return fail("out of memory")
     }

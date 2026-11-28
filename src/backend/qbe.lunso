@@ -1,7 +1,7 @@
 import std.fmt
 import std.mem
 import std.str
-import std.vec
+import std.collections { Vec }
 import frontend.ast
 import backend.ir
 import frontend.sema.*
@@ -29,21 +29,21 @@ fun qbe_type(k: TypeKind): QbeType {
     }
 }
 
-fun push_byte(out: *vec.Vec[u8], b: u8): bool {
+fun push_byte(out: *Vec[u8], b: u8): bool {
     return out.push_value(b) >= 0
 }
 
-fun push_str(out: *vec.Vec[u8], s: []u8): bool {
+fun push_str(out: *Vec[u8], s: []u8): bool {
     return out.append_slice(s) >= 0
 }
 
-fun push_u64(out: *vec.Vec[u8], v: u64): bool {
+fun push_u64(out: *Vec[u8], v: u64): bool {
     var buf: [32]u8
     var n = fmt.u64_to_buf(v, &buf[0], 32)
     return push_str(out, buf[0..n])
 }
 
-fun push_u32(out: *vec.Vec[u8], v: u32): bool {
+fun push_u32(out: *Vec[u8], v: u32): bool {
     return push_u64(out, v as u64)
 }
 
@@ -57,7 +57,7 @@ fun entry_symbol(mod: *ir.IrModule, f: ir.IrFunction): bool {
     return !f.external && !f.specialization && f.module == 0 && str.equals(span_bytes(mod.source, f.name), "main")
 }
 
-fun write_symbol(out: *vec.Vec[u8], mod: *ir.IrModule, index: u32) {
+fun write_symbol(out: *Vec[u8], mod: *ir.IrModule, index: u32) {
     var fns = mod.functions.as_slice()
     var f = fns[index]
     push_byte(out, '$')
@@ -69,7 +69,7 @@ fun write_symbol(out: *vec.Vec[u8], mod: *ir.IrModule, index: u32) {
     push_str(out, span_bytes(mod.source, f.name))
 }
 
-fun write_integer_bits(out: *vec.Vec[u8], bits: u64) {
+fun write_integer_bits(out: *Vec[u8], bits: u64) {
     var max_i64: u64 = 9223372036854775807
     if bits > max_i64 {
         push_byte(out, '-')
@@ -79,7 +79,7 @@ fun write_integer_bits(out: *vec.Vec[u8], bits: u64) {
     }
 }
 
-fun write_integer(out: *vec.Vec[u8], text: []u8, negative: bool) {
+fun write_integer(out: *Vec[u8], text: []u8, negative: bool) {
     var bits: u64 = 0
     parse_int_literal(text, &bits)
     if negative {
@@ -88,7 +88,7 @@ fun write_integer(out: *vec.Vec[u8], text: []u8, negative: bool) {
     write_integer_bits(out, bits)
 }
 
-fun write_number(out: *vec.Vec[u8], mod: *ir.IrModule, inst: ir.IrInstruction) {
+fun write_number(out: *Vec[u8], mod: *ir.IrModule, inst: ir.IrInstruction) {
     var qt = qbe_type(inst.type_info.kind)
     push_str(out, "\t%v")
     push_u32(out, inst.result)
@@ -149,7 +149,7 @@ fun next_literal_byte(text: []u8, end: i64, cursor: *i64, out_byte: *u8): bool {
     return true
 }
 
-fun write_data(out: *vec.Vec[u8], mod: *ir.IrModule): bool {
+fun write_data(out: *Vec[u8], mod: *ir.IrModule): bool {
     var insts = mod.instructions.as_slice()
     for i, inst in insts {
         if inst.op != ir.IrOp.Bytes {
@@ -194,7 +194,7 @@ fun memory_suffix(k: TypeKind): u8 {
     return qbe_type(k).base
 }
 
-fun write_load(out: *vec.Vec[u8], k: TypeKind, result: u32, name: []u8, address: u32) {
+fun write_load(out: *Vec[u8], k: TypeKind, result: u32, name: []u8, address: u32) {
     if is_fat(k) {
         push_str(out, "\t%v")
         push_u32(out, result)
@@ -229,7 +229,7 @@ fun write_load(out: *vec.Vec[u8], k: TypeKind, result: u32, name: []u8, address:
     push_byte(out, '\n')
 }
 
-fun write_store(out: *vec.Vec[u8], k: TypeKind, val_name: []u8, len_name: []u8, val: u32,
+fun write_store(out: *Vec[u8], k: TypeKind, val_name: []u8, len_name: []u8, val: u32,
                 addr_name: []u8, addr: u32, tmp_prefix: []u8, tmp_id: u32) {
     if is_fat(k) {
         push_str(out, "\tstorel %")
@@ -264,7 +264,7 @@ fun write_store(out: *vec.Vec[u8], k: TypeKind, val_name: []u8, len_name: []u8, 
     push_byte(out, '\n')
 }
 
-fun write_call(out: *vec.Vec[u8], mod: *ir.IrModule, inst: ir.IrInstruction) {
+fun write_call(out: *Vec[u8], mod: *ir.IrModule, inst: ir.IrInstruction) {
     var fns = mod.functions.as_slice()
     var params = mod.parameters.as_slice()
     var args = mod.arguments.as_slice()
@@ -319,7 +319,7 @@ fun write_call(out: *vec.Vec[u8], mod: *ir.IrModule, inst: ir.IrInstruction) {
     }
 }
 
-fun write_call_indirect(out: *vec.Vec[u8], mod: *ir.IrModule, inst: ir.IrInstruction) {
+fun write_call_indirect(out: *Vec[u8], mod: *ir.IrModule, inst: ir.IrInstruction) {
     var ft = &mod.func_types.data[inst.c >> 16]
     var count = inst.c & 65535
     var args = mod.arguments.as_slice()
@@ -373,7 +373,7 @@ fun write_call_indirect(out: *vec.Vec[u8], mod: *ir.IrModule, inst: ir.IrInstruc
     }
 }
 
-fun write_length(out: *vec.Vec[u8], t: SemaType, val: u32) {
+fun write_length(out: *Vec[u8], t: SemaType, val: u32) {
     if is_fat(t.kind) {
         push_str(out, "%len")
         push_u32(out, val)
@@ -382,7 +382,7 @@ fun write_length(out: *vec.Vec[u8], t: SemaType, val: u32) {
     }
 }
 
-fun write_index_address(out: *vec.Vec[u8], inst: ir.IrInstruction, size: u32) {
+fun write_index_address(out: *Vec[u8], inst: ir.IrInstruction, size: u32) {
     if size != 1 {
         push_str(out, "\t%off")
         push_u32(out, inst.result)
@@ -407,7 +407,7 @@ fun write_index_address(out: *vec.Vec[u8], inst: ir.IrInstruction, size: u32) {
     push_byte(out, '\n')
 }
 
-fun write_access(out: *vec.Vec[u8], inst: ir.IrInstruction) {
+fun write_access(out: *Vec[u8], inst: ir.IrInstruction) {
     var slice = inst.op == ir.IrOp.Slice || inst.op == ir.IrOp.PointerSlice
     var bound = inst.b
     if slice { bound = inst.c }
@@ -462,7 +462,7 @@ fun write_access(out: *vec.Vec[u8], inst: ir.IrInstruction) {
     }
 }
 
-fun write_copy_bytes(out: *vec.Vec[u8], dst_reg: []u8, dst_id: u32, has_dst_id: bool,
+fun write_copy_bytes(out: *Vec[u8], dst_reg: []u8, dst_id: u32, has_dst_id: bool,
                      src_id: u32, has_src: bool, bytes: u32, at: u32) {
     if bytes == 0 {
         return
@@ -523,7 +523,7 @@ fun write_copy_bytes(out: *vec.Vec[u8], dst_reg: []u8, dst_id: u32, has_dst_id: 
     push_byte(out, '\n')
 }
 
-fun write_comparison(out: *vec.Vec[u8], inst: ir.IrInstruction) {
+fun write_comparison(out: *Vec[u8], inst: ir.IrInstruction) {
     var rel: []u8 = "eq"
     match inst.op {
         ir.IrOp.Equal => rel = "eq"
@@ -575,7 +575,7 @@ fun op_name(inst: ir.IrInstruction): []u8 {
     }
 }
 
-fun write_operation(out: *vec.Vec[u8], inst: ir.IrInstruction) {
+fun write_operation(out: *Vec[u8], inst: ir.IrInstruction) {
     var qt = qbe_type(inst.type_info.kind)
     var rhs: []u8 = "v"
     var right = inst.b
@@ -626,7 +626,7 @@ fun write_operation(out: *vec.Vec[u8], inst: ir.IrInstruction) {
     }
 }
 
-fun write_cast(out: *vec.Vec[u8], result: u32, value: u32, source: TypeKind, destination: TypeKind) {
+fun write_cast(out: *Vec[u8], result: u32, value: u32, source: TypeKind, destination: TypeKind) {
     var target = qbe_type(destination)
     var src = qbe_type(source)
     if destination == TypeKind.Bool {
@@ -751,7 +751,7 @@ fun write_cast(out: *vec.Vec[u8], result: u32, value: u32, source: TypeKind, des
     push_byte(out, '\n')
 }
 
-fun write_instruction(out: *vec.Vec[u8], mod: *ir.IrModule, index: u32,
+fun write_instruction(out: *Vec[u8], mod: *ir.IrModule, index: u32,
                       addressed: []TypeKind, result: SemaType) {
     var insts = mod.instructions.as_slice()
     var inst = insts[index]
@@ -1014,7 +1014,7 @@ fun collect_addressed_slots(arena: *mem.Arena, mod: *ir.IrModule, f: ir.IrFuncti
     if !has_any {
         return true
     }
-    var slots: vec.Vec[TypeKind]
+    var slots: Vec[TypeKind]
     if slots.init(arena, f.slot_count as u64) < 0 {
         return false
     }
@@ -1033,7 +1033,7 @@ fun collect_addressed_slots(arena: *mem.Arena, mod: *ir.IrModule, f: ir.IrFuncti
     return true
 }
 
-fun write_function(arena: *mem.Arena, out: *vec.Vec[u8], mod: *ir.IrModule, index: u32): bool {
+fun write_function(arena: *mem.Arena, out: *Vec[u8], mod: *ir.IrModule, index: u32): bool {
     var fns = mod.functions.as_slice()
     var f = fns[index]
     var addressed: []TypeKind
@@ -1193,7 +1193,7 @@ fun write_function(arena: *mem.Arena, out: *vec.Vec[u8], mod: *ir.IrModule, inde
     return true
 }
 
-pub fun write(arena: *mem.Arena, mod: *ir.IrModule, out: *vec.Vec[u8]): bool {
+pub fun write(arena: *mem.Arena, mod: *ir.IrModule, out: *Vec[u8]): bool {
     if out.init(arena, 4096) < 0 {
         return false
     }

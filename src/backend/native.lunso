@@ -6,7 +6,7 @@ import std.os
 import std.path
 import std.str
 import std.time
-import std.vec
+import std.collections { Vec }
 import backend.ir
 import backend.qbe
 import frontend.sema
@@ -105,7 +105,7 @@ pub fun build(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *Na
         os.rmdir(dir)
     }
 
-    var qbe_buf: vec.Vec[u8]
+    var qbe_buf: Vec[u8]
     if !qbe.write(arena, mod, &qbe_buf) {
         io.eprintln("lunsoc: could not generate QBE IL")
         return false
@@ -132,7 +132,7 @@ pub fun build(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *Na
         return run_tool(cc_bin, cc_argv[0..5])
     }
 
-    var link_args: vec.Vec[[]u8]
+    var link_args: Vec[[]u8]
     if link_args.init(arena, (8 + len(opts.objects) * 2) as u64) < 0 {
         return false
     }
@@ -170,7 +170,7 @@ pub fun run_exe(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *
     if !build(arena, mod, source_path, &run_opts) {
         return 1
     }
-    var argv_buf: vec.Vec[[]u8]
+    var argv_buf: Vec[[]u8]
     if argv_buf.init(arena, (len(run_args) + 1) as u64) < 0 {
         return 1
     }

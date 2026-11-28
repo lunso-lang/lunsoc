@@ -1,5 +1,5 @@
 import std.mem
-import std.vec
+import std.collections { Vec }
 import frontend.ast
 import frontend.lexer
 
@@ -30,7 +30,7 @@ struct Parser {
     error: ParseError
     has_error: bool
     tree: *ast.Ast
-    pending: vec.Vec[u32]
+    pending: Vec[u32]
     source_base: u32
     module: u32
     group_depth: u32

@@ -1,6 +1,6 @@
 // expect-exit: 0
 import std.fmt
-import std.map
+import std.collections { StrMap }
 import std.mem
 
 fun main(): i32 {
@@ -10,11 +10,11 @@ fun main(): i32 {
     }
     defer mem.deinit(&arena)
 
-    var m: map.StrMap[i64]
-    if map.init.[i64](&m, &arena, 0) < 0 {
+    var m: StrMap[i64]
+    if m.init(&arena, 0) < 0 {
         return 2
     }
-    if map.has.[i64](&m, "missing") {
+    if m.has("missing") {
         return 3
     }
 
@@ -22,7 +22,7 @@ fun main(): i32 {
     var key_buf: [32]u8
     for var i: i64 = 0; i < 40; i += 1 {
         var n = fmt.i64_to_buf(i, &key_buf[0], 32)
-        if n <= 0 || map.set.[i64](&m, key_buf[0..n], i * 10) < 0 {
+        if n <= 0 || m.set(key_buf[0..n], i * 10) < 0 {
             return 4
         }
     }
@@ -33,35 +33,35 @@ fun main(): i32 {
     for var i: i64 = 0; i < 40; i += 1 {
         var n = fmt.i64_to_buf(i, &key_buf[0], 32)
         var v: i64 = 0
-        if !map.get.[i64](&m, key_buf[0..n], &v) || v != i * 10 {
+        if !m.get(key_buf[0..n], &v) || v != i * 10 {
             return 6
         }
     }
 
     // Update via set and via get_ptr.
-    if map.set.[i64](&m, "7", 777) < 0 {
+    if m.set("7", 777) < 0 {
         return 7
     }
     var vp: *i64
-    if !map.get_ptr.[i64](&m, "7", &vp) || *vp != 777 {
+    if !m.get_ptr("7", &vp) || *vp != 777 {
         return 8
     }
     *vp = 888
     var v7: i64 = 0
-    if !map.get.[i64](&m, "7", &v7) || v7 != 888 {
+    if !m.get("7", &v7) || v7 != 888 {
         return 9
     }
 
     // Remove and re-insert (tombstone reuse).
-    if !map.remove.[i64](&m, "7") || map.remove.[i64](&m, "7") || map.has.[i64](&m, "7") || m.len != 39 {
+    if !m.remove("7") || m.remove("7") || m.has("7") || m.len != 39 {
         return 10
     }
-    if map.set.[i64](&m, "7", 999) < 0 || !map.get.[i64](&m, "7", &v7) || v7 != 999 || m.len != 40 {
+    if m.set("7", 999) < 0 || !m.get("7", &v7) || v7 != 999 || m.len != 40 {
         return 11
     }
 
-    map.clear.[i64](&m)
-    if m.len != 0 || map.has.[i64](&m, "0") {
+    m.clear()
+    if m.len != 0 || m.has("0") {
         return 12
     }
 

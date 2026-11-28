@@ -1,7 +1,7 @@
 import std.file
 import std.mem
 import std.str
-import std.vec
+import std.collections { Vec }
 
 pub struct DirEntry {
     name: []u8
@@ -263,7 +263,7 @@ pub fun run(program: []const u8, argv: [][]u8): i64 {
     return (128 + (wstatus & 127)) as i64
 }
 
-pub fun list_dir(path: []const u8, arena: *mem.Arena, out: *vec.Vec[DirEntry]): i64 {
+pub fun list_dir(path: []const u8, arena: *mem.Arena, out: *Vec[DirEntry]): i64 {
     if arena == null || out == null {
         return -22
     }
@@ -281,7 +281,7 @@ pub fun list_dir(path: []const u8, arena: *mem.Arena, out: *vec.Vec[DirEntry]): 
     }
     defer lunso_sys_file_close(fd as i32)
 
-    if vec.init.[DirEntry](out, arena, 16) < 0 {
+    if out.init(arena, 16) < 0 {
         return -12
     }
     var buf: [4096]u8
@@ -318,7 +318,7 @@ pub fun list_dir(path: []const u8, arena: *mem.Arena, out: *vec.Vec[DirEntry]): 
                     name: cloned,
                     is_dir: dtype == 4,
                 }
-                if vec.push.[DirEntry](out, &entry) < 0 {
+                if out.push(&entry) < 0 {
                     return -12
                 }
             }

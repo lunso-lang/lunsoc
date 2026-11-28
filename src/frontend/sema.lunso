@@ -1,6 +1,6 @@
 import std.mem
 import std.str
-import std.vec
+import std.collections { Vec }
 import frontend.ast.*
 
 pub enum TypeKind : u8 {
@@ -70,9 +70,9 @@ pub struct SemaFunction {
     slot_count: u32
     declaration: u32
     instantiated_at: u32
-    param_types: vec.Vec[SemaType]
-    arguments: vec.Vec[SemaType]
-    nodes: vec.Vec[SemaNode]
+    param_types: Vec[SemaType]
+    arguments: Vec[SemaType]
+    nodes: Vec[SemaNode]
 }
 
 pub struct SemaConstant {
@@ -87,25 +87,25 @@ pub struct SemaRecord {
     size: u32
     alignment: u32
     state: u8
-    fields: vec.Vec[SemaNode]
-    arguments: vec.Vec[SemaType]
+    fields: Vec[SemaNode]
+    arguments: Vec[SemaType]
 }
 
 pub struct SemaFuncType {
-    params: vec.Vec[SemaType]
+    params: Vec[SemaType]
     result: SemaType
 }
 
 pub struct Sema {
-    nodes: vec.Vec[SemaNode]
-    functions: vec.Vec[SemaFunction]
-    records: vec.Vec[SemaRecord]
-    constants: vec.Vec[SemaConstant]
-    pointees: vec.Vec[SemaType]
-    elements: vec.Vec[SemaType]
-    func_types: vec.Vec[SemaFuncType]
-    enum_values: vec.Vec[u64]
-    match_values: vec.Vec[u64]
+    nodes: Vec[SemaNode]
+    functions: Vec[SemaFunction]
+    records: Vec[SemaRecord]
+    constants: Vec[SemaConstant]
+    pointees: Vec[SemaType]
+    elements: Vec[SemaType]
+    func_types: Vec[SemaFuncType]
+    enum_values: Vec[u64]
+    match_values: Vec[u64]
 }
 
 pub struct SemaError {
@@ -135,8 +135,8 @@ struct Checker {
     sema: *Sema
     err: SemaError
     has_error: bool
-    locals: vec.Vec[LocalVar]
-    loops: vec.Vec[LoopEntry]
+    locals: Vec[LocalVar]
+    loops: Vec[LoopEntry]
     scope_depth: u32
     slot_count: u32
     current_return: SemaType
@@ -648,7 +648,7 @@ fun same_type_args(c: *Checker, a: []SemaType, b: []SemaType): bool {
     return true
 }
 
-fun resolve_type_args(c: *Checker, id: u32, expected_count: u32, out: *vec.Vec[SemaType]): bool {
+fun resolve_type_args(c: *Checker, id: u32, expected_count: u32, out: *Vec[SemaType]): bool {
     var nodes = c.tree.nodes.as_slice()
     var children = c.tree.children.as_slice()
     var node = nodes[id]
@@ -668,7 +668,7 @@ fun resolve_type_args(c: *Checker, id: u32, expected_count: u32, out: *vec.Vec[S
     return true
 }
 
-fun specialize_record_with_args(c: *Checker, id: u32, decl: u32, args: vec.Vec[SemaType], allow_incomplete: bool): SemaType {
+fun specialize_record_with_args(c: *Checker, id: u32, decl: u32, args: Vec[SemaType], allow_incomplete: bool): SemaType {
     var arg_slice = args.as_slice()
     var recs = c.sema.records.data
     for var i = c.tree.structs.len as i64; i < (c.sema.records.len as i64); i += 1 {
@@ -691,7 +691,7 @@ fun specialize_record_with_args(c: *Checker, id: u32, decl: u32, args: vec.Vec[S
         size: 0,
         alignment: 1,
         state: 0,
-        fields: vec.Vec[SemaNode] { arena: c.arena },
+        fields: Vec[SemaNode] { arena: c.arena },
         arguments: args,
     }
     sr.fields.init(c.arena, 8)
@@ -730,7 +730,7 @@ fun specialize_record(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
     if count == 0 {
         return fail(c, id, "struct does not take type arguments")
     }
-    var args: vec.Vec[SemaType]
+    var args: Vec[SemaType]
     if !resolve_type_args(c, id, count, &args) {
         return empty_type()
     }
@@ -749,7 +749,7 @@ fun resolve_self_type(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
         t.record_size = c.sema.records.data[c.owner_struct].size
         return t
     }
-    var args: vec.Vec[SemaType]
+    var args: Vec[SemaType]
     args.init(c.arena, scount as u64)
     for var i: u32 = 0; i < scount; i += 1 {
         args.push(&c.type_arguments[i])
@@ -837,7 +837,7 @@ fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
         var children = c.tree.children.as_slice()
         var aft = c.tree.func_types.as_slice()[node.a]
         var sft = SemaFuncType {
-            params: vec.Vec[SemaType] { arena: c.arena },
+            params: Vec[SemaType] { arena: c.arena },
             result: simple_type(TypeKind.Void),
         }
         sft.params.init(c.arena, aft.params.count as u64)
@@ -1502,7 +1502,7 @@ fun register_fn_sig(c: *Checker, fn_idx: u32) {
     leave_type_scope(c, saved)
 }
 
-fun specialize_function_with_args(c: *Checker, site_id: u32, decl_idx: u32, args: vec.Vec[SemaType]): u32 {
+fun specialize_function_with_args(c: *Checker, site_id: u32, decl_idx: u32, args: Vec[SemaType]): u32 {
     var fdecls = c.tree.functions.as_slice()
     var fdecl = fdecls[decl_idx]
     var arg_slice = args.as_slice()
@@ -1522,9 +1522,9 @@ fun specialize_function_with_args(c: *Checker, site_id: u32, decl_idx: u32, args
         slot_count: 0,
         declaration: decl_idx,
         instantiated_at: site_id,
-        param_types: vec.Vec[SemaType] { arena: c.arena },
+        param_types: Vec[SemaType] { arena: c.arena },
         arguments: args,
-        nodes: vec.Vec[SemaNode] { arena: c.arena },
+        nodes: Vec[SemaNode] { arena: c.arena },
     }
     sf.param_types.init(c.arena, fdecl.parameters.count as u64)
     sf.nodes.init(c.arena, fdecl.nodes.count as u64)
@@ -1555,14 +1555,14 @@ fun specialize_function_with_args(c: *Checker, site_id: u32, decl_idx: u32, args
 fun specialize_function(c: *Checker, app_id: u32, decl_idx: u32): u32 {
     var fdecls = c.tree.functions.as_slice()
     var count = fdecls[decl_idx].type_parameters.count
-    var args: vec.Vec[SemaType]
+    var args: Vec[SemaType]
     if !resolve_type_args(c, app_id, count, &args) {
         return ~0 as u32
     }
     return specialize_function_with_args(c, app_id, decl_idx, args)
 }
 
-fun unify_param_ast(c: *Checker, param_ast: u32, actual: SemaType, fdecl: AstFunction, inferred: *vec.Vec[SemaType]) {
+fun unify_param_ast(c: *Checker, param_ast: u32, actual: SemaType, fdecl: AstFunction, inferred: *Vec[SemaType]) {
     if param_ast == NODE_NONE || actual.kind == TypeKind.Invalid {
         return
     }
@@ -1653,7 +1653,7 @@ fun check_variadic_call_args(c: *Checker, args_first: u32, arg_count: u32, ptype
     }
 }
 
-fun infer_method_type_args(c: *Checker, call_id: u32, decl_idx: u32, struct_args: vec.Vec[SemaType], out_args: *vec.Vec[SemaType]): bool {
+fun infer_method_type_args(c: *Checker, call_id: u32, decl_idx: u32, struct_args: Vec[SemaType], out_args: *Vec[SemaType]): bool {
     var nodes = c.tree.nodes.as_slice()
     var children = c.tree.children.as_slice()
     var call_node = nodes[call_id]
@@ -1689,7 +1689,7 @@ fun infer_method_type_args(c: *Checker, call_id: u32, decl_idx: u32, struct_args
     return true
 }
 
-fun infer_function_type_args(c: *Checker, call_id: u32, decl_idx: u32, out_args: *vec.Vec[SemaType]): bool {
+fun infer_function_type_args(c: *Checker, call_id: u32, decl_idx: u32, out_args: *Vec[SemaType]): bool {
     var nodes = c.tree.nodes.as_slice()
     var children = c.tree.children.as_slice()
     var call_node = nodes[call_id]
@@ -1741,7 +1741,7 @@ fun is_literal_expr(tree: *Ast, id: u32): bool {
 fun make_fn_type(c: *Checker, fi: u32): SemaType {
     var sf = &c.sema.functions.data[fi]
     var sft = SemaFuncType {
-        params: vec.Vec[SemaType] { arena: c.arena },
+        params: Vec[SemaType] { arena: c.arena },
         result: sf.result,
     }
     sft.params.init(c.arena, sf.param_types.len)
@@ -2016,14 +2016,14 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                             if fdecls[fi].type_parameters.count > 0 {
                                 if app == NODE_NONE {
                                     if fdecls[fi].type_parameters.count == (sr.arguments.len as u32) {
-                                        var margs: vec.Vec[SemaType]
+                                        var margs: Vec[SemaType]
                                         margs.init(c.arena, sr.arguments.len)
                                         for var ai: u64 = 0; ai < sr.arguments.len; ai += 1 {
                                             margs.push(&sr.arguments.data[ai])
                                         }
                                         fi = specialize_function_with_args(c, id, fi, margs)
                                     } else {
-                                        var inferred_args: vec.Vec[SemaType]
+                                        var inferred_args: Vec[SemaType]
                                         if infer_method_type_args(c, id, fi, sr.arguments, &inferred_args) {
                                             fi = specialize_function_with_args(c, id, fi, inferred_args)
                                         } else if !c.has_error {
@@ -2181,7 +2181,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                     var fdecls = c.tree.functions.as_slice()
                     if fdecls[fi].type_parameters.count > 0 {
                         if app == NODE_NONE {
-                            var inferred_args: vec.Vec[SemaType]
+                            var inferred_args: Vec[SemaType]
                             if infer_function_type_args(c, id, fi, &inferred_args) {
                                 fi = specialize_function_with_args(c, id, fi, inferred_args)
                             } else if !c.has_error {
@@ -3049,8 +3049,8 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
             size: 0,
             alignment: 1,
             state: 0,
-            fields: vec.Vec[SemaNode] { arena: arena },
-            arguments: vec.Vec[SemaType] { arena: arena },
+            fields: Vec[SemaNode] { arena: arena },
+            arguments: Vec[SemaType] { arena: arena },
         }
         sr.fields.init(arena, 8)
         out.records.push(&sr)
@@ -3112,9 +3112,9 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
             slot_count: 0,
             declaration: i as u32,
             instantiated_at: NODE_NONE,
-            param_types: vec.Vec[SemaType] { arena: arena },
-            arguments: vec.Vec[SemaType] { arena: arena },
-            nodes: vec.Vec[SemaNode] { arena: arena },
+            param_types: Vec[SemaType] { arena: arena },
+            arguments: Vec[SemaType] { arena: arena },
+            nodes: Vec[SemaNode] { arena: arena },
         }
         sf.param_types.init(arena, 8)
         out.functions.push(&sf)

@@ -2,7 +2,7 @@ import std.file
 import std.mem
 import std.os
 import std.str
-import std.vec
+import std.collections { Vec }
 
 ext fun lunso_sys_access(path: *const u8, mode: i32): i64
 ext fun lunso_sys_open_dir(path: *const u8): i64
@@ -153,8 +153,8 @@ pub fun remove_dir(path: []const u8): !void {
     }
 }
 
-pub fun read_dir(path: []const u8, arena: *mem.Arena): !vec.Vec[os.DirEntry] {
-    var out: vec.Vec[os.DirEntry]
+pub fun read_dir(path: []const u8, arena: *mem.Arena): !Vec[os.DirEntry] {
+    var out: Vec[os.DirEntry]
     if os.list_dir(path, arena, &out) < 0 {
         return fail("read_dir failed")
     }
