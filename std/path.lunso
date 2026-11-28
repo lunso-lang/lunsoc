@@ -61,7 +61,7 @@ pub fun basename(p: []const u8): []const u8 {
 
 pub fun extension(p: []const u8): []const u8 {
     var base = basename(p)
-    if len(base) == 0 || str.equals(base, "/") {
+    if len(base) == 0 || base == "/" {
         return ""
     }
     var i = len(base) - 1
@@ -113,11 +113,11 @@ pub fun normalize(arena: *mem.Arena, p: []const u8): []u8 {
             i += 1
         }
         var seg = p[start..i]
-        if str.equals(seg, ".") {
+        if seg == "." {
             continue
         }
-        if str.equals(seg, "..") {
-            if parts.len > 0 && !str.equals(parts.data[parts.len - 1], "..") {
+        if seg == ".." {
+            if parts.len > 0 && parts.data[parts.len - 1] != ".." {
                 parts.pop(null)
             } else if !abs {
                 parts.push_value(seg)
