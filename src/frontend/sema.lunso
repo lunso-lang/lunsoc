@@ -1,5 +1,4 @@
 import std.mem
-import std.str
 import std.collections.Vec
 import frontend.ast.*
 
@@ -357,7 +356,7 @@ fun node_ident_span(tree: *Ast, id: u32): Span {
 }
 
 fun same_span(tree: *Ast, a: Span, b: Span): bool {
-    return str.equals(span_bytes(tree, a), span_bytes(tree, b))
+    return span_bytes(tree, a) == span_bytes(tree, b)
 }
 
 fun fail_at(c: *Checker, offset: u32, msg: []u8): SemaType {
@@ -469,7 +468,7 @@ fun find_in_module(c: *Checker, name: Span, kind: AstBindingKind): u32 {
     var bs = (c.tree.modules.data[c.module].bindings).as_slice()
     var target = span_bytes(c.tree, name)
     for b in bs {
-        if b.kind == kind && str.equals(b.name, target) {
+        if b.kind == kind && b.name == target {
             return b.index
         }
     }
@@ -680,19 +679,19 @@ fun int_fits_type(bits: u64, negative: bool, kind: TypeKind): bool {
 }
 
 fun resolve_primitive(name: []u8): TypeKind {
-    if str.equals(name, "bool") { return TypeKind.Bool }
-    if str.equals(name, "i8") { return TypeKind.I8 }
-    if str.equals(name, "i16") { return TypeKind.I16 }
-    if str.equals(name, "i32") { return TypeKind.I32 }
-    if str.equals(name, "i64") { return TypeKind.I64 }
-    if str.equals(name, "int") { return TypeKind.I64 }
-    if str.equals(name, "u8") { return TypeKind.U8 }
-    if str.equals(name, "u16") { return TypeKind.U16 }
-    if str.equals(name, "u32") { return TypeKind.U32 }
-    if str.equals(name, "u64") { return TypeKind.U64 }
-    if str.equals(name, "f32") { return TypeKind.F32 }
-    if str.equals(name, "f64") { return TypeKind.F64 }
-    if str.equals(name, "any") { return TypeKind.Any }
+    if name == "bool" { return TypeKind.Bool }
+    if name == "i8" { return TypeKind.I8 }
+    if name == "i16" { return TypeKind.I16 }
+    if name == "i32" { return TypeKind.I32 }
+    if name == "i64" { return TypeKind.I64 }
+    if name == "int" { return TypeKind.I64 }
+    if name == "u8" { return TypeKind.U8 }
+    if name == "u16" { return TypeKind.U16 }
+    if name == "u32" { return TypeKind.U32 }
+    if name == "u64" { return TypeKind.U64 }
+    if name == "f32" { return TypeKind.F32 }
+    if name == "f64" { return TypeKind.F64 }
+    if name == "any" { return TypeKind.Any }
     return TypeKind.Invalid
 }
 
@@ -932,7 +931,7 @@ fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
                     return c.type_arguments[i]
                 }
             }
-            if str.equals(text, "Self") && c.owner_struct != (~0 as u32) {
+            if text == "Self" && c.owner_struct != (~0 as u32) {
                 return resolve_self_type(c, id, allow_incomplete)
             }
             var prim = resolve_primitive(text)
@@ -1033,7 +1032,7 @@ fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
             var is_void = false
             match nodes[inner_id].data {
                 AstData.TypeName(nlen) => {
-                    if str.equals(span_bytes(c.tree, node_span(c.tree, inner_id, nlen)), "void") {
+                    if span_bytes(c.tree, node_span(c.tree, inner_id, nlen)) == "void" {
                         is_void = true
                     }
                 }
@@ -1332,8 +1331,8 @@ fun resolve_trait_ref(c: *Checker, id: u32): u32 {
                 return tidx
             }
             var text = span_bytes(c.tree, name)
-            if str.equals(text, "Eq") { return BUILTIN_TRAIT_EQ }
-            if str.equals(text, "Hash") { return BUILTIN_TRAIT_HASH }
+            if text == "Eq" { return BUILTIN_TRAIT_EQ }
+            if text == "Hash" { return BUILTIN_TRAIT_HASH }
             fail(c, id, "unknown trait")
             return ~0 as u32
         }
@@ -1355,7 +1354,7 @@ fun resolve_trait_ref(c: *Checker, id: u32): u32 {
 fun is_eq_trait(c: *Checker, tidx: u32): bool {
     if tidx == BUILTIN_TRAIT_EQ { return true }
     if tidx < (c.tree.traits.len as u32) {
-        return str.equals(span_bytes(c.tree, c.tree.traits.data[tidx].name), "Eq")
+        return span_bytes(c.tree, c.tree.traits.data[tidx].name) == "Eq"
     }
     return false
 }
@@ -1363,7 +1362,7 @@ fun is_eq_trait(c: *Checker, tidx: u32): bool {
 fun is_hash_trait(c: *Checker, tidx: u32): bool {
     if tidx == BUILTIN_TRAIT_HASH { return true }
     if tidx < (c.tree.traits.len as u32) {
-        return str.equals(span_bytes(c.tree, c.tree.traits.data[tidx].name), "Hash")
+        return span_bytes(c.tree, c.tree.traits.data[tidx].name) == "Hash"
     }
     return false
 }
@@ -1375,7 +1374,7 @@ fun is_byte_slice(t: SemaType): bool {
 fun find_method_idx_by_bytes(c: *Checker, struct_decl: u32, name: []u8): u32 {
     var fns = c.tree.functions.as_slice()
     for i, f in fns {
-        if f.owner_struct == struct_decl && str.equals(span_bytes(c.tree, f.name), name) {
+        if f.owner_struct == struct_decl && span_bytes(c.tree, f.name) == name {
             return i as u32
         }
     }
@@ -1865,11 +1864,11 @@ fun eval_const_expr(c: *Checker, id: u32, expected: SemaType, out_bits: *u64, ou
         AstData.Identifier(nlen) => {
             var name = node_span(c.tree, id, nlen)
             var text = span_bytes(c.tree, name)
-            if str.equals(text, "true") {
+            if text == "true" {
                 *out_bits = 1
                 return simple_type(TypeKind.Bool)
             }
-            if str.equals(text, "false") {
+            if text == "false" {
                 *out_bits = 0
                 return simple_type(TypeKind.Bool)
             }
@@ -2611,10 +2610,10 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         AstData.Identifier(nlen) => {
             var name = node_span(c.tree, id, nlen)
             var text = span_bytes(c.tree, name)
-            if str.equals(text, "true") || str.equals(text, "false") {
+            if text == "true" || text == "false" {
                 var sn = node_info(c, id)
                 sn.is_boolean_literal = true
-                if str.equals(text, "true") {
+                if text == "true" {
                     sn.binding = 1
                 } else {
                     sn.binding = 0
@@ -2755,7 +2754,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                     match nodes[tid].data {
                         AstData.Identifier(tlen) => {
                             var tspan = node_span(c.tree, tid, tlen)
-                            if str.equals(span_bytes(c.tree, tspan), "Self") && c.owner_struct != (~0 as u32) {
+                            if span_bytes(c.tree, tspan) == "Self" && c.owner_struct != (~0 as u32) {
                                 si = resolve_self_type(c, tid, false).record
                             } else {
                                 si = find_struct_idx(c, tspan)
@@ -2763,7 +2762,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                         }
                         AstData.TypeName(tlen) => {
                             var tspan = node_span(c.tree, tid, tlen)
-                            if str.equals(span_bytes(c.tree, tspan), "Self") && c.owner_struct != (~0 as u32) {
+                            if span_bytes(c.tree, tspan) == "Self" && c.owner_struct != (~0 as u32) {
                                 si = resolve_self_type(c, tid, false).record
                             } else {
                                 si = find_struct_idx(c, tspan)
@@ -2898,11 +2897,11 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                     var mname = node_span(c.tree, callee, c_mem_len)
                     var mbytes = span_bytes(c.tree, mname)
                     if base_t.kind != TypeKind.Struct {
-                        if app == NODE_NONE && str.equals(mbytes, "hash") && cr.count == 1 && supports_hash(c, base_t) {
+                        if app == NODE_NONE && mbytes == "hash" && cr.count == 1 && supports_hash(c, base_t) {
                             var sn = node_info(c, id)
                             sn.builtin = SemaBuiltin.Hash
                             res = simple_type(TypeKind.U64)
-                        } else if app == NODE_NONE && str.equals(mbytes, "eq") && cr.count == 2 && supports_eq(c, base_t) {
+                        } else if app == NODE_NONE && mbytes == "eq" && cr.count == 2 && supports_eq(c, base_t) {
                             var arg_id = children[cr.first + 1]
                             var arg_t = check_expr(c, arg_id, empty_type())
                             if !c.has_error {
@@ -2921,11 +2920,11 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                         var sr = c.sema.records.data[base_t.record]
                         var fi = find_method_idx(c, sr.declaration, mname)
                         if fi == (~0 as u32) {
-                            if app == NODE_NONE && str.equals(mbytes, "hash") && cr.count == 1 && supports_hash(c, base_t) {
+                            if app == NODE_NONE && mbytes == "hash" && cr.count == 1 && supports_hash(c, base_t) {
                                 var sn = node_info(c, id)
                                 sn.builtin = SemaBuiltin.Hash
                                 res = simple_type(TypeKind.U64)
-                            } else if app == NODE_NONE && str.equals(mbytes, "eq") && cr.count == 2 && supports_eq(c, base_t) {
+                            } else if app == NODE_NONE && mbytes == "eq" && cr.count == 2 && supports_eq(c, base_t) {
                                 var arg_id = children[cr.first + 1]
                                 var arg_t = check_expr(c, arg_id, empty_type())
                                 if !c.has_error {
@@ -3053,11 +3052,11 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                 if !has_q && app == NODE_NONE {
                     var cname = node_span(c.tree, callee, c_ident_len)
                     var text = span_bytes(c.tree, cname)
-                    if str.equals(text, "len") || str.equals(text, "data") || str.equals(text, "size_of") || (str.equals(text, "fail") && find_fn_idx(c, cname) == (~0 as u32)) {
+                    if text == "len" || text == "data" || text == "size_of" || (text == "fail" && find_fn_idx(c, cname) == (~0 as u32)) {
                         is_builtin = true
                         if cr.count != 2 {
                             res = fail(c, id, "builtin expects 1 argument")
-                        } else if str.equals(text, "fail") {
+                        } else if text == "fail" {
                             var arg = children[cr.first + 1]
                             var msg_t = simple_type(TypeKind.Slice)
                             msg_t.element = TypeKind.U8
@@ -3075,14 +3074,14 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                             var at = check_expr(c, arg, empty_type())
                             if !c.has_error {
                                 var sn = node_info(c, id)
-                                if str.equals(text, "len") {
+                                if text == "len" {
                                     if at.kind != TypeKind.Array && at.kind != TypeKind.Slice {
                                         res = fail(c, arg, "len requires an array or slice")
                                     } else {
                                         sn.builtin = SemaBuiltin.Len
                                         res = simple_type(TypeKind.I64)
                                     }
-                                } else if str.equals(text, "data") {
+                                } else if text == "data" {
                                     if at.kind != TypeKind.Array && at.kind != TypeKind.Slice {
                                         res = fail(c, arg, "data requires an array or slice")
                                     } else {
@@ -3261,12 +3260,12 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                     }
                     if bt.kind == TypeKind.Any {
                         var sn = node_info(c, id)
-                        if str.equals(span_bytes(c.tree, mname), "ptr") {
+                        if span_bytes(c.tree, mname) == "ptr" {
                             res = simple_type(TypeKind.Pointer)
                             res.pointee = add_pointee(c, simple_type(TypeKind.U8))
                             res.read_only = true
                             sn.binding = 0
-                        } else if str.equals(span_bytes(c.tree, mname), "tag") {
+                        } else if span_bytes(c.tree, mname) == "tag" {
                             res = simple_type(TypeKind.U64)
                             sn.binding = 8
                         } else {
@@ -3475,7 +3474,7 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                 if bop == BinaryOp.Assign {
                     match nodes[lhs_id].data {
                         AstData.Identifier(l) => {
-                            if str.equals(span_bytes(c.tree, node_span(c.tree, lhs_id, l)), "_") {
+                            if span_bytes(c.tree, node_span(c.tree, lhs_id, l)) == "_" {
                                 is_discard = true
                             }
                         }
@@ -3738,7 +3737,7 @@ fun check_statement(c: *Checker, id: u32): bool {
             }
             if c.has_error { return true }
             var sn = node_info(c, id)
-            if str.equals(span_bytes(c.tree, name), "_") {
+            if span_bytes(c.tree, name) == "_" {
                 sn.binding = ~0 as u32
                 sn.type_info = vt
             } else {
@@ -3935,7 +3934,7 @@ fun check_statement(c: *Checker, id: u32): bool {
                                 }
                                 var bname = node_span(c.tree, arg_id, blen)
                                 var bbytes = span_bytes(c.tree, bname)
-                                if str.equals(bbytes, "_") {
+                                if bbytes == "_" {
                                     node_info(c, arg_id).binding = ~0 as u32
                                 } else {
                                     if find_local(c, bname, c.scope_depth) >= 0 {
@@ -4114,7 +4113,7 @@ fun check_statement(c: *Checker, id: u32): bool {
                 if h.index_name.length > 0 {
                     var idx_slot = c.slot_count
                     c.slot_count += 1
-                    if !str.equals(span_bytes(c.tree, h.index_name), "_") {
+                    if span_bytes(c.tree, h.index_name) != "_" {
                         var ilv = LocalVar {
                             name: h.index_name,
                             slot: idx_slot,
@@ -4128,7 +4127,7 @@ fun check_statement(c: *Checker, id: u32): bool {
                 }
                 var item_slot = c.slot_count
                 c.slot_count += 1
-                if !str.equals(span_bytes(c.tree, h.item_name), "_") {
+                if span_bytes(c.tree, h.item_name) != "_" {
                     var lv = LocalVar {
                         name: h.item_name,
                         slot: item_slot,
