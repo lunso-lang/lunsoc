@@ -3517,7 +3517,8 @@ fun check_statement(c: *Checker, id: u32): bool {
         var has_else = false
         var arm_falls = false
         var pattern_count: u32 = 0
-        var match_start = c.sema.match_values.len
+        var seen_vals: Vec[u64]
+        seen_vals.init(c.arena, 16)
         for var i: u32 = 1; i < node.b && !c.has_error; i += 1 {
             var arm_id = children[node.a + i]
             var arm = nodes[arm_id]
@@ -3620,14 +3621,15 @@ fun check_statement(c: *Checker, id: u32): bool {
                         }
                     }
                     if !c.has_error {
-                        var mvals = c.sema.match_values.as_slice()
-                        for var prev = match_start as i64; prev < len(mvals); prev += 1 {
-                            if mvals[prev] == (v_idx as u64) {
+                        var svals = seen_vals.as_slice()
+                        for var prev: i64 = 0; prev < len(svals); prev += 1 {
+                            if svals[prev] == (v_idx as u64) {
                                 fail(c, pat_id, "duplicate match pattern")
                                 break
                             }
                         }
                         if !c.has_error {
+                            seen_vals.push_value(v_idx as u64)
                             var mv_idx = c.sema.match_values.len as u32
                             c.sema.match_values.push_value(v_idx as u64)
                             var psn = node_info(c, pat_id)
@@ -3647,14 +3649,15 @@ fun check_statement(c: *Checker, id: u32): bool {
                         if !same_type(c, pt, st) && !(!is_enum(pt) && !is_enum(st) && can_widen_num(pt.kind, st.kind)) {
                             fail(c, pat_id, "match pattern type mismatch")
                         } else {
-                            var mvals = c.sema.match_values.as_slice()
-                            for var prev = match_start as i64; prev < len(mvals); prev += 1 {
-                                if mvals[prev] == pbits {
+                            var svals = seen_vals.as_slice()
+                            for var prev: i64 = 0; prev < len(svals); prev += 1 {
+                                if svals[prev] == pbits {
                                     fail(c, pat_id, "duplicate match pattern")
                                     break
                                 }
                             }
                             if !c.has_error {
+                                seen_vals.push_value(pbits)
                                 var mv_idx = c.sema.match_values.len as u32
                                 c.sema.match_values.push_value(pbits)
                                 var sn = node_info(c, pat_id)
