@@ -3,63 +3,28 @@ import std.collections.Vec
 
 pub const NODE_NONE: u32 = 0
 
-pub enum AstKind : u8 {
-    Invalid,
-    Function,
-    Struct,
-    Enum,
-    EnumCase,
-    Trait,
-    Const,
-    Import,
-    ImportItem,
-    Field,
-    Parameter,
-    TypeName,
-    QualifiedType,
-    ArrayType,
-    ConstType,
-    PointerType,
-    ResultType,
-    FuncType,
-    GenericType,
-    Block,
-    Return,
-    If,
-    Match,
-    MatchType,
-    MatchArm,
-    For,
-    ForCStyle,
-    ForIn,
-    Break,
-    Continue,
-    Defer,
-    Var,
-    Identifier,
-    Integer,
-    Float,
-    String,
-    Null,
-    ArrayLiteral,
-    StructLiteral,
-    StructFieldInit,
-    Call,
-    GenericCallee,
-    Index,
-    Slice,
-    SliceRange,
-    Member,
-    Cast,
-    Spread,
-    Try,
-    OrElse,
-    AddressOf,
-    Dereference,
+pub struct Span {
+    offset: u32
+    length: u32
+}
+
+pub struct NodeRange {
+    first: u32
+    count: u32
+}
+
+pub enum UnaryOp : u8, Eq {
     Positive,
     Negate,
     LogicalNot,
     BitNot,
+    AddressOf,
+    Dereference,
+    Try,
+    Spread,
+}
+
+pub enum BinaryOp : u8, Eq {
     Add,
     Subtract,
     Multiply,
@@ -91,21 +56,181 @@ pub enum AstKind : u8 {
     AssignShiftRight,
 }
 
-pub struct Span {
-    offset: u32
-    length: u32
+pub struct AstEnumCase {
+    name_length: u32
+    fields: NodeRange
+    value: u32
+    has_payload: bool
 }
 
-pub struct NodeRange {
-    first: u32
+pub struct AstImportItem {
+    name_length: u32
+    alias_node: u32
+}
+
+pub struct AstNamedType {
+    name_length: u32
+    type_node: u32
+}
+
+pub struct AstTypeParam {
+    name_length: u32
+    bounds: NodeRange
+}
+
+pub struct AstArrayType {
+    elem: u32
     count: u32
 }
 
+pub struct AstPointerType {
+    pointee: u32
+    read_only: bool
+}
+
+pub struct AstIf {
+    condition: u32
+    then_branch: u32
+    else_branch: u32
+}
+
+pub struct AstForHeader {
+    initializer: u32
+    condition: u32
+    step: u32
+    body: u32
+    label: Span
+}
+
+pub struct AstForInHeader {
+    index_name: Span
+    item_name: Span
+    iterable: u32
+    range_end: u32
+    body: u32
+    label: Span
+}
+
+pub struct AstOrElse {
+    expr: u32
+    err_name: Span
+    handler: u32
+    is_block: bool
+}
+
+pub struct AstFuncType {
+    params: NodeRange
+    return_type: u32
+}
+
+pub struct AstVariable {
+    name_length: u32
+    type_node: u32
+    initializer: u32
+}
+
+pub struct AstStructLiteral {
+    type_node: u32
+    fields: NodeRange
+}
+
+pub struct AstStructFieldInit {
+    name_length: u32
+    value: u32
+}
+
+pub struct AstIndex {
+    base: u32
+    idx: u32
+}
+
+pub struct AstSlice {
+    base: u32
+    range: u32
+}
+
+pub struct AstSliceRange {
+    start: u32
+    end: u32
+}
+
+pub struct AstMember {
+    base: u32
+    name_length: u32
+}
+
+pub struct AstCast {
+    expr: u32
+    target_type: u32
+}
+
+pub struct AstUnary {
+    op: UnaryOp
+    operand: u32
+}
+
+pub struct AstBinary {
+    op: BinaryOp
+    left: u32
+    right: u32
+}
+
+pub enum AstData {
+    Invalid,
+    Function(u32),
+    Struct(u32),
+    Enum(u32),
+    EnumCase(AstEnumCase),
+    Trait(u32),
+    Const(u32),
+    Import(u32),
+    ImportItem(AstImportItem),
+    Field(AstNamedType),
+    Parameter(AstNamedType),
+    TypeParam(AstTypeParam),
+    TypeName(u32),
+    QualifiedType(NodeRange),
+    ArrayType(AstArrayType),
+    ConstType(u32),
+    PointerType(AstPointerType),
+    ResultType(u32),
+    FuncType(AstFuncType),
+    GenericType(NodeRange),
+    Block(NodeRange),
+    Return(u32),
+    If(AstIf),
+    Match(NodeRange),
+    MatchType(NodeRange),
+    MatchArm(NodeRange),
+    For(AstForHeader),
+    ForIn(AstForInHeader),
+    Break(u32),
+    Continue(u32),
+    Defer(u32),
+    Var(AstVariable),
+    Identifier(u32),
+    Integer(u32),
+    Float(u32),
+    String(u32),
+    Null,
+    ArrayLiteral(NodeRange),
+    StructLiteral(AstStructLiteral),
+    StructFieldInit(AstStructFieldInit),
+    Call(NodeRange),
+    GenericCallee(NodeRange),
+    Index(AstIndex),
+    Slice(AstSlice),
+    SliceRange(AstSliceRange),
+    Member(AstMember),
+    Cast(AstCast),
+    OrElse(AstOrElse),
+    Unary(AstUnary),
+    Binary(AstBinary),
+}
+
 pub struct AstNode {
-    kind: AstKind
-    a: u32
-    b: u32
     pos: u32
+    data: AstData
 }
 
 pub struct AstFunction {
@@ -121,13 +246,6 @@ pub struct AstFunction {
     is_variadic: bool
 }
 
-pub struct AstTrait {
-    name: Span
-    methods: NodeRange
-    module: u32
-    public: bool
-}
-
 pub struct AstStruct {
     name: Span
     fields: NodeRange
@@ -135,12 +253,6 @@ pub struct AstStruct {
     traits: NodeRange
     module: u32
     public: bool
-}
-
-pub struct AstEnumCase {
-    fields: NodeRange
-    value: u32
-    has_payload: bool
 }
 
 pub struct AstEnum {
@@ -152,6 +264,13 @@ pub struct AstEnum {
     module: u32
     public: bool
     has_payload: bool
+}
+
+pub struct AstTrait {
+    name: Span
+    methods: NodeRange
+    module: u32
+    public: bool
 }
 
 pub struct AstConst {
@@ -174,44 +293,6 @@ pub struct AstImport {
     items: NodeRange
     alias: Span
     kind: ImportKind
-}
-
-pub struct AstIfBranches {
-    then_branch: u32
-    else_branch: u32
-}
-
-pub struct AstForHeader {
-    initializer: u32
-    condition: u32
-    step: u32
-    label: Span
-}
-
-pub struct AstForInHeader {
-    index_name: Span
-    item_name: Span
-    iterable: u32
-    range_end: u32
-    label: Span
-}
-
-pub struct AstOrElse {
-    expr: u32
-    err_name: Span
-    handler: u32
-    is_block: bool
-}
-
-pub struct AstFuncType {
-    params: NodeRange
-    return_type: u32
-}
-
-pub struct AstVariable {
-    name_length: u32
-    type_node: u32
-    initializer: u32
 }
 
 pub enum AstBindingKind : u8 {
@@ -248,17 +329,9 @@ pub struct Ast {
     functions: Vec[AstFunction]
     structs: Vec[AstStruct]
     enums: Vec[AstEnum]
-    enum_cases: Vec[AstEnumCase]
     traits: Vec[AstTrait]
-    type_bounds: Vec[NodeRange]
     consts: Vec[AstConst]
     imports: Vec[AstImport]
-    if_branches: Vec[AstIfBranches]
-    for_headers: Vec[AstForHeader]
-    for_in_headers: Vec[AstForInHeader]
-    or_elses: Vec[AstOrElse]
-    func_types: Vec[AstFuncType]
-    variables: Vec[AstVariable]
     modules: Vec[AstModuleScope]
     qualified: Vec[AstQualified]
     declarations: NodeRange
@@ -272,20 +345,12 @@ pub fun init(arena: *mem.Arena, source: []u8, out: *Ast): bool {
     if out.functions.init(arena, 32) < 0 { return false }
     if out.structs.init(arena, 16) < 0 { return false }
     if out.enums.init(arena, 16) < 0 { return false }
-    if out.enum_cases.init(arena, 32) < 0 { return false }
     if out.traits.init(arena, 16) < 0 { return false }
-    if out.type_bounds.init(arena, 16) < 0 { return false }
     if out.consts.init(arena, 16) < 0 { return false }
     if out.imports.init(arena, 16) < 0 { return false }
-    if out.if_branches.init(arena, 32) < 0 { return false }
-    if out.for_headers.init(arena, 16) < 0 { return false }
-    if out.for_in_headers.init(arena, 16) < 0 { return false }
-    if out.or_elses.init(arena, 16) < 0 { return false }
-    if out.func_types.init(arena, 16) < 0 { return false }
-    if out.variables.init(arena, 32) < 0 { return false }
     if out.modules.init(arena, 8) < 0 { return false }
     if out.qualified.init(arena, 16) < 0 { return false }
-    var zero = AstNode { kind: AstKind.Invalid, a: 0, b: 0, pos: 0 }
+    var zero = AstNode { pos: 0, data: AstData.Invalid }
     return out.nodes.push(&zero) >= 0
 }
 
@@ -308,9 +373,9 @@ pub fun find_qualified(tree: *Ast, node: u32, out: *AstQualified): bool {
     return false
 }
 
-pub fun add_node(ast: *Ast, kind: AstKind, pos: u32, a: u32, b: u32): u32 {
+pub fun add_node(ast: *Ast, pos: u32, data: AstData): u32 {
     var id = ast.nodes.len as u32
-    var node = AstNode { kind: kind, a: a, b: b, pos: pos }
+    var node = AstNode { pos: pos, data: data }
     if ast.nodes.push(&node) < 0 {
         return NODE_NONE
     }
