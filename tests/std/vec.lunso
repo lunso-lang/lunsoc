@@ -1,5 +1,5 @@
 import std.mem
-import std.vec
+import std.collections { Vec }
 
 struct Token {
     kind: i32
@@ -13,18 +13,18 @@ fun main(): i32 {
         return 1
     }
 
-    var nums: vec.Vec[i32]
-    if vec.init.[i32](&nums, &arena, 0) < 0 {
+    var nums: Vec[i32]
+    if nums.init(&arena, 0) < 0 {
         mem.deinit(&arena)
         return 2
     }
-    if len(vec.as_slice.[i32](&nums)) != 0 {
+    if len(nums.as_slice()) != 0 {
         mem.deinit(&arena)
         return 3
     }
 
     for var i: i32 = 0; i < 25; i += 1 {
-        if vec.push_value.[i32](&nums, i * 3) < 0 {
+        if nums.push_value(i * 3) < 0 {
             mem.deinit(&arena)
             return 4
         }
@@ -34,60 +34,60 @@ fun main(): i32 {
         return 5
     }
 
-    var slice = vec.as_slice.[i32](&nums)
+    var slice = nums.as_slice()
     if len(slice) != 25 || slice[0] != 0 || slice[24] != 72 {
         mem.deinit(&arena)
         return 6
     }
 
     var out: i32 = 0
-    if !vec.get.[i32](&nums, 10, &out) || out != 30 {
+    if !nums.get(10, &out) || out != 30 {
         mem.deinit(&arena)
         return 7
     }
-    if vec.get.[i32](&nums, 25, &out) {
+    if nums.get(25, &out) {
         mem.deinit(&arena)
         return 8
     }
 
-    if !vec.pop.[i32](&nums, &out) || out != 72 || nums.len != 24 {
+    if !nums.pop(&out) || out != 72 || nums.len != 24 {
         mem.deinit(&arena)
         return 9
     }
 
-    vec.clear.[i32](&nums)
+    nums.clear()
     if nums.len != 0 {
         mem.deinit(&arena)
         return 10
     }
 
     var extra: [3]i32 = [100, 200, 300]
-    if vec.append_slice.[i32](&nums, extra[0..3]) < 0 || nums.len != 3 || nums.data[2] != 300 {
+    if nums.append_slice(extra[0..3]) < 0 || nums.len != 3 || nums.data[2] != 300 {
         mem.deinit(&arena)
         return 15
     }
-    var buf: vec.Vec[u8]
-    if vec.init.[u8](&buf, &arena, 4) < 0 ||
-       vec.append_slice.[u8](&buf, "Content-Length: ") < 0 ||
-       vec.append_slice.[u8](&buf, "42") < 0 ||
+    var buf: Vec[u8]
+    if buf.init(&arena, 4) < 0 ||
+       buf.append_slice("Content-Length: ") < 0 ||
+       buf.append_slice("42") < 0 ||
        buf.len != 18 || buf.data[0] != 'C' || buf.data[17] != '2' {
         mem.deinit(&arena)
         return 16
     }
 
-    var tokens: vec.Vec[Token]
-    if vec.init.[Token](&tokens, &arena, 2) < 0 {
+    var tokens: Vec[Token]
+    if tokens.init(&arena, 2) < 0 {
         mem.deinit(&arena)
         return 11
     }
     for var j: u64 = 0; j < 10; j += 1 {
-        if vec.push_value.[Token](&tokens, Token { kind: (j as i32) + 1, offset: j * 4, size: 2 }) < 0 {
+        if tokens.push_value(Token { kind: (j as i32) + 1, offset: j * 4, size: 2 }) < 0 {
             mem.deinit(&arena)
             return 12
         }
     }
     var tok: Token
-    if !vec.get.[Token](&tokens, 9, &tok) || tok.kind != 10 || tok.offset != 36 || tok.size != 2 {
+    if !tokens.get(9, &tok) || tok.kind != 10 || tok.offset != 36 || tok.size != 2 {
         mem.deinit(&arena)
         return 13
     }

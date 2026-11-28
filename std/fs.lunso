@@ -2,7 +2,7 @@ import std.file
 import std.mem
 import std.os
 import std.str
-import std.vec
+import std.collections { Vec }
 
 ext fun lunso_sys_access(path: *const u8, mode: i32): i64
 ext fun lunso_sys_open_dir(path: *const u8): i64
@@ -36,7 +36,6 @@ pub fun write_file(path: []const u8, bytes: []const u8): !void {
     if file.write_all(path, bytes) < 0 {
         return fail("write_file failed")
     }
-    return
 }
 
 pub fun copy_file(src: []const u8, dst: []const u8): !i64 {
@@ -107,7 +106,6 @@ pub fun create_dir(path: []const u8): !void {
     if os.mkdir(path) < 0 {
         return fail("create_dir failed")
     }
-    return
 }
 
 pub fun create_dir_all(path: []const u8): !void {
@@ -141,25 +139,22 @@ pub fun create_dir_all(path: []const u8): !void {
         }
         return fail("create_dir_all failed")
     }
-    return
 }
 
 pub fun remove_file(path: []const u8): !void {
     if os.remove(path) < 0 {
         return fail("remove_file failed")
     }
-    return
 }
 
 pub fun remove_dir(path: []const u8): !void {
     if os.rmdir(path) < 0 {
         return fail("remove_dir failed")
     }
-    return
 }
 
-pub fun read_dir(path: []const u8, arena: *mem.Arena): !vec.Vec[os.DirEntry] {
-    var out: vec.Vec[os.DirEntry]
+pub fun read_dir(path: []const u8, arena: *mem.Arena): !Vec[os.DirEntry] {
+    var out: Vec[os.DirEntry]
     if os.list_dir(path, arena, &out) < 0 {
         return fail("read_dir failed")
     }
@@ -178,7 +173,6 @@ pub fun rename(old_path: []const u8, new_path: []const u8): !void {
     if lunso_sys_rename(data(obuf), data(nbuf)) < 0 {
         return fail("rename failed")
     }
-    return
 }
 
 pub fun remove_all(path: []const u8, arena: *mem.Arena): !void {
@@ -202,5 +196,4 @@ pub fun remove_all(path: []const u8, arena: *mem.Arena): !void {
         }
     }
     remove_dir(path)?
-    return
 }

@@ -1,6 +1,6 @@
 import std.mem
 import std.str
-import std.vec
+import std.collections { Vec }
 
 pub fun is_abs(p: []const u8): bool {
     return len(p) > 0 && p[0] == '/'
@@ -97,7 +97,7 @@ pub fun with_extension(arena: *mem.Arena, p: []const u8, new_ext: []const u8): [
 
 pub fun normalize(arena: *mem.Arena, p: []const u8): []u8 {
     var abs = is_abs(p)
-    var parts: vec.Vec[[]const u8]
+    var parts: Vec[[]const u8]
     if parts.init(arena, 16) < 0 {
         return ""
     }
@@ -118,8 +118,7 @@ pub fun normalize(arena: *mem.Arena, p: []const u8): []u8 {
         }
         if str.equals(seg, "..") {
             if parts.len > 0 && !str.equals(parts.data[parts.len - 1], "..") {
-                var popped: []const u8
-                parts.pop(&popped)
+                parts.pop(null)
             } else if !abs {
                 parts.push_value(seg)
             }
@@ -131,7 +130,7 @@ pub fun normalize(arena: *mem.Arena, p: []const u8): []u8 {
         if abs { return "/" }
         return "."
     }
-    var out: vec.Vec[u8]
+    var out: Vec[u8]
     if out.init(arena, (n + 2) as u64) < 0 {
         return ""
     }
@@ -161,67 +160,64 @@ fun is_uri_safe(ch: u8): bool {
     return ch == '/' || ch == '-' || ch == '.' || ch == '_' || ch == '~'
 }
 
-pub fun from_file_uri(arena: *mem.Arena, uri: []const u8, out: *[]u8): bool {
-    if (arena as u64) == 0 || (out as u64) == 0 || !str.starts_with(uri, "file://") {
-        return false
+pub fun from_file_uri(arena: *mem.Arena, uri: []const u8): ![]u8 {
+    if arena == null || !str.starts_with(uri, "file://") {
+        return fail("invalid file URI")
     }
     var rest = uri[7..len(uri)]
     if str.starts_with(rest, "localhost/") {
         rest = rest[9..len(rest)]
     }
     if len(rest) == 0 || rest[0] != '/' {
-        return false
+        return fail("invalid file URI path")
     }
-    var buf: vec.Vec[u8]
+    var buf: Vec[u8]
     if buf.init(arena, len(rest) as u64) < 0 {
-        return false
+        return fail("out of memory")
     }
     for var i: i64 = 0; i < len(rest); i += 1 {
         var ch = rest[i]
         if ch == '%' {
             if i + 2 >= len(rest) {
-                return false
+                return fail("invalid percent-encoding")
             }
             var hi = hex_val(rest[i + 1])
             var lo = hex_val(rest[i + 2])
             if hi < 0 || lo < 0 {
-                return false
+                return fail("invalid percent-encoding")
             }
             var byte = ((hi << 4) | lo) as u8
             if byte == 0 {
-                return false
+                return fail("NUL byte in URI")
             }
-            if buf.push_value(byte) < 0 { return false }
+            if buf.push_value(byte) < 0 { return fail("out of memory") }
             i += 2
         } else {
-            if buf.push_value(ch) < 0 { return false }
+            if buf.push_value(ch) < 0 { return fail("out of memory") }
         }
     }
-    *out = buf.as_slice()
-    return true
+    return buf.as_slice()
 }
 
-pub fun to_file_uri(arena: *mem.Arena, p: []const u8, out: *[]u8): bool {
-    if (arena as u64) == 0 || (out as u64) == 0 || len(p) == 0 || p[0] != '/' {
-        return false
+pub fun to_file_uri(arena: *mem.Arena, p: []const u8): ![]u8 {
+    if arena == null || len(p) == 0 || p[0] != '/' {
+        return fail("path must be absolute")
     }
-    var buf: vec.Vec[u8]
+    var buf: Vec[u8]
     if buf.init(arena, (len(p) + 8) as u64) < 0 {
-        return false
+        return fail("out of memory")
     }
     if buf.append_slice("file://") < 0 {
-        return false
+        return fail("out of memory")
     }
     var hex = "0123456789ABCDEF"
-    for var i: i64 = 0; i < len(p); i += 1 {
-        var ch = p[i]
+    for ch in p {
         if is_uri_safe(ch) {
-            if buf.push_value(ch) < 0 { return false }
+            if buf.push_value(ch) < 0 { return fail("out of memory") }
         } else {
-            var esc: [3]u8 = ['%', hex[((ch >> 4) & 15) as i64], hex[(ch & 15) as i64]]
-            if buf.append_slice(esc[0..3]) < 0 { return false }
+            var esc: [3]u8 = ['%', hex[(ch >> 4) & 15], hex[ch & 15]]
+            if buf.append_slice(esc[0..3]) < 0 { return fail("out of memory") }
         }
     }
-    *out = buf.as_slice()
-    return true
+    return buf.as_slice()
 }

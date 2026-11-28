@@ -20,10 +20,12 @@ fun main(): i32 {
         return 1
     }
 
-    var argv: [][]u8
-    var n = args.load(&arena, &argv)
-    if n != 4 || len(argv) != 4 {
-        mem.deinit(&arena)
+    var argv = args.load(&arena) or {
+        arena.deinit()
+        return 2
+    }
+    if len(argv) != 4 {
+        arena.deinit()
         return 2
     }
 

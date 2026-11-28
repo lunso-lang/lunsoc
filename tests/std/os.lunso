@@ -2,7 +2,7 @@ import std.file
 import std.mem
 import std.os
 import std.str
-import std.vec
+import std.collections { Vec }
 
 fun main(): i32 {
     var arena: mem.Arena
@@ -30,7 +30,7 @@ fun main(): i32 {
         mem.deinit(&arena)
         return 5
     }
-    var entries: vec.Vec[os.DirEntry]
+    var entries: Vec[os.DirEntry]
     if os.list_dir("sub", &arena, &entries) != 1 ||
        !str.equals(entries.data[0].name, "test.txt") || entries.data[0].is_dir {
         mem.deinit(&arena)

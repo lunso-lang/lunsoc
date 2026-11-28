@@ -2,7 +2,7 @@ import std.fs
 import std.mem
 import std.os
 import std.str
-import std.vec
+import std.collections { Vec }
 
 fun main(): i32 {
     var arena: mem.Arena

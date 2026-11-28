@@ -1,12 +1,11 @@
 import std.file
 import std.fmt
 import std.io
-import std.map
+import std.collections { Vec, StrMap }
 import std.mem
 import std.os
 import std.path
 import std.str
-import std.vec
 import frontend.ast.*
 import frontend.lexer
 import frontend.parser
@@ -19,7 +18,7 @@ pub struct ModuleFile {
 
 pub struct ModuleProgram {
     tree: Ast
-    files: vec.Vec[ModuleFile]
+    files: Vec[ModuleFile]
     quiet: bool
     has_error: bool
     err_offset: u32
@@ -44,12 +43,12 @@ struct ModuleEntry {
 struct Loader {
     arena: *mem.Arena
     program: *ModuleProgram
-    source_buf: vec.Vec[u8]
+    source_buf: Vec[u8]
     root: []u8
     std_root: []u8
     include_dirs: [][]u8
-    overlays: *map.StrMap[[]u8]
-    modules: vec.Vec[ModuleEntry]
+    overlays: *StrMap[[]u8]
+    modules: Vec[ModuleEntry]
     depth: u32
 }
 
@@ -57,7 +56,7 @@ const NO_MODULE: u32 = ~0 as u32
 const MAX_MODULE_DEPTH: u32 = 256
 
 fun file_available(l: *Loader, p: []u8): bool {
-    if (l.overlays as u64) != 0 && l.overlays.has(p) {
+    if l.overlays != null && l.overlays.has(p) {
         return true
     }
     return file.exists(p)
@@ -100,7 +99,7 @@ pub fun print_caret(src: []u8, file_start: u32, file_end: u32, offset: u32, line
     io.write_bytes(2, src[(line_start as i64)..(line_end as i64)])
     io.eprintln("")
     io.eprint("  ")
-    for var k: i64 = 0; k < num_len; k += 1 {
+    for _ in (0 as i64)..num_len {
         io.eprint(" ")
     }
     io.eprint(" | ")
@@ -227,7 +226,7 @@ fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
         state: LoadState.Unloaded,
         parent: NO_MODULE,
         declarations: NodeRange { first: 0, count: 0 },
-        scope: AstModuleScope { bindings: vec.Vec[AstBinding] { arena: l.arena } },
+        scope: AstModuleScope { bindings: Vec[AstBinding] { arena: l.arena } },
     }
     if entry.scope.bindings.init(l.arena, 16) < 0 {
         return err_at(l, offset, "could not allocate module scope")
@@ -385,8 +384,8 @@ fun module_path_str(l: *Loader, path: NodeRange): []u8 {
     for var i: u32 = 0; i < path.count; i += 1 {
         if i > 0 { buf[pos] = '/'; pos += 1 }
         var s = span_bytes(tree, item_name(tree, children[path.first + i]))
-        for var j: i64 = 0; j < len(s); j += 1 {
-            buf[pos] = s[j]
+        for ch in s {
+            buf[pos] = ch
             pos += 1
         }
     }
@@ -418,53 +417,60 @@ fun import_all(l: *Loader, owner: u32, target: u32, offset: u32): bool {
     return true
 }
 
-fun import_selected(l: *Loader, owner: u32, target: u32, item: AstImport): bool {
+fun import_symbol(l: *Loader, owner: u32, target: u32, req: Span, bind_as: Span): bool {
     var tree = &l.program.tree
     var children = tree.children.as_slice()
     var nodes = tree.nodes.as_slice()
     var decls = l.modules.data[target].declarations
+    var req_bytes = span_bytes(tree, req)
+    var name_bytes = span_bytes(tree, bind_as)
+    var found = false
+    var is_priv = false
+    for var j: u32 = 0; j < decls.count; j += 1 {
+        var decl_id = children[decls.first + j]
+        var exported: Span
+        var kind: AstBindingKind
+        var is_pub = false
+        if !declaration_info(tree, decl_id, &exported, &kind, &is_pub) {
+            continue
+        }
+        if !str.equals(span_bytes(tree, exported), req_bytes) {
+            continue
+        }
+        if is_pub {
+            if !bind_name(l, owner, name_bytes, kind, nodes[decl_id].a, req.offset) {
+                return false
+            }
+            found = true
+        } else {
+            is_priv = true
+        }
+    }
+    if found { return true }
+    if is_priv {
+        return err_at(l, req.offset, "cannot import a private declaration")
+    }
+    var child: u32 = NO_MODULE
+    if !child_module(l, target, req_bytes, req.offset, &child) {
+        return false
+    }
+    if child == NO_MODULE {
+        return err_at(l, req.offset, "name does not exist in imported module")
+    }
+    return bind_name(l, owner, name_bytes, AstBindingKind.Module, child, req.offset)
+}
+
+fun import_selected(l: *Loader, owner: u32, target: u32, item: AstImport): bool {
+    var tree = &l.program.tree
+    var children = tree.children.as_slice()
+    var nodes = tree.nodes.as_slice()
     for var i: u32 = 0; i < item.items.count; i += 1 {
         var id = children[item.items.first + i]
         var req = item_name(tree, id)
         var alias_id = nodes[id].b
         var name_span = req
         if alias_id != NODE_NONE { name_span = item_name(tree, alias_id) }
-        var req_bytes = span_bytes(tree, req)
-        var name_bytes = span_bytes(tree, name_span)
-        var found = false
-        var is_priv = false
-        for var j: u32 = 0; j < decls.count; j += 1 {
-            var decl_id = children[decls.first + j]
-            var exported: Span
-            var kind: AstBindingKind
-            var is_pub = false
-            if !declaration_info(tree, decl_id, &exported, &kind, &is_pub) {
-                continue
-            }
-            if !str.equals(span_bytes(tree, exported), req_bytes) {
-                continue
-            }
-            if is_pub {
-                if !bind_name(l, owner, name_bytes, kind, nodes[decl_id].a, req.offset) {
-                    return false
-                }
-                found = true
-            } else {
-                is_priv = true
-            }
-        }
-        if found { continue }
-        if is_priv {
-            return err_at(l, req.offset, "cannot import a private declaration")
-        }
-        var child: u32 = NO_MODULE
-        if !child_module(l, target, req_bytes, req.offset, &child) {
-            return false
-        }
-        if child == NO_MODULE {
-            return err_at(l, req.offset, "name does not exist in imported module")
-        }
-        if !bind_name(l, owner, name_bytes, AstBindingKind.Module, child, req.offset) {
+        if !import_symbol(l, owner, target, req, name_span) {
             return false
         }
     }
@@ -474,6 +480,7 @@ fun import_selected(l: *Loader, owner: u32, target: u32, item: AstImport): bool 
 fun load_import(l: *Loader, owner: u32, id: u32): bool {
     var tree = &l.program.tree
     var nodes = tree.nodes.as_slice()
+    var children = tree.children.as_slice()
     var offset = nodes[id].pos
     var imports = tree.imports.as_slice()
     var item = imports[nodes[id].a]
@@ -481,6 +488,24 @@ fun load_import(l: *Loader, owner: u32, id: u32): bool {
     var target: u32 = NO_MODULE
     if !get_module(l, name, offset, &target) {
         return false
+    }
+    if target == NO_MODULE && item.kind == ImportKind.Module && item.path.count >= 2 {
+        var parent_path = NodeRange { first: item.path.first, count: item.path.count - 1 }
+        var parent_name = module_path_str(l, parent_path)
+        if !get_module(l, parent_name, offset, &target) {
+            return false
+        }
+        if target != NO_MODULE {
+            if !load_module(l, target, owner, offset) {
+                return false
+            }
+            var sym_span = item_name(tree, children[item.path.first + item.path.count - 1])
+            var bind_span = item.alias
+            if bind_span.length == 0 {
+                bind_span = sym_span
+            }
+            return import_symbol(l, owner, target, sym_span, bind_span)
+        }
     }
     if target == NO_MODULE {
         io.eprint("  module ")
@@ -496,7 +521,6 @@ fun load_import(l: *Loader, owner: u32, id: u32): bool {
     if item.kind == ImportKind.Selected {
         return import_selected(l, owner, target, item)
     }
-    var children = tree.children.as_slice()
     var last = children[item.path.first + item.path.count - 1]
     var alias_span = item.alias
     if alias_span.length == 0 {
@@ -660,7 +684,7 @@ fun finish_module(l: *Loader, mod_id: u32, first: u32, end: u32): bool {
     if first >= end {
         return true
     }
-    var prefixes: vec.Vec[bool]
+    var prefixes: Vec[bool]
     var count = (end - first) as u64
     if prefixes.init(l.arena, count) < 0 {
         return err_at(l, nodes[first].pos, "could not allocate prefix table")
@@ -700,7 +724,7 @@ fun load_module(l: *Loader, mod_id: u32, owner: u32, offset: u32): bool {
         return true
     }
     var raw: []u8
-    var from_overlay = (l.overlays as u64) != 0 && l.overlays.get(file_path, &raw)
+    var from_overlay = l.overlays != null && l.overlays.get(file_path, &raw)
     if !from_overlay && file.read_all(file_path, l.arena, &raw) < 0 {
         return err_at(l, offset, "could not read imported module")
     }
@@ -748,8 +772,8 @@ fun select_std_root(arena: *mem.Arena, override: []u8): []u8 {
 }
 
 pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, std_dir: []u8,
-                              include_dirs: [][]u8, overlays: *map.StrMap[[]u8], out: *ModuleProgram): bool {
-    var _overlay_layout: map.StrMap[[]u8]
+                              include_dirs: [][]u8, overlays: *StrMap[[]u8], out: *ModuleProgram): bool {
+    var _overlay_layout: StrMap[[]u8]
     if !init(arena, source, &out.tree) {
         return false
     }
@@ -759,12 +783,12 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
     var l = Loader {
         arena: arena,
         program: out,
-        source_buf: vec.Vec[u8] { arena: arena },
+        source_buf: Vec[u8] { arena: arena },
         root: path.dir_prefix(entry_path),
         std_root: select_std_root(arena, std_dir),
         include_dirs: include_dirs,
         overlays: overlays,
-        modules: vec.Vec[ModuleEntry] { arena: arena },
+        modules: Vec[ModuleEntry] { arena: arena },
         depth: 1,
     }
     if l.source_buf.init(arena, (len(source) + 1024) as u64) < 0 {
@@ -779,7 +803,7 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
         state: LoadState.Loading,
         parent: NO_MODULE,
         declarations: NodeRange { first: 0, count: 0 },
-        scope: AstModuleScope { bindings: vec.Vec[AstBinding] { arena: arena } },
+        scope: AstModuleScope { bindings: Vec[AstBinding] { arena: arena } },
     }
     if entry.scope.bindings.init(arena, 16) < 0 {
         return false
@@ -795,8 +819,8 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
     }
     out.tree.declarations = l.modules.data[0].declarations
     sort_qualified(&out.tree)
-    for var i: i64 = 0; i < l.modules.len as i64; i += 1 {
-        if out.tree.modules.push(&l.modules.data[i].scope) < 0 {
+    for m in l.modules.as_slice() {
+        if out.tree.modules.push(&m.scope) < 0 {
             return false
         }
     }
@@ -804,5 +828,5 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
 }
 
 pub fun load(arena: *mem.Arena, entry_path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, out: *ModuleProgram): bool {
-    return load_with_overlays(arena, entry_path, source, std_dir, include_dirs, 0 as *map.StrMap[[]u8], out)
+    return load_with_overlays(arena, entry_path, source, std_dir, include_dirs, null, out)
 }

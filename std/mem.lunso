@@ -28,7 +28,7 @@ pub struct Arena {
 
         var block = self.current
         var tail: *Block
-        for (block as u64) != 0 {
+        for block != null {
             if alloc_from(block, size, mask, out) {
                 self.current = block
                 return 0
@@ -58,7 +58,7 @@ pub struct Arena {
         block.used = header
         // The new block includes room for the header, worst-case padding, and payload.
         alloc_from(block, size, mask, out)
-        if (tail as u64) == 0 {
+        if tail == null {
             self.head = block
         } else {
             tail.next = block
@@ -70,7 +70,7 @@ pub struct Arena {
     pub fun reset(self: *Self) {
         var block = self.head
         self.current = block
-        for (block as u64) != 0 {
+        for block != null {
             block.used = size_of(*block)
             block = block.next
         }
@@ -78,7 +78,7 @@ pub struct Arena {
 
     pub fun deinit(self: *Self): i64 {
         var block = self.head
-        for (block as u64) != 0 {
+        for block != null {
             var next = block.next
             var status = lunso_mem_unmap(block, block.size)
             if status < 0 {
@@ -94,7 +94,7 @@ pub struct Arena {
     }
 
     pub fun alloc_many[T](self: *Self, count: u64, out: **T): i64 {
-        if (out as u64) == 0 {
+        if out == null {
             return -22
         }
         if count == 0 {
@@ -165,7 +165,7 @@ pub fun align_for(size: u64): u64 {
 }
 
 pub fun alloc_many[T](arena: *Arena, count: u64, out: **T): i64 {
-    if (out as u64) == 0 {
+    if out == null {
         return -22
     }
     if count == 0 {

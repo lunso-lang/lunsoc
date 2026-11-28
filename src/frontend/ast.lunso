@@ -1,5 +1,5 @@
 import std.mem
-import std.vec
+import std.collections { Vec }
 
 pub const NODE_NONE: u32 = 0
 
@@ -212,7 +212,7 @@ pub struct AstBinding {
 }
 
 pub struct AstModuleScope {
-    bindings: vec.Vec[AstBinding]
+    bindings: Vec[AstBinding]
 }
 
 pub struct AstQualified {
@@ -224,21 +224,21 @@ pub struct AstQualified {
 
 pub struct Ast {
     source: []u8
-    nodes: vec.Vec[AstNode]
-    children: vec.Vec[u32]
-    functions: vec.Vec[AstFunction]
-    structs: vec.Vec[AstStruct]
-    enums: vec.Vec[AstEnum]
-    consts: vec.Vec[AstConst]
-    imports: vec.Vec[AstImport]
-    if_branches: vec.Vec[AstIfBranches]
-    for_headers: vec.Vec[AstForHeader]
-    for_in_headers: vec.Vec[AstForInHeader]
-    or_elses: vec.Vec[AstOrElse]
-    func_types: vec.Vec[AstFuncType]
-    variables: vec.Vec[AstVariable]
-    modules: vec.Vec[AstModuleScope]
-    qualified: vec.Vec[AstQualified]
+    nodes: Vec[AstNode]
+    children: Vec[u32]
+    functions: Vec[AstFunction]
+    structs: Vec[AstStruct]
+    enums: Vec[AstEnum]
+    consts: Vec[AstConst]
+    imports: Vec[AstImport]
+    if_branches: Vec[AstIfBranches]
+    for_headers: Vec[AstForHeader]
+    for_in_headers: Vec[AstForInHeader]
+    or_elses: Vec[AstOrElse]
+    func_types: Vec[AstFuncType]
+    variables: Vec[AstVariable]
+    modules: Vec[AstModuleScope]
+    qualified: Vec[AstQualified]
     declarations: NodeRange
 }
 
@@ -292,7 +292,7 @@ pub fun add_node(ast: *Ast, kind: AstKind, pos: u32, a: u32, b: u32): u32 {
     return id
 }
 
-pub fun finish_children(ast: *Ast, pending: *vec.Vec[u32], mark: u64): NodeRange {
+pub fun finish_children(ast: *Ast, pending: *Vec[u32], mark: u64): NodeRange {
     var count = pending.len - mark
     if count == 0 {
         return NodeRange { first: 0, count: 0 }
@@ -319,8 +319,7 @@ pub fun offset_to_pos(src: []u8, offset: u32): SourcePos {
     }
     var line: u64 = 1
     var col: u64 = 1
-    for var i: i64 = 0; i < limit; i += 1 {
-        var ch = src[i]
+    for ch in src[0..limit] {
         if ch == '\n' {
             line += 1
             col = 1

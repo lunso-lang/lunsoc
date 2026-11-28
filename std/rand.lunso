@@ -6,12 +6,10 @@ pub struct Rng {
     state: u64
 }
 
-pub fun fill_bytes(buf: *u8, count: u64): i64 {
+pub fun fill_bytes(buf: []u8): !void {
+    var count = len(buf) as u64
     if count == 0 {
-        return 0
-    }
-    if (buf as u64) == 0 {
-        return -22
+        return
     }
     var offset: u64 = 0
     for offset < count {
@@ -19,32 +17,21 @@ pub fun fill_bytes(buf: *u8, count: u64): i64 {
         if n == -4 {
             continue
         }
-        if n < 0 {
-            return n
-        }
-        if n == 0 {
-            return -5
+        if n <= 0 {
+            return fail("getrandom failed")
         }
         offset += n as u64
     }
-    return 0
 }
 
-pub fun u64_entropy(out: *u64): i64 {
-    if (out as u64) == 0 {
-        return -22
-    }
+pub fun u64_entropy(): !u64 {
     var raw: [8]u8
-    var status = fill_bytes(&raw[0], 8)
-    if status < 0 {
-        return status
-    }
+    fill_bytes(raw[0..8])?
     var val: u64 = 0
-    for var i: i64 = 0; i < 8; i += 1 {
-        val |= (raw[i] as u64) << ((i * 8) as u64)
+    for i, b in raw {
+        val |= (b as u64) << ((i * 8) as u64)
     }
-    *out = val
-    return 0
+    return val
 }
 
 pub fun seed(rng: *Rng, value: u64) {
@@ -55,16 +42,12 @@ pub fun seed(rng: *Rng, value: u64) {
     }
 }
 
-pub fun init(rng: *Rng): i64 {
-    var ent: u64 = 0
-    var status = u64_entropy(&ent)
-    if status < 0 {
-        ent = time.monotonic_ns() as u64
-        seed(rng, ent)
-        return status
+pub fun init(rng: *Rng): !void {
+    var ent = u64_entropy() or {
+        seed(rng, time.monotonic_ns() as u64)
+        return fail("entropy unavailable")
     }
     seed(rng, ent)
-    return 0
 }
 
 pub fun next_u64(rng: *Rng): u64 {

@@ -2,15 +2,16 @@ import std.rand
 import std.time
 
 fun main(): i32 {
-    var t1: time.Instant
-    if time.now_monotonic(&t1) < 0 {
+    var t1 = time.now_monotonic() or {
         return 1
     }
-    var rt: time.Instant
-    if time.now_realtime(&rt) < 0 || rt.sec <= 0 {
+    var rt = time.now_realtime() or {
         return 2
     }
-    if time.sleep_ms(5) < 0 {
+    if rt.sec <= 0 {
+        return 2
+    }
+    time.sleep_ms(5) or {
         return 3
     }
     var t2 = time.monotonic_ns()
@@ -19,12 +20,12 @@ fun main(): i32 {
     }
 
     var buf: [16]u8
-    if rand.fill_bytes(&buf[0], 16) < 0 {
+    rand.fill_bytes(buf[0..16]) or {
         return 5
     }
     var any_nonzero = false
-    for var i: i64 = 0; i < 16; i += 1 {
-        if buf[i] != 0 {
+    for b in buf {
+        if b != 0 {
             any_nonzero = true
         }
     }
@@ -33,10 +34,10 @@ fun main(): i32 {
     }
 
     var rng: rand.Rng
-    if rand.init(&rng) < 0 {
+    rand.init(&rng) or {
         return 7
     }
-    for var j: i32 = 0; j < 20; j += 1 {
+    for _ in 0..20 {
         var r = rand.range_i32(&rng, 1, 6)
         if r < 1 || r > 6 {
             return 8

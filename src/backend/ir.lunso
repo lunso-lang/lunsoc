@@ -1,7 +1,7 @@
 import std.fmt
 import std.io
 import std.mem
-import std.vec
+import std.collections { Vec }
 import frontend.ast.*
 import frontend.sema.*
 
@@ -84,14 +84,14 @@ pub struct IrFunction {
 pub struct IrModule {
     source: []u8
     module_count: u32
-    struct_names: vec.Vec[Span]
-    pointees: vec.Vec[SemaType]
-    elements: vec.Vec[SemaType]
-    func_types: vec.Vec[SemaFuncType]
-    functions: vec.Vec[IrFunction]
-    parameters: vec.Vec[SemaType]
-    instructions: vec.Vec[IrInstruction]
-    arguments: vec.Vec[u32]
+    struct_names: Vec[Span]
+    pointees: Vec[SemaType]
+    elements: Vec[SemaType]
+    func_types: Vec[SemaFuncType]
+    functions: Vec[IrFunction]
+    parameters: Vec[SemaType]
+    instructions: Vec[IrInstruction]
+    arguments: Vec[u32]
 }
 
 struct IrLoop {
@@ -107,8 +107,8 @@ struct Lowering {
     next_value: u32
     next_label: u32
     current_fn: u32
-    loops: vec.Vec[IrLoop]
-    defers: vec.Vec[u32]
+    loops: Vec[IrLoop]
+    defers: Vec[u32]
     failed: bool
 }
 
@@ -838,8 +838,7 @@ fun lower_loop(l: *Lowering, id: u32) {
     var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
     l.loops.push(&le)
     lower_statement(l, node.b)
-    var dummy: IrLoop
-    l.loops.pop(&dummy)
+    l.loops.pop(null)
     if header.step != NODE_NONE {
         emit_label(l, cont)
         lower_expression(l, header.step)
@@ -890,8 +889,7 @@ fun lower_for_in(l: *Lowering, id: u32) {
         var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
         l.loops.push(&le)
         lower_statement(l, node.b)
-        var dummy: IrLoop
-        l.loops.pop(&dummy)
+        l.loops.pop(null)
         emit_label(l, cont)
         var cur2 = emit_value(l, IrOp.Load, item_t, item_slot, 0, 0)
         var one = emit_value(l, IrOp.Immediate, item_t, 1, 0, 0)
@@ -954,8 +952,7 @@ fun lower_for_in(l: *Lowering, id: u32) {
     var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
     l.loops.push(&le)
     lower_statement(l, node.b)
-    var dummy: IrLoop
-    l.loops.pop(&dummy)
+    l.loops.pop(null)
     emit_label(l, cont)
     var cidx = emit_value(l, IrOp.Load, i64_t, idx_slot, 0, 0)
     var ione = emit_value(l, IrOp.Immediate, i64_t, 1, 0, 0)

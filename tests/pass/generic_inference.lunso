@@ -1,6 +1,6 @@
 // lunsoc-only
 import "std/mem" as mem
-import "std/vec" as vec
+import std.collections { Vec }
 
 struct Box[T] {
     value: T,
@@ -42,12 +42,12 @@ fun main(): i32 {
     }
 
     var arena = mem.arena_new(1024)
-    var v: vec.Vec[i32]
-    vec.init.[i32](&v, &arena, 4)
-    vec.push_value(&v, a)
-    vec.push_value(&v, b)
+    var v: Vec[i32]
+    v.init(&arena, 4)
+    v.push_value(a)
+    v.push_value(b)
 
-    var s = vec.as_slice(&v)
+    var s = v.as_slice()
     if sum_slice(s) != 30 {
         return 3
     }

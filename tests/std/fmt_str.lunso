@@ -3,7 +3,7 @@ import std.fmt
 import std.io
 import std.mem
 import std.str
-import std.vec
+import std.collections { Vec }
 
 fun main(): i32 {
     if !str.equals("hello", "hello") || str.equals("hello", "world") {
@@ -79,7 +79,7 @@ fun main(): i32 {
         return 17
     }
 
-    var parts: vec.Vec[[]const u8]
+    var parts: Vec[[]const u8]
     if str.split(&arena, "a::b::c", "::", &parts) != 3 ||
        !str.equals(parts.data[0], "a") ||
        !str.equals(parts.data[1], "b") ||
@@ -93,7 +93,7 @@ fun main(): i32 {
         return 19
     }
 
-    var ls: vec.Vec[[]const u8]
+    var ls: Vec[[]const u8]
     if str.lines(&arena, "one\r\ntwo\nthree\n", &ls) != 3 ||
        !str.equals(ls.data[0], "one") ||
        !str.equals(ls.data[1], "two") ||

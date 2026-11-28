@@ -3,6 +3,11 @@ import std.json
 import std.mem
 import std.str
 
+fun parse_fails(arena: *mem.Arena, text: []u8): bool {
+    _ = json.parse(arena, text) or { return true }
+    return false
+}
+
 fun main(): i32 {
     var arena: mem.Arena
     if mem.init(&arena, 8192) < 0 {
@@ -11,8 +16,10 @@ fun main(): i32 {
     defer mem.deinit(&arena)
 
     var payload = "{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"textDocument/hover\",\"params\":{\"ok\":true,\"empty\":null,\"items\":[1,\"a\\nb\",{\"k\":\"\\u0041\"}]}}"
-    var root: json.JsonValue
-    if !json.parse(&arena, payload, &root) || root.kind != json.JsonKind.Object {
+    var root = json.parse(&arena, payload) or {
+        return 2
+    }
+    if root.kind != json.JsonKind.Object {
         return 2
     }
 
@@ -51,18 +58,18 @@ fun main(): i32 {
     }
 
     // Roundtrip stringify + invalid JSON rejection.
-    var serialized: []u8
-    if json.stringify(&arena, root, &serialized) < 0 {
+    var serialized = json.stringify(&arena, root) or {
         return 8
     }
-    var reparsed: json.JsonValue
+    var reparsed = json.parse(&arena, serialized) or {
+        return 9
+    }
     var reparsed_id: i64 = 0
-    if !json.parse(&arena, serialized, &reparsed) || !json.get_i64(reparsed, "id", &reparsed_id) || reparsed_id != 42 {
+    if !json.get_i64(reparsed, "id", &reparsed_id) || reparsed_id != 42 {
         return 9
     }
 
-    var bad: json.JsonValue
-    if json.parse(&arena, "[1, 2,]", &bad) || json.parse(&arena, "{\"a\":1} trailing", &bad) || json.parse(&arena, "\"unterminated", &bad) {
+    if !parse_fails(&arena, "[1, 2,]") || !parse_fails(&arena, "{\"a\":1} trailing") || !parse_fails(&arena, "\"unterminated") {
         return 10
     }
 

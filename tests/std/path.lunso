@@ -3,6 +3,16 @@ import std.mem
 import std.path
 import std.str
 
+fun from_uri_fails(arena: *mem.Arena, uri: []const u8): bool {
+    _ = path.from_file_uri(arena, uri) or { return true }
+    return false
+}
+
+fun to_uri_fails(arena: *mem.Arena, p: []const u8): bool {
+    _ = path.to_file_uri(arena, p) or { return true }
+    return false
+}
+
 fun main(): i32 {
     var arena: mem.Arena
     if arena.init(4096) < 0 {
@@ -46,27 +56,31 @@ fun main(): i32 {
         return 7
     }
 
-    var decoded: []u8
-    if !path.from_file_uri(&arena, "file:///home/user/my%20project/main.lunso", &decoded) ||
-       !str.equals(decoded, "/home/user/my project/main.lunso") {
+    var decoded = path.from_file_uri(&arena, "file:///home/user/my%20project/main.lunso") or {
         return 8
     }
-    if !path.from_file_uri(&arena, "file://localhost/tmp/test.lunso", &decoded) ||
-       !str.equals(decoded, "/tmp/test.lunso") {
+    if !str.equals(decoded, "/home/user/my project/main.lunso") {
+        return 8
+    }
+    var decoded_host = path.from_file_uri(&arena, "file://localhost/tmp/test.lunso") or {
+        return 9
+    }
+    if !str.equals(decoded_host, "/tmp/test.lunso") {
         return 9
     }
 
-    var encoded: []u8
-    if !path.to_file_uri(&arena, "/home/user/my project/main.lunso", &encoded) ||
-       !str.equals(encoded, "file:///home/user/my%20project/main.lunso") {
+    var encoded = path.to_file_uri(&arena, "/home/user/my project/main.lunso") or {
+        return 10
+    }
+    if !str.equals(encoded, "file:///home/user/my%20project/main.lunso") {
         return 10
     }
 
     // Reject non-file, relative, or malformed percent-encoding.
-    if path.from_file_uri(&arena, "http://example.com/a", &decoded) ||
-       path.from_file_uri(&arena, "file://relative/path", &decoded) ||
-       path.from_file_uri(&arena, "file:///bad%2", &decoded) ||
-       path.to_file_uri(&arena, "relative/path", &encoded) {
+    if !from_uri_fails(&arena, "http://example.com/a") ||
+       !from_uri_fails(&arena, "file://relative/path") ||
+       !from_uri_fails(&arena, "file:///bad%2") ||
+       !to_uri_fails(&arena, "relative/path") {
         return 11
     }
 

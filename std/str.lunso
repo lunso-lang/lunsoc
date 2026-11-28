@@ -1,12 +1,12 @@
 import std.mem
-import std.vec
+import std.collections { Vec }
 
 pub fun equals(a: []const u8, b: []const u8): bool {
     if len(a) != len(b) {
         return false
     }
-    for var i: i64 = 0; i < len(a); i += 1 {
-        if a[i] != b[i] {
+    for i, ch in a {
+        if ch != b[i] {
             return false
         }
     }
@@ -17,8 +17,8 @@ pub fun starts_with(s: []const u8, prefix: []const u8): bool {
     if len(s) < len(prefix) {
         return false
     }
-    for var i: i64 = 0; i < len(prefix); i += 1 {
-        if s[i] != prefix[i] {
+    for i, ch in prefix {
+        if s[i] != ch {
             return false
         }
     }
@@ -30,8 +30,8 @@ pub fun ends_with(s: []const u8, suffix: []const u8): bool {
         return false
     }
     var offset = len(s) - len(suffix)
-    for var i: i64 = 0; i < len(suffix); i += 1 {
-        if s[offset + i] != suffix[i] {
+    for i, ch in suffix {
+        if s[offset + i] != ch {
             return false
         }
     }
@@ -39,8 +39,8 @@ pub fun ends_with(s: []const u8, suffix: []const u8): bool {
 }
 
 pub fun index_of(s: []const u8, needle: u8): i64 {
-    for var i: i64 = 0; i < len(s); i += 1 {
-        if s[i] == needle {
+    for i, ch in s {
+        if ch == needle {
             return i
         }
     }
@@ -100,11 +100,11 @@ pub fun concat(arena: *mem.Arena, a: []const u8, b: []const u8): []u8 {
     var total = len(a) + len(b)
     if total == 0 { return "" }
     var buf: *u8
-    if mem.alloc(arena, total as u64, 1, &buf) < 0 {
+    if arena.alloc(total as u64, 1, &buf) < 0 {
         return ""
     }
-    for var i: i64 = 0; i < len(a); i += 1 { buf[i] = a[i] }
-    for var i: i64 = 0; i < len(b); i += 1 { buf[len(a) + i] = b[i] }
+    for i, ch in a { buf[i] = ch }
+    for i, ch in b { buf[len(a) + i] = ch }
     return buf[0..total]
 }
 
@@ -112,13 +112,13 @@ pub fun concat3(arena: *mem.Arena, a: []const u8, b: []const u8, c: []const u8):
     var total = len(a) + len(b) + len(c)
     if total == 0 { return "" }
     var buf: *u8
-    if mem.alloc(arena, total as u64, 1, &buf) < 0 {
+    if arena.alloc(total as u64, 1, &buf) < 0 {
         return ""
     }
     var pos: i64 = 0
-    for var i: i64 = 0; i < len(a); i += 1 { buf[pos] = a[i]; pos += 1 }
-    for var i: i64 = 0; i < len(b); i += 1 { buf[pos] = b[i]; pos += 1 }
-    for var i: i64 = 0; i < len(c); i += 1 { buf[pos] = c[i]; pos += 1 }
+    for ch in a { buf[pos] = ch; pos += 1 }
+    for ch in b { buf[pos] = ch; pos += 1 }
+    for ch in c { buf[pos] = ch; pos += 1 }
     return buf[0..total]
 }
 
@@ -126,19 +126,19 @@ pub fun clone(arena: *mem.Arena, s: []const u8): []u8 {
     var n = len(s)
     if n == 0 { return "" }
     var buf: *u8
-    if mem.alloc(arena, n as u64, 1, &buf) < 0 {
+    if arena.alloc(n as u64, 1, &buf) < 0 {
         return ""
     }
-    for var i: i64 = 0; i < n; i += 1 {
-        buf[i] = s[i]
+    for i, ch in s {
+        buf[i] = ch
     }
     return buf[0..n]
 }
 
 pub fun hash(s: []const u8): u64 {
     var h: u64 = 0xcbf29ce484222325
-    for var i: i64 = 0; i < len(s); i += 1 {
-        h ^= s[i] as u64
+    for ch in s {
+        h ^= ch as u64
         h *= 0x100000001b3
     }
     return h
@@ -150,8 +150,7 @@ pub fun parse_u64(s: []const u8, out: *u64): bool {
     }
     var max_u64: u64 = 18446744073709551615
     var acc: u64 = 0
-    for var i: i64 = 0; i < len(s); i += 1 {
-        var ch = s[i]
+    for ch in s {
         if ch < '0' || ch > '9' {
             return false
         }
@@ -229,8 +228,8 @@ pub fun contains(s: []const u8, needle: []const u8): bool {
     return find(s, needle) >= 0
 }
 
-pub fun split_char(arena: *mem.Arena, s: []const u8, sep: u8, out: *vec.Vec[[]const u8]): i64 {
-    if (arena as u64) == 0 || (out as u64) == 0 {
+pub fun split_char(arena: *mem.Arena, s: []const u8, sep: u8, out: *Vec[[]const u8]): i64 {
+    if arena == null || out == null {
         return -22
     }
     if out.init(arena, 8) < 0 {
@@ -249,8 +248,8 @@ pub fun split_char(arena: *mem.Arena, s: []const u8, sep: u8, out: *vec.Vec[[]co
     return out.len as i64
 }
 
-pub fun split(arena: *mem.Arena, s: []const u8, sep: []const u8, out: *vec.Vec[[]const u8]): i64 {
-    if (arena as u64) == 0 || (out as u64) == 0 {
+pub fun split(arena: *mem.Arena, s: []const u8, sep: []const u8, out: *Vec[[]const u8]): i64 {
+    if arena == null || out == null {
         return -22
     }
     if len(sep) == 1 {
@@ -286,7 +285,7 @@ pub fun split(arena: *mem.Arena, s: []const u8, sep: []const u8, out: *vec.Vec[[
     return out.len as i64
 }
 
-pub fun lines(arena: *mem.Arena, s: []const u8, out: *vec.Vec[[]const u8]): i64 {
+pub fun lines(arena: *mem.Arena, s: []const u8, out: *Vec[[]const u8]): i64 {
     var count = split_char(arena, s, '\n', out)
     if count < 0 {
         return count
@@ -343,7 +342,7 @@ pub fun replace(arena: *mem.Arena, s: []const u8, old: []const u8, new_s: []cons
     if oldlen == 0 {
         return clone(arena, s)
     }
-    var out: vec.Vec[u8]
+    var out: Vec[u8]
     if out.init(arena, (len(s) as u64) + 16) < 0 {
         return ""
     }

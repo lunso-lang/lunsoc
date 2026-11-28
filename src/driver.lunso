@@ -7,7 +7,7 @@ import std.os
 import std.path
 import std.process
 import std.str
-import std.vec
+import std.collections { Vec }
 import frontend.ast
 import backend.ir
 import frontend.lexer
@@ -57,7 +57,7 @@ fun report_error(path: []const u8, source: []const u8, tok: lexer.Token, msg: []
 }
 
 fun dump_tokens(path: []u8, source: []u8, arena: *mem.Arena): i32 {
-    var tokens: vec.Vec[lexer.Token]
+    var tokens: Vec[lexer.Token]
     if tokens.init(arena, 128) < 0 {
         io.eprintln("lunsoc: out of memory")
         return 1
@@ -103,7 +103,7 @@ fun run_parse(path: []u8, source: []u8, arena: *mem.Arena): i32 {
     return 0
 }
 
-const VERSION: []u8 = "lunsoc 0.5.0"
+const VERSION: []u8 = "lunsoc 0.5.1"
 
 enum Mode : u8 {
     Tokens,
@@ -181,7 +181,7 @@ fun run_compile(path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, a
         return 0
     }
     if mode == Mode.EmitQbe {
-        var out_buf: vec.Vec[u8]
+        var out_buf: Vec[u8]
         if !qbe.write(arena, &mod, &out_buf) {
             io.eprintln("lunsoc: could not emit QBE IL")
             return 1
@@ -244,8 +244,8 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
     var nostdlib = false
     var stop_options = false
     var run_args_start: i64 = len(argv)
-    var objects: vec.Vec[[]u8]
-    var include_dirs: vec.Vec[[]u8]
+    var objects: Vec[[]u8]
+    var include_dirs: Vec[[]u8]
     if objects.init(arena, 4) < 0 || include_dirs.init(arena, 4) < 0 {
         return 1
     }

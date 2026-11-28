@@ -1,17 +1,16 @@
 import std.file
 import std.mem
 
-pub fun load(arena: *mem.Arena, out: *[][]u8): i64 {
+pub fun load(arena: *mem.Arena): ![][]u8 {
     var raw: []u8
-    var status = file.read_all("/proc/self/cmdline", arena, &raw)
-    if status < 0 {
-        return status
+    if file.read_all("/proc/self/cmdline", arena, &raw) < 0 {
+        return fail("could not read /proc/self/cmdline")
     }
 
     var raw_len = len(raw)
     var count: i64 = 0
-    for var i: i64 = 0; i < raw_len; i += 1 {
-        if raw[i] == '\0' {
+    for ch in raw {
+        if ch == '\0' {
             count += 1
         }
     }
@@ -21,19 +20,17 @@ pub fun load(arena: *mem.Arena, out: *[][]u8): i64 {
 
     if count == 0 {
         var empty: *[]u8
-        *out = empty[0..0]
-        return 0
+        return empty[0..0]
     }
 
     var items: *[]u8
-    status = mem.alloc_many.[[]u8](arena, count as u64, &items)
-    if status < 0 {
-        return status
+    if arena.alloc_many(count as u64, &items) < 0 {
+        return fail("args out of memory")
     }
     var idx: i64 = 0
     var start: i64 = 0
-    for var i: i64 = 0; i < raw_len; i += 1 {
-        if raw[i] == '\0' {
+    for i, ch in raw {
+        if ch == '\0' {
             items[idx] = raw[start..i]
             idx += 1
             start = i + 1
@@ -43,6 +40,5 @@ pub fun load(arena: *mem.Arena, out: *[][]u8): i64 {
         items[idx] = raw[start..raw_len]
     }
 
-    *out = items[0..count]
-    return count
+    return items[0..count]
 }
