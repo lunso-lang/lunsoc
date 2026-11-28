@@ -2,6 +2,14 @@
 
 All notable changes to `lunsoc` are documented in this file.
 
+## [0.6.1] - 2026-11-28
+
+### Fixed
+- `==` / `!=` now work between `[]u8` values and byte-string literals (sema and IR lowering, including `PointerIndex` element type).
+- Parser no longer consumes `(` twice when parsing enum variant payloads.
+- Duplicate `match` pattern detection is now tracked per `match`, so nested `match` statements no longer produce false positives.
+- CI and release workflows bootstrap from `lunsoc v0.5.1`.
+
 ## [0.6.0] - 2026-11-28
 
 ### Language & Compiler
