@@ -36,14 +36,14 @@ fun main(): i32 {
     if (parse.[i32]("-42") or 0) != -42 { return 2 }
     if (parse.[i32]("+7") or 0) != 7 { return 3 }
 
-    if ((parse.[i8]("-128") or 0) as i32) != -128 { return 4 }
+    if (parse.[i8]("-128") or 0) != -128 { return 4 }
     if (parse.[i8]("127") or 0) != 127 { return 5 }
     if !i8_fails("128") || !i8_fails("-129") || !i8_fails("") || !i8_fails("-") { return 6 }
 
     if (parse.[u8]("255") or 0) != 255 { return 7 }
     if !u8_fails("256") || !u8_fails("-1") || !u8_fails("12a") { return 8 }
 
-    if (parse.[i64]("-9223372036854775808") or 0) != (-9223372036854775807 - 1) { return 9 }
+    if (parse.[i64]("-9223372036854775808") or 0) != -9223372036854775808 { return 9 }
     if (parse.[i64]("9223372036854775807") or 0) != 9223372036854775807 { return 10 }
     if !i64_fails("9223372036854775808") || !i64_fails("-9223372036854775809") { return 11 }
 

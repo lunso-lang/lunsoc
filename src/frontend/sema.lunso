@@ -2481,6 +2481,31 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
                 res = complete_type(c, pts[op.pointee])
             }
         }
+    } else if node.kind == AstKind.Negate && nodes[node.a].kind == AstKind.Integer {
+        var inner = nodes[node.a]
+        var text = span_bytes(c.tree, node_span(c.tree, node.a, inner.a))
+        var bits: u64 = 0
+        if !parse_int_literal(text, &bits) {
+            if text[0] == '\'' {
+                res = fail(c, node.a, "invalid character literal")
+            } else {
+                res = fail(c, node.a, "invalid integer literal")
+            }
+        } else {
+            var k = TypeKind.I32
+            if is_integer(expected.kind) && !is_enum(expected) {
+                k = expected.kind
+            } else if bits > 2147483648 {
+                k = TypeKind.I64
+            }
+            if !int_fits_type(bits, true, k) {
+                res = fail(c, node.a, "integer literal out of range")
+            } else {
+                var nt = simple_type(k)
+                node_info(c, node.a).type_info = nt
+                res = nt
+            }
+        }
     } else if node.kind == AstKind.Positive || node.kind == AstKind.Negate {
         var op = check_expr(c, node.a, expected)
         if !c.has_error && !is_numeric(op.kind) {
@@ -2900,14 +2925,26 @@ fun check_statement(c: *Checker, id: u32): bool {
         var h = headers[node.a]
         var item_t = empty_type()
         if h.range_end != NODE_NONE {
-            var start_t = check_expr(c, h.iterable, empty_type())
-            if !c.has_error && !is_integer(start_t.kind) {
-                fail(c, h.iterable, "range bounds must be integers")
+            var start_t = empty_type()
+            if is_literal_expr(c.tree, h.iterable) && !is_literal_expr(c.tree, h.range_end) {
+                var end_t = check_expr(c, h.range_end, empty_type())
+                if !c.has_error && !is_integer(end_t.kind) {
+                    fail(c, h.range_end, "range bounds must be integers")
+                }
+                if !c.has_error {
+                    start_t = check_value(c, h.iterable, end_t)
+                    item_t = end_t
+                }
+            } else {
+                start_t = check_expr(c, h.iterable, empty_type())
+                if !c.has_error && !is_integer(start_t.kind) {
+                    fail(c, h.iterable, "range bounds must be integers")
+                }
+                if !c.has_error {
+                    check_value(c, h.range_end, start_t)
+                }
+                item_t = start_t
             }
-            if !c.has_error {
-                check_value(c, h.range_end, start_t)
-            }
-            item_t = start_t
         } else {
             var iter_t = check_expr(c, h.iterable, empty_type())
             if !c.has_error {

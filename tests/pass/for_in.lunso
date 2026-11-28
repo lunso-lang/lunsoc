@@ -1,4 +1,5 @@
 // lunsoc-only
+// expect-exit: 0
 struct Pair {
     a: i32
     b: i32
@@ -47,6 +48,24 @@ fun main(): i32 {
     }
     if psum != 10 {
         return 4
+    }
+
+    var n64: i64 = 5
+    var s64: i64 = 0
+    for i in 0..n64 {
+        s64 += i
+    }
+    if s64 != 10 {
+        return 5
+    }
+
+    var nu32: u32 = 4
+    var su32: u32 = 0
+    for i in 0..nu32 {
+        su32 += i
+    }
+    if su32 != 6 {
+        return 6
     }
 
     return 0
