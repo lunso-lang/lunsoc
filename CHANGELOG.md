@@ -2,6 +2,17 @@
 
 All notable changes to `lunsoc` are documented in this file.
 
+## [0.6.2] - 2026-11-28
+
+### Added
+- `std.collections`: added generic `HashMap[K: Eq + Hash, V]`.
+
+### Changed
+- Refactored compiler AST (`AstNode`) from `AstKind` + untyped `a`/`b` fields and 8 side tables to a tagged union (`AstData`, `UnaryOp`, `BinaryOp`).
+- Replaced `str.equals` with `==` / `!=` for byte-slice comparisons across `std/` and `src/` (lexer, driver, modules, sema, IR, QBE, native).
+- Indexed loaded modules in `Loader` using `HashMap[[]u8, u32]`.
+- Updated CI and release workflows to bootstrap from `lunsoc v0.6.1`.
+
 ## [0.6.1] - 2026-11-28
 
 ### Fixed
