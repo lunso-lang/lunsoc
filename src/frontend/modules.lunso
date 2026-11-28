@@ -56,7 +56,7 @@ const NO_MODULE: u32 = ~0 as u32
 const MAX_MODULE_DEPTH: u32 = 256
 
 fun file_available(l: *Loader, p: []u8): bool {
-    if (l.overlays as u64) != 0 && l.overlays.has(p) {
+    if l.overlays != null && l.overlays.has(p) {
         return true
     }
     return file.exists(p)
@@ -99,7 +99,7 @@ pub fun print_caret(src: []u8, file_start: u32, file_end: u32, offset: u32, line
     io.write_bytes(2, src[(line_start as i64)..(line_end as i64)])
     io.eprintln("")
     io.eprint("  ")
-    for var k: i64 = 0; k < num_len; k += 1 {
+    for _ in (0 as i64)..num_len {
         io.eprint(" ")
     }
     io.eprint(" | ")
@@ -384,8 +384,8 @@ fun module_path_str(l: *Loader, path: NodeRange): []u8 {
     for var i: u32 = 0; i < path.count; i += 1 {
         if i > 0 { buf[pos] = '/'; pos += 1 }
         var s = span_bytes(tree, item_name(tree, children[path.first + i]))
-        for var j: i64 = 0; j < len(s); j += 1 {
-            buf[pos] = s[j]
+        for ch in s {
+            buf[pos] = ch
             pos += 1
         }
     }
@@ -724,7 +724,7 @@ fun load_module(l: *Loader, mod_id: u32, owner: u32, offset: u32): bool {
         return true
     }
     var raw: []u8
-    var from_overlay = (l.overlays as u64) != 0 && l.overlays.get(file_path, &raw)
+    var from_overlay = l.overlays != null && l.overlays.get(file_path, &raw)
     if !from_overlay && file.read_all(file_path, l.arena, &raw) < 0 {
         return err_at(l, offset, "could not read imported module")
     }
@@ -819,8 +819,8 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
     }
     out.tree.declarations = l.modules.data[0].declarations
     sort_qualified(&out.tree)
-    for var i: i64 = 0; i < l.modules.len as i64; i += 1 {
-        if out.tree.modules.push(&l.modules.data[i].scope) < 0 {
+    for m in l.modules.as_slice() {
+        if out.tree.modules.push(&m.scope) < 0 {
             return false
         }
     }
@@ -828,5 +828,5 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
 }
 
 pub fun load(arena: *mem.Arena, entry_path: []u8, source: []u8, std_dir: []u8, include_dirs: [][]u8, out: *ModuleProgram): bool {
-    return load_with_overlays(arena, entry_path, source, std_dir, include_dirs, 0 as *StrMap[[]u8], out)
+    return load_with_overlays(arena, entry_path, source, std_dir, include_dirs, null, out)
 }

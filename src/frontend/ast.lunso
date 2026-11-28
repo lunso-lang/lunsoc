@@ -319,8 +319,7 @@ pub fun offset_to_pos(src: []u8, offset: u32): SourcePos {
     }
     var line: u64 = 1
     var col: u64 = 1
-    for var i: i64 = 0; i < limit; i += 1 {
-        var ch = src[i]
+    for ch in src[0..limit] {
         if ch == '\n' {
             line += 1
             col = 1

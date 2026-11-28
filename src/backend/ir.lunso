@@ -838,8 +838,7 @@ fun lower_loop(l: *Lowering, id: u32) {
     var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
     l.loops.push(&le)
     lower_statement(l, node.b)
-    var dummy: IrLoop
-    l.loops.pop(&dummy)
+    l.loops.pop(null)
     if header.step != NODE_NONE {
         emit_label(l, cont)
         lower_expression(l, header.step)
@@ -890,8 +889,7 @@ fun lower_for_in(l: *Lowering, id: u32) {
         var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
         l.loops.push(&le)
         lower_statement(l, node.b)
-        var dummy: IrLoop
-        l.loops.pop(&dummy)
+        l.loops.pop(null)
         emit_label(l, cont)
         var cur2 = emit_value(l, IrOp.Load, item_t, item_slot, 0, 0)
         var one = emit_value(l, IrOp.Immediate, item_t, 1, 0, 0)
@@ -954,8 +952,7 @@ fun lower_for_in(l: *Lowering, id: u32) {
     var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
     l.loops.push(&le)
     lower_statement(l, node.b)
-    var dummy: IrLoop
-    l.loops.pop(&dummy)
+    l.loops.pop(null)
     emit_label(l, cont)
     var cidx = emit_value(l, IrOp.Load, i64_t, idx_slot, 0, 0)
     var ione = emit_value(l, IrOp.Immediate, i64_t, 1, 0, 0)
