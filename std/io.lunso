@@ -12,7 +12,7 @@ pub fun read_exact(buffer: *u8, count: u64): i64 {
     if count == 0 {
         return 0
     }
-    if (buffer as u64) == 0 || count > 9223372036854775807 {
+    if buffer == null || count > 9223372036854775807 {
         return -22
     }
     var offset: u64 = 0
@@ -33,7 +33,7 @@ pub fun read_exact(buffer: *u8, count: u64): i64 {
 }
 
 pub fun read_line(buffer: *u8, capacity: u64, out: *[]u8): i64 {
-    if capacity == 0 || (buffer as u64) == 0 || (out as u64) == 0 {
+    if capacity == 0 || buffer == null || out == null {
         return -22
     }
     var n: u64 = 0

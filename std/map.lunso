@@ -16,13 +16,13 @@ pub struct StrMap[V] {
     arena: *mem.Arena
 
     pub fun init(self: *Self, arena: *mem.Arena, initial_cap: u64): i64 {
-        if (self as u64) == 0 || (arena as u64) == 0 {
+        if self == null || arena == null {
             return -22
         }
-        self.keys = 0 as *[]u8
-        self.values = 0 as *V
-        self.hashes = 0 as *u64
-        self.states = 0 as *u8
+        self.keys = null
+        self.values = null
+        self.hashes = null
+        self.states = null
         self.len = 0
         self.used = 0
         self.cap = 0
@@ -34,7 +34,7 @@ pub struct StrMap[V] {
     }
 
     pub fun reserve(self: *Self, min_cap: u64): i64 {
-        if (self as u64) == 0 || (self.arena as u64) == 0 {
+        if self == null || self.arena == null {
             return -22
         }
         var new_cap = next_pow2(min_cap)
@@ -88,7 +88,7 @@ pub struct StrMap[V] {
     }
 
     fun find_index(self: *const Self, key: []const u8, h: u64): i64 {
-        if (self as u64) == 0 || self.cap == 0 || self.len == 0 {
+        if self == null || self.cap == 0 || self.len == 0 {
             return -1
         }
         var mask = self.cap - 1
@@ -107,7 +107,7 @@ pub struct StrMap[V] {
     }
 
     pub fun set(self: *Self, key: []const u8, value: V): i64 {
-        if (self as u64) == 0 || (self.arena as u64) == 0 {
+        if self == null || self.arena == null {
             return -22
         }
         if self.cap == 0 || (self.used + 1) * 10 >= self.cap * 7 {
@@ -163,7 +163,7 @@ pub struct StrMap[V] {
     }
 
     pub fun get_ptr(self: *Self, key: []const u8, out: **V): bool {
-        if (out as u64) == 0 {
+        if out == null {
             return false
         }
         var idx = self.find_index(key, str.hash(key))
@@ -175,7 +175,7 @@ pub struct StrMap[V] {
     }
 
     pub fun get(self: *const Self, key: []const u8, out: *V): bool {
-        if (out as u64) == 0 {
+        if out == null {
             return false
         }
         var idx = self.find_index(key, str.hash(key))
@@ -201,7 +201,7 @@ pub struct StrMap[V] {
     }
 
     pub fun clear(self: *Self) {
-        if (self as u64) == 0 {
+        if self == null {
             return
         }
         for var i: u64 = 0; i < self.cap; i += 1 {

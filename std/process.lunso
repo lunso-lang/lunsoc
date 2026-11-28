@@ -65,7 +65,6 @@ pub fun chdir(path: []const u8): !void {
     if lunso_sys_chdir(data(buf)) < 0 {
         return fail("chdir failed")
     }
-    return
 }
 
 pub fun run(program: []const u8, argv: [][]u8): i64 {
@@ -125,8 +124,7 @@ fun build_envp(arena: *mem.Arena, raw: []u8, has_env: bool, out: ***u8): i64 {
             }
         }
     }
-    var null_ptr: *u8
-    envp[count] = null_ptr
+    envp[count] = null
     *out = envp
     return 0
 }
@@ -173,7 +171,7 @@ pub struct Command {
     argv: vec.Vec[[]u8]
 
     pub fun init(self: *Self, arena: *mem.Arena, program: []const u8): !void {
-        if (self as u64) == 0 || (arena as u64) == 0 || len(program) == 0 {
+        if self == null || arena == null || len(program) == 0 {
             return fail("Command.init invalid argument")
         }
         self.arena = arena
@@ -186,7 +184,6 @@ pub struct Command {
         if self.argv.push_value(prog_copy) < 0 {
             return fail("Command.init out of memory")
         }
-        return
     }
 
     pub fun arg(self: *Self, a: []const u8): !void {
@@ -197,7 +194,6 @@ pub struct Command {
         if self.argv.push_value(copy) < 0 {
             return fail("Command.arg out of memory")
         }
-        return
     }
 
     pub fun run(self: *const Self): !i64 {
@@ -209,7 +205,7 @@ pub struct Command {
     }
 
     pub fun output(self: *const Self): ![]u8 {
-        if len(self.program) == 0 || (self.arena as u64) == 0 {
+        if len(self.program) == 0 || self.arena == null {
             return fail("Command.output invalid command")
         }
         var raw_env: []u8
@@ -237,8 +233,7 @@ pub struct Command {
             }
             c_argv[i] = ap
         }
-        var null_ptr: *u8
-        c_argv[argc] = null_ptr
+        c_argv[argc] = null
 
         var fds: [2]i32
         if lunso_sys_pipe2(&fds[0], 0x80000) < 0 {

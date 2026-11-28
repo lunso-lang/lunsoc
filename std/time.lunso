@@ -10,7 +10,7 @@ ext fun lunso_sys_clock_gettime(clock_id: i32, out_sec: *i64, out_nsec: *i64): i
 ext fun lunso_sys_nanosleep(sec: i64, nsec: i64): i64
 
 pub fun now(clock_id: i32, out: *Instant): i64 {
-    if (out as u64) == 0 {
+    if out == null {
         return -22
     }
     var sec: i64 = 0

@@ -118,8 +118,7 @@ pub fun normalize(arena: *mem.Arena, p: []const u8): []u8 {
         }
         if str.equals(seg, "..") {
             if parts.len > 0 && !str.equals(parts.data[parts.len - 1], "..") {
-                var popped: []const u8
-                parts.pop(&popped)
+                parts.pop(null)
             } else if !abs {
                 parts.push_value(seg)
             }
@@ -162,7 +161,7 @@ fun is_uri_safe(ch: u8): bool {
 }
 
 pub fun from_file_uri(arena: *mem.Arena, uri: []const u8, out: *[]u8): bool {
-    if (arena as u64) == 0 || (out as u64) == 0 || !str.starts_with(uri, "file://") {
+    if arena == null || out == null || !str.starts_with(uri, "file://") {
         return false
     }
     var rest = uri[7..len(uri)]
@@ -202,7 +201,7 @@ pub fun from_file_uri(arena: *mem.Arena, uri: []const u8, out: *[]u8): bool {
 }
 
 pub fun to_file_uri(arena: *mem.Arena, p: []const u8, out: *[]u8): bool {
-    if (arena as u64) == 0 || (out as u64) == 0 || len(p) == 0 || p[0] != '/' {
+    if arena == null || out == null || len(p) == 0 || p[0] != '/' {
         return false
     }
     var buf: vec.Vec[u8]

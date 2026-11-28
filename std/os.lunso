@@ -150,8 +150,7 @@ fun build_envp(arena: *mem.Arena, raw: []u8, has_env: bool, out: ***u8): i64 {
             }
         }
     }
-    var null_ptr: *u8
-    envp[count] = null_ptr
+    envp[count] = null
     *out = envp
     return 0
 }
@@ -239,8 +238,7 @@ pub fun run(program: []const u8, argv: [][]u8): i64 {
         }
         c_argv[i] = arg_ptr
     }
-    var null_ptr: *u8
-    c_argv[argc] = null_ptr
+    c_argv[argc] = null
 
     var pid = lunso_sys_fork()
     if pid < 0 {
@@ -266,7 +264,7 @@ pub fun run(program: []const u8, argv: [][]u8): i64 {
 }
 
 pub fun list_dir(path: []const u8, arena: *mem.Arena, out: *vec.Vec[DirEntry]): i64 {
-    if (arena as u64) == 0 || (out as u64) == 0 {
+    if arena == null || out == null {
         return -22
     }
     var cpath: [4096]u8

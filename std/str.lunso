@@ -230,7 +230,7 @@ pub fun contains(s: []const u8, needle: []const u8): bool {
 }
 
 pub fun split_char(arena: *mem.Arena, s: []const u8, sep: u8, out: *vec.Vec[[]const u8]): i64 {
-    if (arena as u64) == 0 || (out as u64) == 0 {
+    if arena == null || out == null {
         return -22
     }
     if out.init(arena, 8) < 0 {
@@ -250,7 +250,7 @@ pub fun split_char(arena: *mem.Arena, s: []const u8, sep: u8, out: *vec.Vec[[]co
 }
 
 pub fun split(arena: *mem.Arena, s: []const u8, sep: []const u8, out: *vec.Vec[[]const u8]): i64 {
-    if (arena as u64) == 0 || (out as u64) == 0 {
+    if arena == null || out == null {
         return -22
     }
     if len(sep) == 1 {

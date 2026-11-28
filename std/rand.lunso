@@ -10,7 +10,7 @@ pub fun fill_bytes(buf: *u8, count: u64): i64 {
     if count == 0 {
         return 0
     }
-    if (buf as u64) == 0 {
+    if buf == null {
         return -22
     }
     var offset: u64 = 0
@@ -31,7 +31,7 @@ pub fun fill_bytes(buf: *u8, count: u64): i64 {
 }
 
 pub fun u64_entropy(out: *u64): i64 {
-    if (out as u64) == 0 {
+    if out == null {
         return -22
     }
     var raw: [8]u8

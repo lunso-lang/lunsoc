@@ -47,9 +47,9 @@ pub fun null_val(): JsonValue {
         int_val: 0,
         float_val: 0.0,
         str_val: "",
-        arr_val: 0 as *u8,
-        obj_val: 0 as *u8,
-        obj_keys: 0 as *vec.Vec[[]u8],
+        arr_val: null,
+        obj_val: null,
+        obj_keys: null,
     }
 }
 
@@ -82,7 +82,7 @@ pub fun str_val(v: []u8): JsonValue {
 }
 
 pub fun array_val(arena: *mem.Arena, out: *JsonValue): i64 {
-    if (arena as u64) == 0 || (out as u64) == 0 {
+    if arena == null || out == null {
         return -22
     }
     var arr: *vec.Vec[JsonValue]
@@ -102,7 +102,7 @@ pub fun array_val(arena: *mem.Arena, out: *JsonValue): i64 {
 }
 
 pub fun object_val(arena: *mem.Arena, out: *JsonValue): i64 {
-    if (arena as u64) == 0 || (out as u64) == 0 {
+    if arena == null || out == null {
         return -22
     }
     var obj: *map.StrMap[JsonValue]
@@ -132,14 +132,14 @@ pub fun object_val(arena: *mem.Arena, out: *JsonValue): i64 {
 }
 
 pub fun push(arr: *JsonValue, val: JsonValue): i64 {
-    if (arr as u64) == 0 || arr.kind != JsonKind.Array || (arr.arr_val as u64) == 0 {
+    if arr == null || arr.kind != JsonKind.Array || arr.arr_val == null {
         return -22
     }
     return vec.push.[JsonValue](arr_ptr(*arr), &val)
 }
 
 pub fun set(arena: *mem.Arena, obj: *JsonValue, key: []u8, val: JsonValue): i64 {
-    if (obj as u64) == 0 || obj.kind != JsonKind.Object || (obj.obj_val as u64) == 0 {
+    if obj == null || obj.kind != JsonKind.Object || obj.obj_val == null {
         return -22
     }
     var op = obj_ptr(*obj)
@@ -148,7 +148,7 @@ pub fun set(arena: *mem.Arena, obj: *JsonValue, key: []u8, val: JsonValue): i64 
     if status < 0 {
         return status
     }
-    if !existed && (obj.obj_keys as u64) != 0 {
+    if !existed && obj.obj_keys != null {
         var k = str.clone(arena, key)
         if len(key) > 0 && len(k) == 0 {
             return -12
@@ -162,7 +162,7 @@ pub fun set(arena: *mem.Arena, obj: *JsonValue, key: []u8, val: JsonValue): i64 
 }
 
 pub fun get(obj: JsonValue, key: []u8, out: *JsonValue): bool {
-    if obj.kind != JsonKind.Object || (obj.obj_val as u64) == 0 {
+    if obj.kind != JsonKind.Object || obj.obj_val == null {
         return false
     }
     return map.get.[JsonValue](obj_ptr(obj), key, out)
@@ -196,17 +196,17 @@ pub fun get_bool(obj: JsonValue, key: []u8, out: *bool): bool {
 }
 
 pub fun at(arr: JsonValue, index: u64, out: *JsonValue): bool {
-    if arr.kind != JsonKind.Array || (arr.arr_val as u64) == 0 {
+    if arr.kind != JsonKind.Array || arr.arr_val == null {
         return false
     }
     return vec.get.[JsonValue](arr_ptr(arr), index, out)
 }
 
 pub fun len_of(v: JsonValue): u64 {
-    if v.kind == JsonKind.Array && (v.arr_val as u64) != 0 {
+    if v.kind == JsonKind.Array && v.arr_val != null {
         return arr_ptr(v).len
     }
-    if v.kind == JsonKind.Object && (v.obj_val as u64) != 0 {
+    if v.kind == JsonKind.Object && v.obj_val != null {
         return obj_ptr(v).len
     }
     return 0
@@ -616,7 +616,7 @@ fun parse_value(p: *Parser, out: *JsonValue): bool {
 }
 
 pub fun parse(arena: *mem.Arena, text: []u8, out: *JsonValue): bool {
-    if (arena as u64) == 0 || (out as u64) == 0 {
+    if arena == null || out == null {
         return false
     }
     var p = Parser { arena: arena, src: text, pos: 0, depth: 0 }
@@ -658,7 +658,7 @@ pub fun write_escaped_str(s: []u8, out: *vec.Vec[u8]): i64 {
 }
 
 pub fun write(v: JsonValue, out: *vec.Vec[u8]): i64 {
-    if (out as u64) == 0 {
+    if out == null {
         return -22
     }
     if v.kind == JsonKind.Null {
@@ -688,7 +688,7 @@ pub fun write(v: JsonValue, out: *vec.Vec[u8]): i64 {
     }
     if v.kind == JsonKind.Array {
         if vec.push_value.[u8](out, '[') < 0 { return -12 }
-        if (v.arr_val as u64) != 0 {
+        if v.arr_val != null {
             var items = vec.as_slice.[JsonValue](arr_ptr(v))
             for var i: i64 = 0; i < len(items); i += 1 {
                 if i > 0 && vec.push_value.[u8](out, ',') < 0 { return -12 }
@@ -700,7 +700,7 @@ pub fun write(v: JsonValue, out: *vec.Vec[u8]): i64 {
     }
     if v.kind == JsonKind.Object {
         if vec.push_value.[u8](out, '{') < 0 { return -12 }
-        if (v.obj_keys as u64) != 0 && (v.obj_val as u64) != 0 {
+        if v.obj_keys != null && v.obj_val != null {
             var op = obj_ptr(v)
             var keys = vec.as_slice.[[]u8](v.obj_keys)
             for var i: i64 = 0; i < len(keys); i += 1 {
@@ -724,7 +724,7 @@ pub fun write(v: JsonValue, out: *vec.Vec[u8]): i64 {
 }
 
 pub fun stringify(arena: *mem.Arena, v: JsonValue, out: *[]u8): i64 {
-    if (arena as u64) == 0 || (out as u64) == 0 {
+    if arena == null || out == null {
         return -22
     }
     var buf: vec.Vec[u8]
