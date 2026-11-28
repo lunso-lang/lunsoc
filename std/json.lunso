@@ -612,16 +612,20 @@ fun parse_value(p: *Parser, out: *JsonValue): bool {
     return false
 }
 
-pub fun parse(arena: *mem.Arena, text: []u8, out: *JsonValue): bool {
-    if arena == null || out == null {
-        return false
+pub fun parse(arena: *mem.Arena, text: []u8): !JsonValue {
+    if arena == null {
+        return fail("json.parse null arena")
     }
+    var out: JsonValue
     var p = Parser { arena: arena, src: text, pos: 0, depth: 0 }
-    if !parse_value(&p, out) {
-        return false
+    if !parse_value(&p, &out) {
+        return fail("json.parse invalid syntax")
     }
     skip_ws(&p)
-    return p.pos == len(p.src)
+    if p.pos != len(p.src) {
+        return fail("json.parse trailing characters")
+    }
+    return out
 }
 
 pub fun write_escaped_str(s: []u8, out: *vec.Vec[u8]): i64 {
@@ -716,19 +720,16 @@ pub fun write(v: JsonValue, out: *vec.Vec[u8]): i64 {
     return -22
 }
 
-pub fun stringify(arena: *mem.Arena, v: JsonValue, out: *[]u8): i64 {
-    if arena == null || out == null {
-        return -22
+pub fun stringify(arena: *mem.Arena, v: JsonValue): ![]u8 {
+    if arena == null {
+        return fail("json.stringify null arena")
     }
     var buf: vec.Vec[u8]
-    var status = vec.init.[u8](&buf, arena, 64)
-    if status < 0 {
-        return status
+    if vec.init.[u8](&buf, arena, 64) < 0 {
+        return fail("json.stringify out of memory")
     }
-    status = write(v, &buf)
-    if status < 0 {
-        return status
+    if write(v, &buf) < 0 {
+        return fail("json.stringify failed")
     }
-    *out = vec.as_slice.[u8](&buf)
-    return 0
+    return vec.as_slice.[u8](&buf)
 }
