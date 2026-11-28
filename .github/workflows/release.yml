@@ -49,7 +49,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            dist/assets/* \
-            --title "lunsoc ${GITHUB_REF_NAME}" \
-            --generate-notes
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES_FILE="/tmp/release-notes.md"
+          awk -v ver="[$VERSION]" '
+            $0 ~ "^## " {
+              if (found) exit
+              if (index($0, ver) > 0) { found = 1; next }
+            }
+            found { print }
+          ' CHANGELOG.md > "$NOTES_FILE"
+          if [ -s "$NOTES_FILE" ]; then
+            gh release create "$GITHUB_REF_NAME" \
+              dist/assets/* \
+              --title "lunsoc ${GITHUB_REF_NAME}" \
+              --notes-file "$NOTES_FILE"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              dist/assets/* \
+              --title "lunsoc ${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi
