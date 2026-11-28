@@ -1,0 +1,66 @@
+// expect-exit: 0
+import std.parse
+
+fun i8_fails(s: []const u8): bool {
+    _ = parse.parse.[i8](s) or { return true }
+    return false
+}
+
+fun u8_fails(s: []const u8): bool {
+    _ = parse.parse.[u8](s) or { return true }
+    return false
+}
+
+fun i64_fails(s: []const u8): bool {
+    _ = parse.parse.[i64](s) or { return true }
+    return false
+}
+
+fun u64_fails(s: []const u8): bool {
+    _ = parse.parse.[u64](s) or { return true }
+    return false
+}
+
+fun bool_fails(s: []const u8): bool {
+    _ = parse.parse.[bool](s) or { return true }
+    return false
+}
+
+fun f64_fails(s: []const u8): bool {
+    _ = parse.parse.[f64](s) or { return true }
+    return false
+}
+
+fun main(): i32 {
+    if (parse.parse.[i32]("12") or 0) != 12 { return 1 }
+    if (parse.parse.[i32]("-42") or 0) != -42 { return 2 }
+    if (parse.parse.[i32]("+7") or 0) != 7 { return 3 }
+
+    if ((parse.parse.[i8]("-128") or 0) as i32) != -128 { return 4 }
+    if (parse.parse.[i8]("127") or 0) != 127 { return 5 }
+    if !i8_fails("128") || !i8_fails("-129") || !i8_fails("") || !i8_fails("-") { return 6 }
+
+    if (parse.parse.[u8]("255") or 0) != 255 { return 7 }
+    if !u8_fails("256") || !u8_fails("-1") || !u8_fails("12a") { return 8 }
+
+    if (parse.parse.[i64]("-9223372036854775808") or 0) != (-9223372036854775807 - 1) { return 9 }
+    if (parse.parse.[i64]("9223372036854775807") or 0) != 9223372036854775807 { return 10 }
+    if !i64_fails("9223372036854775808") || !i64_fails("-9223372036854775809") { return 11 }
+
+    if (parse.parse.[u64]("18446744073709551615") or 0) != 18446744073709551615 { return 12 }
+    if !u64_fails("18446744073709551616") { return 13 }
+
+    if !(parse.parse.[bool]("true") or false) { return 14 }
+    if (parse.parse.[bool]("false") or true) { return 15 }
+    if !bool_fails("1") || !bool_fails("") { return 16 }
+
+    var f = parse.parse.[f64]("-12.5") or 0.0
+    if f < -12.51 || f > -12.49 { return 17 }
+    var fe = parse.parse.[f64]("1.5e2") or 0.0
+    if fe < 149.9 || fe > 150.1 { return 18 }
+    var f32v = parse.parse.[f32]("0.25") or 0.0
+    if f32v < 0.24 || f32v > 0.26 { return 19 }
+    if !f64_fails("") || !f64_fails(".") || !f64_fails("1.5e") || !f64_fails("1.5x") { return 20 }
+
+    return 0
+}
