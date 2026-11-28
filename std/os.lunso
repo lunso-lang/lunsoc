@@ -309,7 +309,7 @@ pub fun list_dir(path: []const u8, arena: *mem.Arena, out: *Vec[DirEntry]): i64 
                 name_end += 1
             }
             var name_slice = buf[name_start..name_end]
-            if !str.equals(name_slice, ".") && !str.equals(name_slice, "..") {
+            if name_slice != "." && name_slice != ".." {
                 var cloned = str.clone(arena, name_slice)
                 if len(name_slice) > 0 && len(cloned) == 0 {
                     return -12

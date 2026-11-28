@@ -103,7 +103,7 @@ fun run_parse(path: []u8, source: []u8, arena: *mem.Arena): i32 {
     return 0
 }
 
-const VERSION: []u8 = "lunsoc 0.6.1"
+const VERSION: []u8 = "lunsoc 0.6.2"
 
 enum Mode : u8 {
     Tokens,
@@ -210,7 +210,7 @@ fun resolve_std_obj(arena: *mem.Arena): []u8 {
 }
 
 fun default_output_name(arena: *mem.Arena, src_path: []const u8, mode: Mode): []u8 {
-    var has_lunso = str.equals(path.extension(src_path), ".lunso")
+    var has_lunso = path.extension(src_path) == ".lunso"
     var stem = path.basename(src_path)
     if has_lunso {
         stem = path.stem(src_path)
@@ -252,7 +252,7 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
 
     for var i: i64 = 1; i < len(argv); i += 1 {
         var arg = argv[i]
-        if !stop_options && str.equals(arg, "--") {
+        if !stop_options && arg == "--" {
             stop_options = true
             if mode == Mode.Run && len(path) > 0 {
                 run_args_start = i + 1
@@ -260,70 +260,70 @@ pub fun run(arena: *mem.Arena, argv: [][]u8): i32 {
             }
             continue
         }
-        if !stop_options && (str.equals(arg, "-h") || str.equals(arg, "--help")) {
+        if !stop_options && (arg == "-h" || arg == "--help") {
             print_help(prog_name)
             return 0
         }
-        if !stop_options && (str.equals(arg, "-V") || str.equals(arg, "--version")) {
+        if !stop_options && (arg == "-V" || arg == "--version") {
             io.println(VERSION)
             return 0
         }
-        if !stop_options && str.equals(arg, "--parse") {
+        if !stop_options && arg == "--parse" {
             mode = Mode.Parse
             mode_count += 1
-        } else if !stop_options && str.equals(arg, "--check") {
+        } else if !stop_options && arg == "--check" {
             mode = Mode.Check
             mode_count += 1
-        } else if !stop_options && str.equals(arg, "--emit-ir") {
+        } else if !stop_options && arg == "--emit-ir" {
             mode = Mode.EmitIr
             mode_count += 1
-        } else if !stop_options && str.equals(arg, "--emit-qbe") {
+        } else if !stop_options && arg == "--emit-qbe" {
             mode = Mode.EmitQbe
             mode_count += 1
-        } else if !stop_options && str.equals(arg, "--emit-asm") {
+        } else if !stop_options && arg == "--emit-asm" {
             mode = Mode.EmitAsm
             mode_count += 1
-        } else if !stop_options && (str.equals(arg, "-c") || str.equals(arg, "--emit-obj")) {
+        } else if !stop_options && (arg == "-c" || arg == "--emit-obj") {
             mode = Mode.EmitObj
             mode_count += 1
-        } else if !stop_options && str.equals(arg, "--build") {
+        } else if !stop_options && arg == "--build" {
             mode = Mode.Build
             mode_count += 1
-        } else if !stop_options && str.equals(arg, "--run") {
+        } else if !stop_options && arg == "--run" {
             mode = Mode.Run
             mode_count += 1
-        } else if !stop_options && (str.equals(arg, "-nostdlib") || str.equals(arg, "--nostdlib")) {
+        } else if !stop_options && (arg == "-nostdlib" || arg == "--nostdlib") {
             nostdlib = true
-        } else if !stop_options && str.equals(arg, "--std") {
+        } else if !stop_options && arg == "--std" {
             if i + 1 >= len(argv) || len(std_dir) > 0 {
                 io.eprintln("lunsoc: invalid --std option")
                     return 1
             }
             i += 1
             std_dir = argv[i]
-        } else if !stop_options && str.equals(arg, "-I") {
+        } else if !stop_options && arg == "-I" {
             if i + 1 >= len(argv) {
                 io.eprintln("lunsoc: -I requires a directory")
                     return 1
             }
             i += 1
             include_dirs.push_value(argv[i])
-        } else if !stop_options && len(arg) > 2 && str.equals(arg[0..2], "-I") {
+        } else if !stop_options && len(arg) > 2 && arg[0..2] == "-I" {
             include_dirs.push_value(arg[2..len(arg)])
-        } else if !stop_options && len(arg) > 6 && str.equals(arg[0..6], "--std=") {
+        } else if !stop_options && len(arg) > 6 && arg[0..6] == "--std=" {
             if len(std_dir) > 0 || len(arg) == 6 {
                 io.eprintln("lunsoc: invalid --std option")
                     return 1
             }
             std_dir = arg[6..len(arg)]
-        } else if !stop_options && str.equals(arg, "-o") {
+        } else if !stop_options && arg == "-o" {
             if i + 1 >= len(argv) || len(output) > 0 {
                 io.eprintln("lunsoc: invalid -o option")
                     return 1
             }
             i += 1
             output = argv[i]
-        } else if !stop_options && str.equals(arg, "--link") {
+        } else if !stop_options && arg == "--link" {
             if i + 1 >= len(argv) {
                 io.eprintln("lunsoc: --link requires a path")
                     return 1

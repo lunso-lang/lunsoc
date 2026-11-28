@@ -59,10 +59,10 @@ fun parse_signed(s: []const u8, min_val: i64, max_val: i64): !i64 {
 }
 
 fun parse_bool_val(s: []const u8): !bool {
-    if str.equals(s, "true") {
+    if s == "true" {
         return true
     }
-    if str.equals(s, "false") {
+    if s == "false" {
         return false
     }
     return fail("invalid bool")

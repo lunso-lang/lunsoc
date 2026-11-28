@@ -1,0 +1,55 @@
+// exit: 0
+
+import std.mem
+import std.collections.HashMap
+
+struct Point : Eq, Hash {
+    x: i32
+    y: i32
+}
+
+fun main(): i32 {
+    var arena: mem.Arena
+    if arena.init(8192) < 0 { return 1 }
+    defer arena.deinit()
+
+    // 1. Struct keys with auto-Eq and auto-Hash
+    var pmap: HashMap[Point, i32]
+    if pmap.init(&arena, 8) < 0 { return 2 }
+    var p1 = Point { x: 1, y: 2 }
+    var p2 = Point { x: 3, y: 4 }
+    if pmap.put(p1, 100) < 0 { return 3 }
+    if pmap.put(p2, 200) < 0 { return 4 }
+
+    var out: i32 = 0
+    if !pmap.get(Point { x: 1, y: 2 }, &out) || out != 100 { return 5 }
+    if !pmap.get(Point { x: 3, y: 4 }, &out) || out != 200 { return 6 }
+    if pmap.contains(Point { x: 9, y: 9 }) { return 7 }
+
+    // Update existing key & remove
+    if pmap.put(p1, 150) < 0 { return 8 }
+    if !pmap.get(p1, &out) || out != 150 { return 9 }
+    if !pmap.remove(p2) { return 10 }
+    if pmap.contains(p2) || pmap.len != 1 { return 11 }
+
+    // 2. String keys ([]const u8)
+    var smap: HashMap[[]const u8, i64]
+    if smap.init(&arena, 8) < 0 { return 12 }
+    if smap.put("alpha", 10) < 0 { return 13 }
+    if smap.put("beta", 20) < 0 { return 14 }
+    var sval: i64 = 0
+    if !smap.get("alpha", &sval) || sval != 10 { return 15 }
+    if !smap.get("beta", &sval) || sval != 20 { return 16 }
+
+    // 3. Integer keys (i32)
+    var imap: HashMap[i32, i32]
+    if imap.init(&arena, 4) < 0 { return 17 }
+    for i in 0..32 {
+        if imap.put(i, i * 10) < 0 { return 18 }
+    }
+    for i in 0..32 {
+        if !imap.get(i, &out) || out != i * 10 { return 19 }
+    }
+
+    return 0
+}

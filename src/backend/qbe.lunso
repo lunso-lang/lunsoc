@@ -54,7 +54,7 @@ fun span_bytes(source: []u8, s: ast.Span): []u8 {
 }
 
 fun entry_symbol(mod: *ir.IrModule, f: ir.IrFunction): bool {
-    return !f.external && !f.specialization && f.module == 0 && str.equals(span_bytes(mod.source, f.name), "main")
+    return !f.external && !f.specialization && f.module == 0 && span_bytes(mod.source, f.name) == "main"
 }
 
 fun write_symbol(out: *Vec[u8], mod: *ir.IrModule, index: u32) {

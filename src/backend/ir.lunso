@@ -113,23 +113,23 @@ struct Lowering {
     failed: bool
 }
 
-fun binary_ir_op(kind: AstKind): IrOp {
-    match kind {
-        AstKind.Add, AstKind.AssignAdd => return IrOp.Add
-        AstKind.Subtract, AstKind.AssignSubtract => return IrOp.Subtract
-        AstKind.Multiply, AstKind.AssignMultiply => return IrOp.Multiply
-        AstKind.Divide, AstKind.AssignDivide => return IrOp.Divide
-        AstKind.Remainder, AstKind.AssignRemainder => return IrOp.Remainder
-        AstKind.Equal => return IrOp.Equal
-        AstKind.NotEqual => return IrOp.NotEqual
-        AstKind.Less => return IrOp.Less
-        AstKind.LessEqual => return IrOp.LessEqual
-        AstKind.Greater => return IrOp.Greater
-        AstKind.GreaterEqual => return IrOp.GreaterEqual
-        AstKind.BitAnd, AstKind.AssignBitAnd => return IrOp.BitAnd
-        AstKind.BitOr, AstKind.AssignBitOr => return IrOp.BitOr
-        AstKind.BitXor, AstKind.AssignBitXor => return IrOp.BitXor
-        AstKind.ShiftLeft, AstKind.AssignShiftLeft => return IrOp.ShiftLeft
+fun binary_ir_op(bop: BinaryOp): IrOp {
+    match bop {
+        BinaryOp.Add, BinaryOp.AssignAdd => return IrOp.Add
+        BinaryOp.Subtract, BinaryOp.AssignSubtract => return IrOp.Subtract
+        BinaryOp.Multiply, BinaryOp.AssignMultiply => return IrOp.Multiply
+        BinaryOp.Divide, BinaryOp.AssignDivide => return IrOp.Divide
+        BinaryOp.Remainder, BinaryOp.AssignRemainder => return IrOp.Remainder
+        BinaryOp.Equal => return IrOp.Equal
+        BinaryOp.NotEqual => return IrOp.NotEqual
+        BinaryOp.Less => return IrOp.Less
+        BinaryOp.LessEqual => return IrOp.LessEqual
+        BinaryOp.Greater => return IrOp.Greater
+        BinaryOp.GreaterEqual => return IrOp.GreaterEqual
+        BinaryOp.BitAnd, BinaryOp.AssignBitAnd => return IrOp.BitAnd
+        BinaryOp.BitOr, BinaryOp.AssignBitOr => return IrOp.BitOr
+        BinaryOp.BitXor, BinaryOp.AssignBitXor => return IrOp.BitXor
+        BinaryOp.ShiftLeft, BinaryOp.AssignShiftLeft => return IrOp.ShiftLeft
         else => return IrOp.ShiftRight
     }
 }
@@ -218,8 +218,13 @@ fun lower_const(l: *Lowering, info: SemaNode): u32 {
     if sc.str_node != NODE_NONE {
         var nodes = l.tree.nodes.as_slice()
         var sn_node = nodes[sc.str_node]
+        var slen: u32 = 0
+        match sn_node.data {
+            AstData.String(slen_v) => slen = slen_v
+            else => {}
+        }
         var st = lower_node(l, sc.str_node).type_info
-        var bytes = emit_value(l, IrOp.Bytes, st, sn_node.pos, sn_node.a, 0)
+        var bytes = emit_value(l, IrOp.Bytes, st, sn_node.pos, slen, 0)
         if info.type_info.kind == TypeKind.Slice {
             return emit_value(l, IrOp.ArrayView, st, bytes, 0, 0)
         }
@@ -243,26 +248,34 @@ fun lower_index(l: *Lowering, id: u32): u32 {
 
 fun lower_memory_address(l: *Lowering, id: u32): u32 {
     var nodes = l.tree.nodes.as_slice()
-    var node = nodes[id]
-    if node.kind == AstKind.Index {
-        var base = lower_expression(l, node.a)
-        var idx = lower_index(l, node.b)
-        var bt = lower_node(l, node.a).type_info
-        if bt.kind == TypeKind.Pointer {
-            return emit_value(l, IrOp.PointerIndex, lower_node(l, id).type_info, base, idx, 0)
+    match nodes[id].data {
+        AstData.Index(ix) => {
+            var base = lower_expression(l, ix.base)
+            var idx = lower_index(l, ix.idx)
+            var bt = lower_node(l, ix.base).type_info
+            if bt.kind == TypeKind.Pointer {
+                return emit_value(l, IrOp.PointerIndex, lower_node(l, id).type_info, base, idx, 0)
+            }
+            return emit_value(l, IrOp.ElementAddress, bt, base, idx, 0)
         }
-        return emit_value(l, IrOp.ElementAddress, bt, base, idx, 0)
+        AstData.Unary(un) => {
+            var base_val = lower_expression(l, un.operand)
+            if un.op == UnaryOp.Dereference {
+                return base_val
+            }
+            return base_val
+        }
+        AstData.Member(m) => {
+            var base_val = lower_expression(l, m.base)
+            var bt = lower_node(l, m.base).type_info
+            if bt.kind == TypeKind.Pointer {
+                var pts = l.sem.pointees.as_slice()
+                bt = pts[bt.pointee]
+            }
+            return emit_value(l, IrOp.FieldAddress, bt, base_val, lower_node(l, id).binding, 0)
+        }
+        else => return 0
     }
-    var base_val = lower_expression(l, node.a)
-    if node.kind == AstKind.Dereference {
-        return base_val
-    }
-    var bt = lower_node(l, node.a).type_info
-    if bt.kind == TypeKind.Pointer {
-        var pts = l.sem.pointees.as_slice()
-        bt = pts[bt.pointee]
-    }
-    return emit_value(l, IrOp.FieldAddress, bt, base_val, lower_node(l, id).binding, 0)
 }
 
 fun emit_u64_imm(l: *Lowering, v: u64): u32 {
@@ -285,7 +298,7 @@ fun find_struct_method_ir(l: *Lowering, t: SemaType, name: []u8): u32 {
         var fd = fdecls[sf.declaration]
         if fd.owner_struct != sr.declaration { continue }
         var fn_bytes = l.tree.source[(fd.name.offset as i64)..((fd.name.offset + fd.name.length) as i64)]
-        if !str.equals(fn_bytes, name) { continue }
+        if fn_bytes != name { continue }
         if fd.type_parameters.count == 0 { return i as u32 }
         if sf.arguments.len == sr.arguments.len {
             var ok = true
@@ -552,16 +565,24 @@ fun emit_hash_value(l: *Lowering, t: SemaType, val: u32): u32 {
 fun lower_call(l: *Lowering, id: u32): u32 {
     var info = lower_node(l, id)
     var nodes = l.tree.nodes.as_slice()
-    var call = nodes[id]
+    var cr = NodeRange { first: 0, count: 0 }
+    match nodes[id].data {
+        AstData.Call(r) => cr = r
+        else => return 0
+    }
     var children = l.tree.children.as_slice()
     if info.builtin == SemaBuiltin.SizeOf {
         return emit_value(l, IrOp.Immediate, info.type_info, info.binding, 0, 0)
     }
     if info.builtin == SemaBuiltin.Fail {
-        return lower_expression(l, children[call.a + 1])
+        return lower_expression(l, children[cr.first + 1])
     }
     if info.builtin == SemaBuiltin.Hash {
-        var recv_id = nodes[children[call.a]].a
+        var recv_id = NODE_NONE
+        match nodes[children[cr.first]].data {
+            AstData.Member(m) => recv_id = m.base
+            else => {}
+        }
         var recv_t = lower_node(l, recv_id).type_info
         var recv_val = lower_expression(l, recv_id)
         if recv_t.kind == TypeKind.Pointer {
@@ -574,8 +595,12 @@ fun lower_call(l: *Lowering, id: u32): u32 {
         return emit_hash_value(l, recv_t, recv_val)
     }
     if info.builtin == SemaBuiltin.Eq {
-        var recv_id = nodes[children[call.a]].a
-        var arg_id = children[call.a + 1]
+        var recv_id = NODE_NONE
+        match nodes[children[cr.first]].data {
+            AstData.Member(m) => recv_id = m.base
+            else => {}
+        }
+        var arg_id = children[cr.first + 1]
         var recv_t = lower_node(l, recv_id).type_info
         var lhs = lower_expression(l, recv_id)
         var rhs_ptr = lower_expression(l, arg_id)
@@ -593,7 +618,7 @@ fun lower_call(l: *Lowering, id: u32): u32 {
         return emit_eq_values(l, base_t, lhs, rhs)
     }
     if info.builtin != SemaBuiltin.None {
-        var arg = children[call.a + 1]
+        var arg = children[cr.first + 1]
         var val = lower_expression(l, arg)
         var op = IrOp.Data
         if info.builtin == SemaBuiltin.Len {
@@ -602,10 +627,10 @@ fun lower_call(l: *Lowering, id: u32): u32 {
         return emit_value(l, op, lower_node(l, arg).type_info, val, 0, 0)
     }
     if info.is_enum_case && info.type_info.kind == TypeKind.TaggedUnion {
-        var count = call.b - 1
+        var count = cr.count - 1
         var temp_vals: [64]u32
         for var i: u32 = 0; i < count && !l.failed; i += 1 {
-            var val = lower_expression(l, children[call.a + 1 + i])
+            var val = lower_expression(l, children[cr.first + 1 + i])
             if i < 64 {
                 temp_vals[i] = val
             }
@@ -622,13 +647,13 @@ fun lower_call(l: *Lowering, id: u32): u32 {
         }
         return addr
     }
-    var count = call.b - 1
+    var count = cr.count - 1
     // Lower arguments first so nested calls do not interleave in mod.arguments.
     var temp_vals: [64]u32
     if info.is_indirect_call {
-        var callee_val = lower_expression(l, children[call.a])
+        var callee_val = lower_expression(l, children[cr.first])
         for var i: u32 = 0; i < count && !l.failed; i += 1 {
-            var val = lower_expression(l, children[call.a + 1 + i])
+            var val = lower_expression(l, children[cr.first + 1 + i])
             if i < 64 {
                 temp_vals[i] = val
             }
@@ -644,17 +669,27 @@ fun lower_call(l: *Lowering, id: u32): u32 {
     }
     var arg_offset: u32 = 0
     if info.method_call != 0 {
-        var callee_id = children[call.a]
-        if nodes[callee_id].kind == AstKind.GenericCallee {
-            callee_id = children[nodes[callee_id].a]
+        var callee_id = children[cr.first]
+        match nodes[callee_id].data {
+            AstData.GenericCallee(gr) => callee_id = children[gr.first]
+            else => {}
         }
-        var recv_id = nodes[callee_id].a
+        var recv_id = NODE_NONE
+        match nodes[callee_id].data {
+            AstData.Member(m) => recv_id = m.base
+            else => {}
+        }
         var recv_val: u32 = 0
         if info.method_call == 2 {
             var target = lower_node(l, recv_id)
+            var recv_is_ident = false
+            match nodes[recv_id].data {
+                AstData.Identifier(_) => recv_is_ident = true
+                else => {}
+            }
             if uses_storage(target.type_info) || target.is_const {
                 recv_val = lower_expression(l, recv_id)
-            } else if nodes[recv_id].kind != AstKind.Identifier {
+            } else if !recv_is_ident {
                 recv_val = lower_memory_address(l, recv_id)
             } else {
                 recv_val = emit_value(l, IrOp.LocalAddress, target.type_info, target.binding, 0, 0)
@@ -666,10 +701,21 @@ fun lower_call(l: *Lowering, id: u32): u32 {
         arg_offset = 1
     }
     for var i: u32 = 0; i < count && !l.failed; i += 1 {
-        var arg_id = children[call.a + 1 + i]
+        var arg_id = children[cr.first + 1 + i]
         var val: u32 = 0
-        if nodes[arg_id].kind == AstKind.Spread {
-            val = lower_expression(l, nodes[arg_id].a)
+        var spread_inner = NODE_NONE
+        var is_sp = false
+        match nodes[arg_id].data {
+            AstData.Unary(un) => {
+                if un.op == UnaryOp.Spread {
+                    is_sp = true
+                    spread_inner = un.operand
+                }
+            }
+            else => {}
+        }
+        if is_sp {
+            val = lower_expression(l, spread_inner)
         } else {
             val = lower_expression(l, arg_id)
         }
@@ -683,7 +729,15 @@ fun lower_call(l: *Lowering, id: u32): u32 {
     if fdecl.is_variadic && !l.failed {
         var fixed_total = fdecl.parameters.count - 1
         var var_count = total_count - fixed_total
-        var is_spread = var_count == 1 && nodes[children[call.a + 1 + (fixed_total - arg_offset)]].kind == AstKind.Spread
+        var is_spread = false
+        if var_count == 1 {
+            match nodes[children[cr.first + 1 + (fixed_total - arg_offset)]].data {
+                AstData.Unary(un) => {
+                    if un.op == UnaryOp.Spread { is_spread = true }
+                }
+                else => {}
+            }
+        }
         if is_spread {
             total_count = fixed_total + 1
         } else {
@@ -708,14 +762,14 @@ fun lower_call(l: *Lowering, id: u32): u32 {
     return emit_value(l, IrOp.Call, info.type_info, info.binding, first, total_count)
 }
 
-fun lower_logical(l: *Lowering, kind: AstKind, a: u32, b: u32, t: SemaType): u32 {
+fun lower_logical(l: *Lowering, bop: BinaryOp, a: u32, b: u32, t: SemaType): u32 {
     var lhs = lower_expression(l, a)
     var slot = l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count
     l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count += 1
     var rhs_lbl = new_label(l)
     var short_lbl = new_label(l)
     var end_lbl = new_label(l)
-    if kind == AstKind.LogicalAnd {
+    if bop == BinaryOp.LogicalAnd {
         emit_branch(l, lhs, rhs_lbl, short_lbl)
     } else {
         emit_branch(l, lhs, short_lbl, rhs_lbl)
@@ -726,7 +780,7 @@ fun lower_logical(l: *Lowering, kind: AstKind, a: u32, b: u32, t: SemaType): u32
     emit_jump(l, end_lbl)
     emit_label(l, short_lbl)
     var sv: u32 = 0
-    if kind == AstKind.LogicalOr { sv = 1 }
+    if bop == BinaryOp.LogicalOr { sv = 1 }
     var short_val = emit_value(l, IrOp.Bool, t, sv, 0, 0)
     emit_store(l, t, slot, short_val)
     emit_jump(l, end_lbl)
@@ -739,286 +793,332 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
     var nodes = l.tree.nodes.as_slice()
     var node = nodes[id]
     var info = lower_node(l, id)
-    if node.kind == AstKind.Identifier {
-        if info.is_const {
-            return lower_const(l, info)
-        }
-        if info.is_fn_ref {
-            return emit_value(l, IrOp.FnAddr, info.type_info, info.binding, 0, 0)
-        }
-        var op = IrOp.Load
-        if info.is_boolean_literal { op = IrOp.Bool }
-        return emit_value(l, op, info.type_info, info.binding, 0, 0)
-    }
-    if node.kind == AstKind.Integer || node.kind == AstKind.Float {
-        return emit_value(l, IrOp.Number, info.type_info, node.pos, node.a, 0)
-    }
-    if node.kind == AstKind.String {
-        return emit_value(l, IrOp.Bytes, info.type_info, node.pos, node.a, 0)
-    }
-    if node.kind == AstKind.Null {
-        return emit_value(l, IrOp.Immediate, info.type_info, 0, 0, 0)
-    }
-    if node.kind == AstKind.ArrayLiteral {
-        var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
-        var elems = l.sem.elements.as_slice()
-        var elem_t = elems[info.type_info.element_type]
-        var children = l.tree.children.as_slice()
-        for var i: u32 = 0; i < node.b && !l.failed; i += 1 {
-            var idx = emit_value(l, IrOp.Immediate, simple_type(TypeKind.I64), i, 0, 0)
-            var dst = emit_value(l, IrOp.ElementAddress, info.type_info, addr, idx, 0)
-            var val = lower_expression(l, children[node.a + i])
-            if uses_storage(elem_t) {
-                emit(l, IrInstruction { op: IrOp.StorageInit, type_info: elem_t, result: 0, a: dst, b: val, c: 0 })
-            } else {
-                emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: elem_t, result: 0, a: dst, b: val, c: 0 })
+    match node.data {
+        AstData.Identifier(_) => {
+            if info.is_const {
+                return lower_const(l, info)
             }
-        }
-        return addr
-    }
-    if node.kind == AstKind.StructLiteral {
-        var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
-        emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: 0, c: 0 })
-        var children = l.tree.children.as_slice()
-        for var i: u32 = 1; i < node.b && !l.failed; i += 1 {
-            var init_id = children[node.a + i]
-            var init_node = nodes[init_id]
-            var init_info = lower_node(l, init_id)
-            var ft = init_info.type_info
-            var dst = emit_value(l, IrOp.FieldAddress, ft, addr, init_info.binding, 0)
-            var val = lower_expression(l, init_node.b)
-            if uses_storage(ft) {
-                emit(l, IrInstruction { op: IrOp.StorageInit, type_info: ft, result: 0, a: dst, b: val, c: 0 })
-            } else {
-                emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: ft, result: 0, a: dst, b: val, c: 0 })
+            if info.is_fn_ref {
+                return emit_value(l, IrOp.FnAddr, info.type_info, info.binding, 0, 0)
             }
+            var op = IrOp.Load
+            if info.is_boolean_literal { op = IrOp.Bool }
+            return emit_value(l, op, info.type_info, info.binding, 0, 0)
         }
-        return addr
-    }
-    if node.kind == AstKind.Call {
-        return lower_call(l, id)
-    }
-    if node.kind == AstKind.AddressOf {
-        var target = lower_node(l, node.a)
-        if uses_storage(target.type_info) || target.is_const {
-            return lower_expression(l, node.a)
-        }
-        if nodes[node.a].kind != AstKind.Identifier {
-            return lower_memory_address(l, node.a)
-        }
-        return emit_value(l, IrOp.LocalAddress, target.type_info, target.binding, 0, 0)
-    }
-    if node.kind == AstKind.Index || node.kind == AstKind.Member || node.kind == AstKind.Dereference {
-        if info.is_const {
-            return lower_const(l, info)
-        }
-        if info.is_fn_ref {
-            return emit_value(l, IrOp.FnAddr, info.type_info, info.binding, 0, 0)
-        }
-        if info.is_enum_case {
-            if info.type_info.kind == TypeKind.TaggedUnion {
-                var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
-                emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: 0, c: 0 })
-                var tag = emit_value(l, IrOp.Immediate, simple_type(TypeKind.U32), info.binding, 0, 0)
-                emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: simple_type(TypeKind.U32), result: 0, a: addr, b: tag, c: 0 })
-                return addr
+        AstData.Integer(nlen) => return emit_value(l, IrOp.Number, info.type_info, node.pos, nlen, 0)
+        AstData.Float(nlen) => return emit_value(l, IrOp.Number, info.type_info, node.pos, nlen, 0)
+        AstData.String(nlen) => return emit_value(l, IrOp.Bytes, info.type_info, node.pos, nlen, 0)
+        AstData.Null => return emit_value(l, IrOp.Immediate, info.type_info, 0, 0, 0)
+        AstData.ArrayLiteral(ar) => {
+            var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
+            var elems = l.sem.elements.as_slice()
+            var elem_t = elems[info.type_info.element_type]
+            var children = l.tree.children.as_slice()
+            for var i: u32 = 0; i < ar.count && !l.failed; i += 1 {
+                var idx = emit_value(l, IrOp.Immediate, simple_type(TypeKind.I64), i, 0, 0)
+                var dst = emit_value(l, IrOp.ElementAddress, info.type_info, addr, idx, 0)
+                var val = lower_expression(l, children[ar.first + i])
+                if uses_storage(elem_t) {
+                    emit(l, IrInstruction { op: IrOp.StorageInit, type_info: elem_t, result: 0, a: dst, b: val, c: 0 })
+                } else {
+                    emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: elem_t, result: 0, a: dst, b: val, c: 0 })
+                }
             }
-            var evals = l.sem.enum_values.as_slice()
-            var bits = evals[info.binding]
-            return emit_value(l, IrOp.Immediate, info.type_info, bits as u32, (bits >> 32) as u32, 0)
-        }
-        if node.kind == AstKind.Member && lower_node(l, node.a).type_info.kind == TypeKind.Any {
-            var any_val = lower_expression(l, node.a)
-            if info.binding == 0 {
-                return emit_value(l, IrOp.Data, info.type_info, any_val, 0, 0)
-            }
-            return emit_value(l, IrOp.Len, simple_type(TypeKind.Any), any_val, 0, 0)
-        }
-        var addr = lower_memory_address(l, id)
-        if uses_storage(info.type_info) {
             return addr
         }
-        return emit_value(l, IrOp.MemoryLoad, info.type_info, addr, 0, 0)
-    }
-    if node.kind == AstKind.Slice {
-        var base = lower_expression(l, node.a)
-        var rnode = nodes[node.b]
-        var start = lower_index(l, rnode.a)
-        var end = lower_index(l, rnode.b)
-        var src_t = lower_node(l, node.a).type_info
-        if src_t.kind == TypeKind.Pointer {
-            return emit_value(l, IrOp.PointerSlice, info.type_info, base, start, end)
-        }
-        return emit_value(l, IrOp.Slice, src_t, base, start, end)
-    }
-    if node.kind == AstKind.Try {
-        var r_addr = lower_expression(l, node.a)
-        var res_t = lower_node(l, node.a).type_info
-        var inner_t = info.type_info
-        var ok_val = emit_value(l, IrOp.MemoryLoad, simple_type(TypeKind.Bool), r_addr, 0, 0)
-        var ok_lbl = new_label(l)
-        var err_lbl = new_label(l)
-        emit_branch(l, ok_val, ok_lbl, err_lbl)
-        emit_label(l, err_lbl)
-        var ret_t = l.sem.functions.data[l.current_fn].result
-        var ret_slot = emit_value(l, IrOp.StorageAlloc, ret_t, 0, 0, 0)
-        var bool_t = simple_type(TypeKind.Bool)
-        var slice_t = simple_type(TypeKind.Slice)
-        var ok_dst = emit_value(l, IrOp.FieldAddress, ret_t, ret_slot, 0, 0)
-        var ok_false = emit_value(l, IrOp.Bool, bool_t, 0, 0, 0)
-        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: ok_dst, b: ok_false, c: 0 })
-        var err_src = emit_value(l, IrOp.FieldAddress, res_t, r_addr, 8, 0)
-        var err_val = emit_value(l, IrOp.MemoryLoad, slice_t, err_src, 0, 0)
-        var err_dst = emit_value(l, IrOp.FieldAddress, ret_t, ret_slot, 8, 0)
-        emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: slice_t, result: 0, a: err_dst, b: err_val, c: 0 })
-        emit_defers(l, 0)
-        emit(l, IrInstruction { op: IrOp.Return, type_info: empty_type(), result: 0, a: ret_slot, b: 0, c: 0 })
-        emit_label(l, ok_lbl)
-        if inner_t.kind == TypeKind.Void {
-            return 0
-        }
-        var val_addr = emit_value(l, IrOp.FieldAddress, res_t, r_addr, res_t.length, 0)
-        if uses_storage(inner_t) {
-            return val_addr
-        }
-        return emit_value(l, IrOp.MemoryLoad, inner_t, val_addr, 0, 0)
-    }
-    if node.kind == AstKind.OrElse {
-        var oeh = l.tree.or_elses.as_slice()[node.a]
-        var r_addr = lower_expression(l, oeh.expr)
-        var res_t = lower_node(l, oeh.expr).type_info
-        var inner_t = info.type_info
-        var ok_val = emit_value(l, IrOp.MemoryLoad, simple_type(TypeKind.Bool), r_addr, 0, 0)
-        var ok_lbl = new_label(l)
-        var err_lbl = new_label(l)
-        var end_lbl = new_label(l)
-        var out_slot: u32 = 0
-        if inner_t.kind != TypeKind.Void {
-            out_slot = l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count
-            l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count += 1
-        }
-        emit_branch(l, ok_val, ok_lbl, err_lbl)
-        emit_label(l, ok_lbl)
-        if inner_t.kind != TypeKind.Void {
-            var val_addr = emit_value(l, IrOp.FieldAddress, res_t, r_addr, res_t.length, 0)
-            var v = val_addr
-            if !uses_storage(inner_t) {
-                v = emit_value(l, IrOp.MemoryLoad, inner_t, val_addr, 0, 0)
+        AstData.StructLiteral(sl) => {
+            var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
+            emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: 0, c: 0 })
+            var children = l.tree.children.as_slice()
+            for var i: u32 = 0; i < sl.fields.count && !l.failed; i += 1 {
+                var init_id = children[sl.fields.first + i]
+                var init_val = NODE_NONE
+                match nodes[init_id].data {
+                    AstData.StructFieldInit(fi) => init_val = fi.value
+                    else => {}
+                }
+                var init_info = lower_node(l, init_id)
+                var ft = init_info.type_info
+                var dst = emit_value(l, IrOp.FieldAddress, ft, addr, init_info.binding, 0)
+                var val = lower_expression(l, init_val)
+                if uses_storage(ft) {
+                    emit(l, IrInstruction { op: IrOp.StorageInit, type_info: ft, result: 0, a: dst, b: val, c: 0 })
+                } else {
+                    emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: ft, result: 0, a: dst, b: val, c: 0 })
+                }
             }
-            emit_store(l, inner_t, out_slot, v)
+            return addr
         }
-        emit_jump(l, end_lbl)
-        emit_label(l, err_lbl)
-        if oeh.is_block {
-            if oeh.err_name.length > 0 {
-                var slice_t = simple_type(TypeKind.Slice)
-                var err_src = emit_value(l, IrOp.FieldAddress, res_t, r_addr, 8, 0)
-                var err_val = emit_value(l, IrOp.MemoryLoad, slice_t, err_src, 0, 0)
-                emit_store(l, slice_t, info.binding, err_val)
+        AstData.Call(_) => return lower_call(l, id)
+        AstData.Index(_) => {
+            if info.is_const { return lower_const(l, info) }
+            if info.is_fn_ref { return emit_value(l, IrOp.FnAddr, info.type_info, info.binding, 0, 0) }
+            var addr = lower_memory_address(l, id)
+            if uses_storage(info.type_info) { return addr }
+            return emit_value(l, IrOp.MemoryLoad, info.type_info, addr, 0, 0)
+        }
+        AstData.Member(m) => {
+            if info.is_const { return lower_const(l, info) }
+            if info.is_fn_ref { return emit_value(l, IrOp.FnAddr, info.type_info, info.binding, 0, 0) }
+            if info.is_enum_case {
+                if info.type_info.kind == TypeKind.TaggedUnion {
+                    var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
+                    emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: 0, c: 0 })
+                    var tag = emit_value(l, IrOp.Immediate, simple_type(TypeKind.U32), info.binding, 0, 0)
+                    emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: simple_type(TypeKind.U32), result: 0, a: addr, b: tag, c: 0 })
+                    return addr
+                }
+                var evals = l.sem.enum_values.as_slice()
+                var bits = evals[info.binding]
+                return emit_value(l, IrOp.Immediate, info.type_info, bits as u32, (bits >> 32) as u32, 0)
             }
-            lower_statement(l, oeh.handler)
-            if lower_node(l, oeh.handler).falls_through {
-                emit_jump(l, end_lbl)
+            if lower_node(l, m.base).type_info.kind == TypeKind.Any {
+                var any_val = lower_expression(l, m.base)
+                if info.binding == 0 {
+                    return emit_value(l, IrOp.Data, info.type_info, any_val, 0, 0)
+                }
+                return emit_value(l, IrOp.Len, simple_type(TypeKind.Any), any_val, 0, 0)
             }
-        } else {
-            var fb = lower_expression(l, oeh.handler)
+            var addr = lower_memory_address(l, id)
+            if uses_storage(info.type_info) { return addr }
+            return emit_value(l, IrOp.MemoryLoad, info.type_info, addr, 0, 0)
+        }
+        AstData.Slice(sl) => {
+            var base = lower_expression(l, sl.base)
+            var rstart = NODE_NONE
+            var rend = NODE_NONE
+            match nodes[sl.range].data {
+                AstData.SliceRange(sr) => {
+                    rstart = sr.start
+                    rend = sr.end
+                }
+                else => {}
+            }
+            var start = lower_index(l, rstart)
+            var end = lower_index(l, rend)
+            var src_t = lower_node(l, sl.base).type_info
+            if src_t.kind == TypeKind.Pointer {
+                return emit_value(l, IrOp.PointerSlice, info.type_info, base, start, end)
+            }
+            return emit_value(l, IrOp.Slice, src_t, base, start, end)
+        }
+        AstData.OrElse(oeh) => {
+            var r_addr = lower_expression(l, oeh.expr)
+            var res_t = lower_node(l, oeh.expr).type_info
+            var inner_t = info.type_info
+            var ok_val = emit_value(l, IrOp.MemoryLoad, simple_type(TypeKind.Bool), r_addr, 0, 0)
+            var ok_lbl = new_label(l)
+            var err_lbl = new_label(l)
+            var end_lbl = new_label(l)
+            var out_slot: u32 = 0
             if inner_t.kind != TypeKind.Void {
-                emit_store(l, inner_t, out_slot, fb)
+                out_slot = l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count
+                l.mod.functions.data[l.mod.functions.len as i64 - 1].slot_count += 1
+            }
+            emit_branch(l, ok_val, ok_lbl, err_lbl)
+            emit_label(l, ok_lbl)
+            if inner_t.kind != TypeKind.Void {
+                var val_addr = emit_value(l, IrOp.FieldAddress, res_t, r_addr, res_t.length, 0)
+                var v = val_addr
+                if !uses_storage(inner_t) {
+                    v = emit_value(l, IrOp.MemoryLoad, inner_t, val_addr, 0, 0)
+                }
+                emit_store(l, inner_t, out_slot, v)
             }
             emit_jump(l, end_lbl)
-        }
-        emit_label(l, end_lbl)
-        if inner_t.kind != TypeKind.Void {
-            return emit_value(l, IrOp.Load, inner_t, out_slot, 0, 0)
-        }
-        return 0
-    }
-    if node.kind == AstKind.Cast {
-        var val = lower_expression(l, node.a)
-        var src_t = lower_node(l, node.a).type_info
-        return emit_value(l, IrOp.Cast, info.type_info, val, src_t.kind as u32, 0)
-    }
-    if node.kind == AstKind.Positive {
-        return lower_expression(l, node.a)
-    }
-    if node.kind == AstKind.Negate {
-        var inner = nodes[node.a]
-        if inner.kind == AstKind.Integer {
-            return emit_value(l, IrOp.Number, info.type_info, inner.pos, inner.a, 1)
-        }
-        var val = lower_expression(l, node.a)
-        return emit_value(l, IrOp.Negate, info.type_info, val, 0, 0)
-    }
-    if node.kind == AstKind.LogicalNot {
-        return emit_value(l, IrOp.LogicalNot, info.type_info, lower_expression(l, node.a), 0, 0)
-    }
-    if node.kind == AstKind.BitNot {
-        return emit_value(l, IrOp.BitNot, info.type_info, lower_expression(l, node.a), 0, 0)
-    }
-    if node.kind == AstKind.LogicalAnd || node.kind == AstKind.LogicalOr {
-        return lower_logical(l, node.kind, node.a, node.b, info.type_info)
-    }
-    if node.kind >= AstKind.Assign && node.kind <= AstKind.AssignShiftRight {
-        if node.kind == AstKind.Assign && nodes[node.a].kind == AstKind.Identifier && lower_node(l, node.a).binding == (~0 as u32) {
-            return lower_expression(l, node.b)
-        }
-        var tk = nodes[node.a].kind
-        var memory = tk == AstKind.Index || tk == AstKind.Member || tk == AstKind.Dereference
-        var target = lower_node(l, node.a).binding
-        if memory {
-            target = lower_memory_address(l, node.a)
-        }
-        if uses_storage(info.type_info) {
-            var addr = target
-            if !memory {
-                addr = emit_value(l, IrOp.Load, info.type_info, target, 0, 0)
+            emit_label(l, err_lbl)
+            if oeh.is_block {
+                if oeh.err_name.length > 0 {
+                    var slice_t = simple_type(TypeKind.Slice)
+                    var err_src = emit_value(l, IrOp.FieldAddress, res_t, r_addr, 8, 0)
+                    var err_val = emit_value(l, IrOp.MemoryLoad, slice_t, err_src, 0, 0)
+                    emit_store(l, slice_t, info.binding, err_val)
+                }
+                lower_statement(l, oeh.handler)
+                if lower_node(l, oeh.handler).falls_through {
+                    emit_jump(l, end_lbl)
+                }
+            } else {
+                var fb = lower_expression(l, oeh.handler)
+                if inner_t.kind != TypeKind.Void {
+                    emit_store(l, inner_t, out_slot, fb)
+                }
+                emit_jump(l, end_lbl)
             }
-            var src = lower_expression(l, node.b)
-            emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: src, c: 0 })
-            return addr
-        }
-        var cur: u32 = 0
-        if node.kind != AstKind.Assign {
-            var load_op = IrOp.Load
-            if memory { load_op = IrOp.MemoryLoad }
-            cur = emit_value(l, load_op, info.type_info, target, 0, 0)
-        }
-        var val = lower_expression(l, node.b)
-        if node.kind != AstKind.Assign {
-            val = emit_value(l, binary_ir_op(node.kind), info.type_info, cur, val, 0)
-        }
-        if memory {
-            emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: info.type_info, result: 0, a: target, b: val, c: 0 })
-        } else {
-            emit_store(l, info.type_info, target, val)
-        }
-        return val
-    }
-    // Binary op
-    var left = lower_expression(l, node.a)
-    var right = lower_expression(l, node.b)
-    var linfo = lower_node(l, node.a)
-    if (node.kind == AstKind.Equal || node.kind == AstKind.NotEqual) && info.method_call != 0 {
-        var eq_res: u32 = 0
-        if info.method_call == 2 {
-            eq_res = emit_call_2(l, simple_type(TypeKind.Bool), info.binding, left, right)
-        } else {
-            var eq_t = linfo.type_info
-            if linfo.borrow_array {
-                eq_t = lower_node(l, node.b).type_info
+            emit_label(l, end_lbl)
+            if inner_t.kind != TypeKind.Void {
+                return emit_value(l, IrOp.Load, inner_t, out_slot, 0, 0)
             }
-            eq_res = emit_eq_values(l, eq_t, left, right)
+            return 0
         }
-        if node.kind == AstKind.NotEqual {
-            eq_res = emit_value(l, IrOp.LogicalNot, simple_type(TypeKind.Bool), eq_res, 0, 0)
+        AstData.Cast(c) => {
+            var val = lower_expression(l, c.expr)
+            var src_t = lower_node(l, c.expr).type_info
+            return emit_value(l, IrOp.Cast, info.type_info, val, src_t.kind as u32, 0)
         }
-        return eq_res
+        AstData.Unary(un) => {
+            var uop = un.op
+            var op_id = un.operand
+            if uop == UnaryOp.Dereference {
+                if info.is_const { return lower_const(l, info) }
+                if info.is_fn_ref { return emit_value(l, IrOp.FnAddr, info.type_info, info.binding, 0, 0) }
+                var addr = lower_memory_address(l, id)
+                if uses_storage(info.type_info) { return addr }
+                return emit_value(l, IrOp.MemoryLoad, info.type_info, addr, 0, 0)
+            }
+            if uop == UnaryOp.AddressOf {
+                var target = lower_node(l, op_id)
+                if uses_storage(target.type_info) || target.is_const {
+                    return lower_expression(l, op_id)
+                }
+                var is_ident = false
+                match nodes[op_id].data {
+                    AstData.Identifier(_) => is_ident = true
+                    else => {}
+                }
+                if !is_ident {
+                    return lower_memory_address(l, op_id)
+                }
+                return emit_value(l, IrOp.LocalAddress, target.type_info, target.binding, 0, 0)
+            }
+            if uop == UnaryOp.Try {
+                var r_addr = lower_expression(l, op_id)
+                var res_t = lower_node(l, op_id).type_info
+                var inner_t = info.type_info
+                var ok_val = emit_value(l, IrOp.MemoryLoad, simple_type(TypeKind.Bool), r_addr, 0, 0)
+                var ok_lbl = new_label(l)
+                var err_lbl = new_label(l)
+                emit_branch(l, ok_val, ok_lbl, err_lbl)
+                emit_label(l, err_lbl)
+                var ret_t = l.sem.functions.data[l.current_fn].result
+                var ret_slot = emit_value(l, IrOp.StorageAlloc, ret_t, 0, 0, 0)
+                var bool_t = simple_type(TypeKind.Bool)
+                var slice_t = simple_type(TypeKind.Slice)
+                var ok_dst = emit_value(l, IrOp.FieldAddress, ret_t, ret_slot, 0, 0)
+                var ok_false = emit_value(l, IrOp.Bool, bool_t, 0, 0, 0)
+                emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: ok_dst, b: ok_false, c: 0 })
+                var err_src = emit_value(l, IrOp.FieldAddress, res_t, r_addr, 8, 0)
+                var err_val = emit_value(l, IrOp.MemoryLoad, slice_t, err_src, 0, 0)
+                var err_dst = emit_value(l, IrOp.FieldAddress, ret_t, ret_slot, 8, 0)
+                emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: slice_t, result: 0, a: err_dst, b: err_val, c: 0 })
+                emit_defers(l, 0)
+                emit(l, IrInstruction { op: IrOp.Return, type_info: empty_type(), result: 0, a: ret_slot, b: 0, c: 0 })
+                emit_label(l, ok_lbl)
+                if inner_t.kind == TypeKind.Void {
+                    return 0
+                }
+                var val_addr = emit_value(l, IrOp.FieldAddress, res_t, r_addr, res_t.length, 0)
+                if uses_storage(inner_t) {
+                    return val_addr
+                }
+                return emit_value(l, IrOp.MemoryLoad, inner_t, val_addr, 0, 0)
+            }
+            if uop == UnaryOp.Positive {
+                return lower_expression(l, op_id)
+            }
+            if uop == UnaryOp.Negate {
+                var int_len: u32 = 0
+                var is_int = false
+                match nodes[op_id].data {
+                    AstData.Integer(l) => {
+                        is_int = true
+                        int_len = l
+                    }
+                    else => {}
+                }
+                if is_int {
+                    return emit_value(l, IrOp.Number, info.type_info, nodes[op_id].pos, int_len, 1)
+                }
+                var val = lower_expression(l, op_id)
+                return emit_value(l, IrOp.Negate, info.type_info, val, 0, 0)
+            }
+            if uop == UnaryOp.LogicalNot {
+                return emit_value(l, IrOp.LogicalNot, info.type_info, lower_expression(l, op_id), 0, 0)
+            }
+            if uop == UnaryOp.BitNot {
+                return emit_value(l, IrOp.BitNot, info.type_info, lower_expression(l, op_id), 0, 0)
+            }
+            return 0
+        }
+        AstData.Binary(bin) => {
+            var bop = bin.op
+            var lhs_id = bin.left
+            var rhs_id = bin.right
+            if bop == BinaryOp.LogicalAnd || bop == BinaryOp.LogicalOr {
+                return lower_logical(l, bop, lhs_id, rhs_id, info.type_info)
+            }
+            if (bop as u8) >= (BinaryOp.Assign as u8) && (bop as u8) <= (BinaryOp.AssignShiftRight as u8) {
+                var lhs_is_ident = false
+                var lhs_is_mem = false
+                match nodes[lhs_id].data {
+                    AstData.Identifier(_) => lhs_is_ident = true
+                    AstData.Index(_) => lhs_is_mem = true
+                    AstData.Member(_) => lhs_is_mem = true
+                    AstData.Unary(un) => {
+                        if un.op == UnaryOp.Dereference { lhs_is_mem = true }
+                    }
+                    else => {}
+                }
+                if bop == BinaryOp.Assign && lhs_is_ident && lower_node(l, lhs_id).binding == (~0 as u32) {
+                    return lower_expression(l, rhs_id)
+                }
+                var target = lower_node(l, lhs_id).binding
+                if lhs_is_mem {
+                    target = lower_memory_address(l, lhs_id)
+                }
+                if uses_storage(info.type_info) {
+                    var addr = target
+                    if !lhs_is_mem {
+                        addr = emit_value(l, IrOp.Load, info.type_info, target, 0, 0)
+                    }
+                    var src = lower_expression(l, rhs_id)
+                    emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: src, c: 0 })
+                    return addr
+                }
+                var cur: u32 = 0
+                if bop != BinaryOp.Assign {
+                    var load_op = IrOp.Load
+                    if lhs_is_mem { load_op = IrOp.MemoryLoad }
+                    cur = emit_value(l, load_op, info.type_info, target, 0, 0)
+                }
+                var val = lower_expression(l, rhs_id)
+                if bop != BinaryOp.Assign {
+                    val = emit_value(l, binary_ir_op(bop), info.type_info, cur, val, 0)
+                }
+                if lhs_is_mem {
+                    emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: info.type_info, result: 0, a: target, b: val, c: 0 })
+                } else {
+                    emit_store(l, info.type_info, target, val)
+                }
+                return val
+            }
+            var left = lower_expression(l, lhs_id)
+            var right = lower_expression(l, rhs_id)
+            var linfo = lower_node(l, lhs_id)
+            if (bop == BinaryOp.Equal || bop == BinaryOp.NotEqual) && info.method_call != 0 {
+                var eq_res: u32 = 0
+                if info.method_call == 2 {
+                    eq_res = emit_call_2(l, simple_type(TypeKind.Bool), info.binding, left, right)
+                } else {
+                    var eq_t = linfo.type_info
+                    if linfo.borrow_array {
+                        eq_t = lower_node(l, rhs_id).type_info
+                    }
+                    eq_res = emit_eq_values(l, eq_t, left, right)
+                }
+                if bop == BinaryOp.NotEqual {
+                    eq_res = emit_value(l, IrOp.LogicalNot, simple_type(TypeKind.Bool), eq_res, 0, 0)
+                }
+                return eq_res
+            }
+            var op_type = linfo.type_info
+            if linfo.promotion != TypeKind.Invalid {
+                op_type.kind = linfo.promotion
+            }
+            return emit_value(l, binary_ir_op(bop), op_type, left, right, 0)
+        }
+        else => return 0
     }
-    var op_type = linfo.type_info
-    if linfo.promotion != TypeKind.Invalid {
-        op_type.kind = linfo.promotion
-    }
-    return emit_value(l, binary_ir_op(node.kind), op_type, left, right, 0)
 }
 
 fun lower_expression(l: *Lowering, id: u32): u32 {
@@ -1083,10 +1183,12 @@ fun lower_expression(l: *Lowering, id: u32): u32 {
 
 fun lower_if(l: *Lowering, id: u32) {
     var nodes = l.tree.nodes.as_slice()
-    var node = nodes[id]
-    var brs = l.tree.if_branches.as_slice()
-    var arms = brs[node.b]
-    var cond = lower_expression(l, node.a)
+    var arms = AstIf { condition: NODE_NONE, then_branch: NODE_NONE, else_branch: NODE_NONE }
+    match nodes[id].data {
+        AstData.If(ifn) => arms = ifn
+        else => return
+    }
+    var cond = lower_expression(l, arms.condition)
     var yes = new_label(l)
     var no = new_label(l)
     var falls = lower_node(l, id).falls_through
@@ -1115,8 +1217,12 @@ fun lower_if(l: *Lowering, id: u32) {
 fun lower_match(l: *Lowering, id: u32) {
     var nodes = l.tree.nodes.as_slice()
     var children = l.tree.children.as_slice()
-    var node = nodes[id]
-    var scrut_id = children[node.a]
+    var mr = NodeRange { first: 0, count: 0 }
+    match nodes[id].data {
+        AstData.Match(r) => mr = r
+        else => return
+    }
+    var scrut_id = children[mr.first]
     var scrut = lower_expression(l, scrut_id)
     var st = lower_node(l, scrut_id).type_info
     var cmp_t = st
@@ -1126,14 +1232,18 @@ fun lower_match(l: *Lowering, id: u32) {
         cmp_val = emit_value(l, IrOp.MemoryLoad, cmp_t, scrut, 0, 0)
     }
     var end_lbl = new_label(l)
-    var arm_count = node.b - 1
+    var arm_count = mr.count - 1
     var mvals = l.sem.match_values.as_slice()
 
     for var i: u32 = 0; i < arm_count && !l.failed; i += 1 {
-        var arm_id = children[node.a + 1 + i]
-        var arm = nodes[arm_id]
-        var body = children[arm.a + arm.b - 1]
-        if arm.b == 1 {
+        var arm_id = children[mr.first + 1 + i]
+        var ar = NodeRange { first: 0, count: 0 }
+        match nodes[arm_id].data {
+            AstData.MatchArm(r) => ar = r
+            else => {}
+        }
+        var body = children[ar.first + ar.count - 1]
+        if ar.count == 1 {
             lower_statement(l, body)
             if lower_node(l, body).falls_through {
                 emit_jump(l, end_lbl)
@@ -1147,14 +1257,14 @@ fun lower_match(l: *Lowering, id: u32) {
         if is_last {
             emit_jump(l, arm_body)
         } else {
-            for var p: u32 = 0; p < arm.b - 1 && !l.failed; p += 1 {
-                var pat = children[arm.a + p]
+            for var p: u32 = 0; p < ar.count - 1 && !l.failed; p += 1 {
+                var pat = children[ar.first + p]
                 var bits = mvals[lower_node(l, pat).binding]
                 var op = IrOp.Immediate
                 if cmp_t.kind == TypeKind.Bool { op = IrOp.Bool }
                 var pval = emit_value(l, op, cmp_t, bits as u32, (bits >> 32) as u32, 0)
                 var cmp = emit_value(l, IrOp.Equal, cmp_t, cmp_val, pval, 0)
-                var last_pat = p + 1 == arm.b - 1
+                var last_pat = p + 1 == ar.count - 1
                 var next_pat = next_arm
                 if !last_pat { next_pat = new_label(l) }
                 emit_branch(l, cmp, arm_body, next_pat)
@@ -1164,14 +1274,22 @@ fun lower_match(l: *Lowering, id: u32) {
             }
         }
         emit_label(l, arm_body)
-        if st.kind == TypeKind.TaggedUnion && arm.b == 2 {
-            var pat = children[arm.a]
-            var pat_node = nodes[pat]
-            if pat_node.kind == AstKind.Call {
+        if st.kind == TypeKind.TaggedUnion && ar.count == 2 {
+            var pat = children[ar.first]
+            var pcr = NodeRange { first: 0, count: 0 }
+            var pat_is_call = false
+            match nodes[pat].data {
+                AstData.Call(r) => {
+                    pat_is_call = true
+                    pcr = r
+                }
+                else => {}
+            }
+            if pat_is_call {
                 var v_idx = mvals[lower_node(l, pat).binding] as u32
                 var uv = &l.sem.unions.data[st.record].variants.data[v_idx]
-                for var bi: u32 = 0; bi < pat_node.b - 1 && !l.failed; bi += 1 {
-                    var arg_id = children[pat_node.a + 1 + bi]
+                for var bi: u32 = 0; bi < pcr.count - 1 && !l.failed; bi += 1 {
+                    var arg_id = children[pcr.first + 1 + bi]
                     var binfo = lower_node(l, arg_id)
                     if binfo.binding != (~0 as u32) {
                         var fsn = uv.fields.data[bi]
@@ -1203,11 +1321,10 @@ fun lower_match(l: *Lowering, id: u32) {
 
 fun lower_loop(l: *Lowering, id: u32) {
     var nodes = l.tree.nodes.as_slice()
-    var node = nodes[id]
-    var header = AstForHeader { initializer: NODE_NONE, condition: node.a, step: NODE_NONE, label: Span { offset: 0, length: 0 } }
-    if node.kind == AstKind.ForCStyle {
-        var hdrs = l.tree.for_headers.as_slice()
-        header = hdrs[node.a]
+    var header = AstForHeader { initializer: NODE_NONE, condition: NODE_NONE, step: NODE_NONE, body: NODE_NONE, label: Span { offset: 0, length: 0 } }
+    match nodes[id].data {
+        AstData.For(h) => header = h
+        else => return
     }
     if header.initializer != NODE_NONE {
         lower_statement(l, header.initializer)
@@ -1228,13 +1345,13 @@ fun lower_loop(l: *Lowering, id: u32) {
     }
     var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
     l.loops.push(&le)
-    lower_statement(l, node.b)
+    lower_statement(l, header.body)
     l.loops.pop(null)
     if header.step != NODE_NONE {
         emit_label(l, cont)
         lower_expression(l, header.step)
         emit_jump(l, start)
-    } else if lower_node(l, node.b).falls_through {
+    } else if lower_node(l, header.body).falls_through {
         emit_jump(l, start)
     }
     if header.condition != NODE_NONE || lower_node(l, id).falls_through {
@@ -1244,12 +1361,14 @@ fun lower_loop(l: *Lowering, id: u32) {
 
 fun lower_for_in(l: *Lowering, id: u32) {
     var nodes = l.tree.nodes.as_slice()
-    var node = nodes[id]
     var info = lower_node(l, id)
     var item_t = info.type_info
     var item_slot = info.binding
-    var hdrs = l.tree.for_in_headers.as_slice()
-    var h = hdrs[node.a]
+    var h = AstForInHeader { index_name: Span { offset: 0, length: 0 }, item_name: Span { offset: 0, length: 0 }, iterable: NODE_NONE, range_end: NODE_NONE, body: NODE_NONE, label: Span { offset: 0, length: 0 } }
+    match nodes[id].data {
+        AstData.ForIn(hdr) => h = hdr
+        else => return
+    }
 
     var start = new_label(l)
     var body = new_label(l)
@@ -1257,7 +1376,6 @@ fun lower_for_in(l: *Lowering, id: u32) {
     var end = new_label(l)
 
     var i64_t = simple_type(TypeKind.I64)
-    var bool_t = simple_type(TypeKind.Bool)
 
     if h.range_end != NODE_NONE {
         var start_val = lower_expression(l, h.iterable)
@@ -1279,7 +1397,7 @@ fun lower_for_in(l: *Lowering, id: u32) {
         emit_label(l, body)
         var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
         l.loops.push(&le)
-        lower_statement(l, node.b)
+        lower_statement(l, h.body)
         l.loops.pop(null)
         emit_label(l, cont)
         var cur2 = emit_value(l, IrOp.Load, item_t, item_slot, 0, 0)
@@ -1342,7 +1460,7 @@ fun lower_for_in(l: *Lowering, id: u32) {
     }
     var le = IrLoop { break_label: end, continue_label: cont, defer_base: l.defers.len }
     l.loops.push(&le)
-    lower_statement(l, node.b)
+    lower_statement(l, h.body)
     l.loops.pop(null)
     emit_label(l, cont)
     var cidx = emit_value(l, IrOp.Load, i64_t, idx_slot, 0, 0)
@@ -1380,93 +1498,97 @@ fun lower_statement(l: *Lowering, id: u32) {
     var nodes = l.tree.nodes.as_slice()
     var node = nodes[id]
     var children = l.tree.children.as_slice()
-    if node.kind == AstKind.Block {
-        var defer_base = l.defers.len
-        var fell = true
-        for var i: u32 = 0; i < node.b && !l.failed; i += 1 {
-            var ch = children[node.a + i]
-            lower_statement(l, ch)
-            if !lower_node(l, ch).falls_through {
-                fell = false
-                break
+    match node.data {
+        AstData.Block(br) => {
+            var defer_base = l.defers.len
+            var fell = true
+            for var i: u32 = 0; i < br.count && !l.failed; i += 1 {
+                var ch = children[br.first + i]
+                lower_statement(l, ch)
+                if !lower_node(l, ch).falls_through {
+                    fell = false
+                    break
+                }
             }
-        }
-        if fell {
-            emit_defers(l, defer_base)
-        }
-        l.defers.len = defer_base
-    } else if node.kind == AstKind.Defer {
-        l.defers.push_value(node.a)
-    } else if node.kind == AstKind.Return {
-        var val: u32 = 0
-        if node.a != NODE_NONE {
-            val = lower_expression(l, node.a)
-        } else if l.current_fn < (l.sem.functions.len as u32) {
-            var ret_t = l.sem.functions.data[l.current_fn].result
-            if ret_t.kind == TypeKind.Result {
-                val = emit_ok_void_result(l, ret_t)
+            if fell {
+                emit_defers(l, defer_base)
             }
+            l.defers.len = defer_base
         }
-        emit_defers(l, 0)
-        emit(l, IrInstruction { op: IrOp.Return, type_info: empty_type(), result: 0, a: val, b: 0, c: 0 })
-    } else if node.kind == AstKind.If {
-        lower_if(l, id)
-    } else if node.kind == AstKind.MatchType {
-        var children = l.tree.children.as_slice()
-        var matched_arm = lower_node(l, id).binding
-        var arm_id = children[node.a + matched_arm]
-        var arm = nodes[arm_id]
-        var body = children[arm.a + arm.b - 1]
-        lower_statement(l, body)
-    } else if node.kind == AstKind.Match {
-        lower_match(l, id)
-    } else if node.kind == AstKind.For || node.kind == AstKind.ForCStyle {
-        lower_loop(l, id)
-    } else if node.kind == AstKind.ForIn {
-        lower_for_in(l, id)
-    } else if node.kind == AstKind.Break {
-        var loops = l.loops.as_slice()
-        var target = loops[lower_node(l, id).binding]
-        emit_defers(l, target.defer_base)
-        emit_jump(l, target.break_label)
-    } else if node.kind == AstKind.Continue {
-        var loops = l.loops.as_slice()
-        var target = loops[lower_node(l, id).binding]
-        emit_defers(l, target.defer_base)
-        emit_jump(l, target.continue_label)
-    } else if node.kind == AstKind.Const {
-        return
-    } else if node.kind == AstKind.Var {
-        var info = lower_node(l, id)
-        var vars = l.tree.variables.as_slice()
-        var init_id = vars[node.a].initializer
-        if info.binding == (~0 as u32) {
-            if init_id != NODE_NONE {
-                lower_expression(l, init_id)
-            }
-            return
-        }
-        if uses_storage(info.type_info) {
-            var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
-            var src: u32 = 0
-            if init_id != NODE_NONE {
-                src = lower_expression(l, init_id)
-            }
-            emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: src, c: 0 })
-            emit_store(l, info.type_info, info.binding, addr)
-        } else {
+        AstData.Defer(stmt_id) => l.defers.push_value(stmt_id)
+        AstData.Return(val_id) => {
             var val: u32 = 0
-            if init_id != NODE_NONE {
-                val = lower_expression(l, init_id)
-            } else {
-                var op = IrOp.Immediate
-                if info.type_info.kind == TypeKind.Bool { op = IrOp.Bool }
-                val = emit_value(l, op, info.type_info, 0, 0, 0)
+            if val_id != NODE_NONE {
+                val = lower_expression(l, val_id)
+            } else if l.current_fn < (l.sem.functions.len as u32) {
+                var ret_t = l.sem.functions.data[l.current_fn].result
+                if ret_t.kind == TypeKind.Result {
+                    val = emit_ok_void_result(l, ret_t)
+                }
             }
-            emit_store(l, info.type_info, info.binding, val)
+            emit_defers(l, 0)
+            emit(l, IrInstruction { op: IrOp.Return, type_info: empty_type(), result: 0, a: val, b: 0, c: 0 })
         }
-    } else {
-        lower_expression(l, id)
+        AstData.If(_) => lower_if(l, id)
+        AstData.MatchType(mr) => {
+            var matched_arm = lower_node(l, id).binding
+            var arm_id = children[mr.first + matched_arm]
+            var ar = NodeRange { first: 0, count: 0 }
+            match nodes[arm_id].data {
+                AstData.MatchArm(r) => ar = r
+                else => {}
+            }
+            var body = children[ar.first + ar.count - 1]
+            lower_statement(l, body)
+        }
+        AstData.Match(_) => lower_match(l, id)
+        AstData.For(_) => lower_loop(l, id)
+        AstData.ForIn(_) => lower_for_in(l, id)
+        AstData.Break(_) => {
+            var loops = l.loops.as_slice()
+            var target = loops[lower_node(l, id).binding]
+            emit_defers(l, target.defer_base)
+            emit_jump(l, target.break_label)
+        }
+        AstData.Continue(_) => {
+            var loops = l.loops.as_slice()
+            var target = loops[lower_node(l, id).binding]
+            emit_defers(l, target.defer_base)
+            emit_jump(l, target.continue_label)
+        }
+        AstData.Const(_) => return
+        AstData.Var(v) => {
+            var info = lower_node(l, id)
+            var init_id = v.initializer
+            if info.binding == (~0 as u32) {
+                if init_id != NODE_NONE {
+                    lower_expression(l, init_id)
+                }
+                return
+            }
+            if uses_storage(info.type_info) {
+                var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
+                var src: u32 = 0
+                if init_id != NODE_NONE {
+                    src = lower_expression(l, init_id)
+                }
+                emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: src, c: 0 })
+                emit_store(l, info.type_info, info.binding, addr)
+            } else {
+                var val: u32 = 0
+                if init_id != NODE_NONE {
+                    val = lower_expression(l, init_id)
+                } else {
+                    var op = IrOp.Immediate
+                    if info.type_info.kind == TypeKind.Bool { op = IrOp.Bool }
+                    val = emit_value(l, op, info.type_info, 0, 0, 0)
+                }
+                emit_store(l, info.type_info, info.binding, val)
+            }
+        }
+        else => {
+            lower_expression(l, id)
+        }
     }
 }
 

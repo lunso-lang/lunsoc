@@ -1,6 +1,7 @@
 import std.mem
 import std.collections.Vec
 import frontend.ast
+import frontend.ast { AstData }
 import frontend.lexer
 
 const PREC_ASSIGNMENT: u32 = 1
@@ -109,11 +110,11 @@ fun enter(p: *Parser): bool {
     return true
 }
 
-fun add_node(p: *Parser, kind: ast.AstKind, tok: lexer.Token, a: u32, b: u32): u32 {
+fun add_node(p: *Parser, tok: lexer.Token, data: ast.AstData): u32 {
     if p.has_error {
         return ast.NODE_NONE
     }
-    var id = ast.add_node(p.tree, kind, p.source_base + (tok.offset as u32), a, b)
+    var id = ast.add_node(p.tree, p.source_base + (tok.offset as u32), data)
     if id == ast.NODE_NONE {
         fail(p, "could not allocate AST storage")
     }
@@ -185,41 +186,41 @@ fun infix_prec(kind: lexer.TokenKind): u32 {
     }
 }
 
-fun infix_kind(kind: lexer.TokenKind): ast.AstKind {
+fun infix_op(kind: lexer.TokenKind): ast.BinaryOp {
     match kind {
-        lexer.TokenKind.Equal => return ast.AstKind.Assign
-        lexer.TokenKind.PlusEqual => return ast.AstKind.AssignAdd
-        lexer.TokenKind.MinusEqual => return ast.AstKind.AssignSubtract
-        lexer.TokenKind.StarEqual => return ast.AstKind.AssignMultiply
-        lexer.TokenKind.SlashEqual => return ast.AstKind.AssignDivide
-        lexer.TokenKind.PercentEqual => return ast.AstKind.AssignRemainder
-        lexer.TokenKind.AmpersandEqual => return ast.AstKind.AssignBitAnd
-        lexer.TokenKind.PipeEqual => return ast.AstKind.AssignBitOr
-        lexer.TokenKind.CaretEqual => return ast.AstKind.AssignBitXor
-        lexer.TokenKind.ShiftLeftEqual => return ast.AstKind.AssignShiftLeft
-        lexer.TokenKind.ShiftRightEqual => return ast.AstKind.AssignShiftRight
-        lexer.TokenKind.PipePipe => return ast.AstKind.LogicalOr
-        lexer.TokenKind.AmpersandAmpersand => return ast.AstKind.LogicalAnd
-        lexer.TokenKind.Pipe => return ast.AstKind.BitOr
-        lexer.TokenKind.Caret => return ast.AstKind.BitXor
-        lexer.TokenKind.Ampersand => return ast.AstKind.BitAnd
-        lexer.TokenKind.EqualEqual => return ast.AstKind.Equal
-        lexer.TokenKind.BangEqual => return ast.AstKind.NotEqual
-        lexer.TokenKind.Less => return ast.AstKind.Less
-        lexer.TokenKind.LessEqual => return ast.AstKind.LessEqual
-        lexer.TokenKind.Greater => return ast.AstKind.Greater
-        lexer.TokenKind.GreaterEqual => return ast.AstKind.GreaterEqual
-        lexer.TokenKind.ShiftLeft => return ast.AstKind.ShiftLeft
-        lexer.TokenKind.ShiftRight => return ast.AstKind.ShiftRight
-        lexer.TokenKind.Plus => return ast.AstKind.Add
-        lexer.TokenKind.Minus => return ast.AstKind.Subtract
-        lexer.TokenKind.Star => return ast.AstKind.Multiply
-        lexer.TokenKind.Slash => return ast.AstKind.Divide
-        else => return ast.AstKind.Remainder
+        lexer.TokenKind.Equal => return ast.BinaryOp.Assign
+        lexer.TokenKind.PlusEqual => return ast.BinaryOp.AssignAdd
+        lexer.TokenKind.MinusEqual => return ast.BinaryOp.AssignSubtract
+        lexer.TokenKind.StarEqual => return ast.BinaryOp.AssignMultiply
+        lexer.TokenKind.SlashEqual => return ast.BinaryOp.AssignDivide
+        lexer.TokenKind.PercentEqual => return ast.BinaryOp.AssignRemainder
+        lexer.TokenKind.AmpersandEqual => return ast.BinaryOp.AssignBitAnd
+        lexer.TokenKind.PipeEqual => return ast.BinaryOp.AssignBitOr
+        lexer.TokenKind.CaretEqual => return ast.BinaryOp.AssignBitXor
+        lexer.TokenKind.ShiftLeftEqual => return ast.BinaryOp.AssignShiftLeft
+        lexer.TokenKind.ShiftRightEqual => return ast.BinaryOp.AssignShiftRight
+        lexer.TokenKind.PipePipe => return ast.BinaryOp.LogicalOr
+        lexer.TokenKind.AmpersandAmpersand => return ast.BinaryOp.LogicalAnd
+        lexer.TokenKind.Pipe => return ast.BinaryOp.BitOr
+        lexer.TokenKind.Caret => return ast.BinaryOp.BitXor
+        lexer.TokenKind.Ampersand => return ast.BinaryOp.BitAnd
+        lexer.TokenKind.EqualEqual => return ast.BinaryOp.Equal
+        lexer.TokenKind.BangEqual => return ast.BinaryOp.NotEqual
+        lexer.TokenKind.Less => return ast.BinaryOp.Less
+        lexer.TokenKind.LessEqual => return ast.BinaryOp.LessEqual
+        lexer.TokenKind.Greater => return ast.BinaryOp.Greater
+        lexer.TokenKind.GreaterEqual => return ast.BinaryOp.GreaterEqual
+        lexer.TokenKind.ShiftLeft => return ast.BinaryOp.ShiftLeft
+        lexer.TokenKind.ShiftRight => return ast.BinaryOp.ShiftRight
+        lexer.TokenKind.Plus => return ast.BinaryOp.Add
+        lexer.TokenKind.Minus => return ast.BinaryOp.Subtract
+        lexer.TokenKind.Star => return ast.BinaryOp.Multiply
+        lexer.TokenKind.Slash => return ast.BinaryOp.Divide
+        else => return ast.BinaryOp.Remainder
     }
 }
 
-fun parse_type_application(p: *Parser, kind: ast.AstKind, base: u32): u32 {
+fun parse_type_application(p: *Parser, is_callee: bool, base: u32): u32 {
     var opening = p.current
     var mark = p.pending.len
     push_child(p, base)
@@ -232,7 +233,10 @@ fun parse_type_application(p: *Parser, kind: ast.AstKind, base: u32): u32 {
     }
     close_group(p, lexer.TokenKind.RightBracket, "expected ']' after type arguments")
     var items = finish_children(p, mark)
-    return add_node(p, kind, opening, items.first, items.count)
+    if is_callee {
+        return add_node(p, opening, AstData.GenericCallee(items))
+    }
+    return add_node(p, opening, AstData.GenericType(items))
 }
 
 fun bracket_before_initializer(p: *Parser): bool {
@@ -264,7 +268,7 @@ fun parse_call(p: *Parser, callee: u32): u32 {
             var sp_tok = p.current
             advance(p)
             var expr = parse_expression(p, PREC_ASSIGNMENT)
-            push_child(p, add_node(p, ast.AstKind.Spread, sp_tok, expr, 0))
+            push_child(p, add_node(p, sp_tok, AstData.Unary(ast.AstUnary { op: ast.UnaryOp.Spread, operand: expr })))
         } else {
             push_child(p, parse_expression(p, PREC_ASSIGNMENT))
         }
@@ -276,13 +280,12 @@ fun parse_call(p: *Parser, callee: u32): u32 {
     p.disallow_struct_literal = saved
     close_group(p, lexer.TokenKind.RightParen, "expected ')' after arguments")
     var items = finish_children(p, mark)
-    return add_node(p, ast.AstKind.Call, opening, items.first, items.count)
+    return add_node(p, opening, AstData.Call(items))
 }
 
 fun parse_struct_literal(p: *Parser, type_expr: u32): u32 {
     var opening = p.current
     var mark = p.pending.len
-    push_child(p, type_expr)
     open_group(p)
     var saved = p.disallow_struct_literal
     p.disallow_struct_literal = false
@@ -290,7 +293,7 @@ fun parse_struct_literal(p: *Parser, type_expr: u32): u32 {
         var field = expect_tok(p, lexer.TokenKind.Identifier, "expected field name in struct initializer")
         expect_tok(p, lexer.TokenKind.Colon, "expected ':' after field name")
         var val = parse_expression(p, PREC_ASSIGNMENT)
-        push_child(p, add_node(p, ast.AstKind.StructFieldInit, field, field.length as u32, val))
+        push_child(p, add_node(p, field, AstData.StructFieldInit(ast.AstStructFieldInit { name_length: field.length as u32, value: val })))
         if !match_tok(p, lexer.TokenKind.Comma) {
             break
         }
@@ -298,7 +301,7 @@ fun parse_struct_literal(p: *Parser, type_expr: u32): u32 {
     p.disallow_struct_literal = saved
     close_group(p, lexer.TokenKind.RightBrace, "expected '}' after struct initializer")
     var items = finish_children(p, mark)
-    return add_node(p, ast.AstKind.StructLiteral, opening, items.first, items.count)
+    return add_node(p, opening, AstData.StructLiteral(ast.AstStructLiteral { type_node: type_expr, fields: items }))
 }
 
 fun parse_array_literal(p: *Parser): u32 {
@@ -319,7 +322,26 @@ fun parse_array_literal(p: *Parser): u32 {
     if !p.has_error && items.count == 0 {
         fail(p, "array initializer cannot be empty")
     }
-    return add_node(p, ast.AstKind.ArrayLiteral, opening, items.first, items.count)
+    return add_node(p, opening, AstData.ArrayLiteral(items))
+}
+
+fun can_start_struct_literal(nodes: []ast.AstNode, base: u32): bool {
+    if base == ast.NODE_NONE { return false }
+    match nodes[base].data {
+        AstData.Identifier(_) => return true
+        AstData.Member(_) => return true
+        AstData.GenericType(_) => return true
+        else => return false
+    }
+}
+
+fun is_ident_or_member(nodes: []ast.AstNode, base: u32): bool {
+    if base == ast.NODE_NONE { return false }
+    match nodes[base].data {
+        AstData.Identifier(_) => return true
+        AstData.Member(_) => return true
+        else => return false
+    }
 }
 
 fun parse_postfix(p: *Parser, base_in: u32): u32 {
@@ -331,22 +353,14 @@ fun parse_postfix(p: *Parser, base_in: u32): u32 {
             base = parse_call(p, base)
             nodes = p.tree.nodes.as_slice()
         } else if tok.kind == lexer.TokenKind.LeftBrace {
-            var base_kind = ast.AstKind.Invalid
-            if base != ast.NODE_NONE {
-                base_kind = nodes[base].kind
-            }
-            if p.disallow_struct_literal ||
-               (base_kind != ast.AstKind.Identifier && base_kind != ast.AstKind.Member && base_kind != ast.AstKind.GenericType) {
+            if p.disallow_struct_literal || !can_start_struct_literal(nodes, base) {
                 return base
             }
             base = parse_struct_literal(p, base)
             nodes = p.tree.nodes.as_slice()
         } else if tok.kind == lexer.TokenKind.LeftBracket {
-            var base_kind = nodes[base].kind
-            if !p.disallow_struct_literal &&
-               (base_kind == ast.AstKind.Identifier || base_kind == ast.AstKind.Member) &&
-               bracket_before_initializer(p) {
-                base = parse_type_application(p, ast.AstKind.GenericType, base)
+            if !p.disallow_struct_literal && is_ident_or_member(nodes, base) && bracket_before_initializer(p) {
+                base = parse_type_application(p, false, base)
                 nodes = p.tree.nodes.as_slice()
                 continue
             }
@@ -357,17 +371,17 @@ fun parse_postfix(p: *Parser, base_in: u32): u32 {
                 advance(p)
                 var end_expr = parse_expression(p, PREC_ASSIGNMENT)
                 close_group(p, lexer.TokenKind.RightBracket, "expected ']' after slice range")
-                var bounds = add_node(p, ast.AstKind.SliceRange, range_tok, idx, end_expr)
-                base = add_node(p, ast.AstKind.Slice, tok, base, bounds)
+                var bounds = add_node(p, range_tok, AstData.SliceRange(ast.AstSliceRange { start: idx, end: end_expr }))
+                base = add_node(p, tok, AstData.Slice(ast.AstSlice { base: base, range: bounds }))
             } else {
                 close_group(p, lexer.TokenKind.RightBracket, "expected ']' after index")
-                base = add_node(p, ast.AstKind.Index, tok, base, idx)
+                base = add_node(p, tok, AstData.Index(ast.AstIndex { base: base, idx: idx }))
             }
             nodes = p.tree.nodes.as_slice()
         } else if tok.kind == lexer.TokenKind.Dot {
             advance(p)
             if p.current.kind == lexer.TokenKind.LeftBracket {
-                base = parse_type_application(p, ast.AstKind.GenericCallee, base)
+                base = parse_type_application(p, true, base)
                 if !p.has_error && p.current.kind != lexer.TokenKind.LeftParen {
                     fail(p, "expected '(' after generic function type arguments")
                 }
@@ -376,11 +390,11 @@ fun parse_postfix(p: *Parser, base_in: u32): u32 {
                 }
             } else {
                 var member = expect_tok(p, lexer.TokenKind.Identifier, "expected member name after '.'")
-                base = add_node(p, ast.AstKind.Member, member, base, member.length as u32)
+                base = add_node(p, member, AstData.Member(ast.AstMember { base: base, name_length: member.length as u32 }))
             }
             nodes = p.tree.nodes.as_slice()
         } else if match_tok(p, lexer.TokenKind.Question) {
-            base = add_node(p, ast.AstKind.Try, tok, base, 0)
+            base = add_node(p, tok, AstData.Unary(ast.AstUnary { op: ast.UnaryOp.Try, operand: base }))
             nodes = p.tree.nodes.as_slice()
         } else {
             return base
@@ -391,19 +405,19 @@ fun parse_postfix(p: *Parser, base_in: u32): u32 {
 
 fun parse_operand(p: *Parser): u32 {
     var tok = p.current
-    var kind = ast.AstKind.Invalid
+    var uop = ast.UnaryOp.Positive
     if tok.kind == lexer.TokenKind.Plus {
-        kind = ast.AstKind.Positive
+        uop = ast.UnaryOp.Positive
     } else if tok.kind == lexer.TokenKind.Minus {
-        kind = ast.AstKind.Negate
+        uop = ast.UnaryOp.Negate
     } else if tok.kind == lexer.TokenKind.Bang {
-        kind = ast.AstKind.LogicalNot
+        uop = ast.UnaryOp.LogicalNot
     } else if tok.kind == lexer.TokenKind.Tilde {
-        kind = ast.AstKind.BitNot
+        uop = ast.UnaryOp.BitNot
     } else if tok.kind == lexer.TokenKind.Ampersand {
-        kind = ast.AstKind.AddressOf
+        uop = ast.UnaryOp.AddressOf
     } else if tok.kind == lexer.TokenKind.Star {
-        kind = ast.AstKind.Dereference
+        uop = ast.UnaryOp.Dereference
     } else if tok.kind == lexer.TokenKind.LeftParen {
         open_group(p)
         var saved = p.disallow_struct_literal
@@ -416,19 +430,19 @@ fun parse_operand(p: *Parser): u32 {
         return parse_postfix(p, parse_array_literal(p))
     } else if tok.kind == lexer.TokenKind.Identifier {
         advance(p)
-        return parse_postfix(p, add_node(p, ast.AstKind.Identifier, tok, tok.length as u32, 0))
+        return parse_postfix(p, add_node(p, tok, AstData.Identifier(tok.length as u32)))
     } else if tok.kind == lexer.TokenKind.Integer || tok.kind == lexer.TokenKind.Char {
         advance(p)
-        return parse_postfix(p, add_node(p, ast.AstKind.Integer, tok, tok.length as u32, 0))
+        return parse_postfix(p, add_node(p, tok, AstData.Integer(tok.length as u32)))
     } else if tok.kind == lexer.TokenKind.Float {
         advance(p)
-        return parse_postfix(p, add_node(p, ast.AstKind.Float, tok, tok.length as u32, 0))
+        return parse_postfix(p, add_node(p, tok, AstData.Float(tok.length as u32)))
     } else if tok.kind == lexer.TokenKind.String {
         advance(p)
-        return parse_postfix(p, add_node(p, ast.AstKind.String, tok, tok.length as u32, 0))
+        return parse_postfix(p, add_node(p, tok, AstData.String(tok.length as u32)))
     } else if tok.kind == lexer.TokenKind.Null {
         advance(p)
-        return parse_postfix(p, add_node(p, ast.AstKind.Null, tok, 0, 0))
+        return parse_postfix(p, add_node(p, tok, AstData.Null))
     } else {
         fail(p, "expected an expression")
         return ast.NODE_NONE
@@ -436,7 +450,7 @@ fun parse_operand(p: *Parser): u32 {
 
     advance(p)
     var operand = parse_expression(p, PREC_PREFIX)
-    return add_node(p, kind, tok, operand, 0)
+    return add_node(p, tok, AstData.Unary(ast.AstUnary { op: uop, operand: operand }))
 }
 
 fun parse_expression(p: *Parser, minimum: u32): u32 {
@@ -449,7 +463,7 @@ fun parse_expression(p: *Parser, minimum: u32): u32 {
         if tok.kind == lexer.TokenKind.As && minimum <= PREC_CAST {
             advance(p)
             var t = parse_type(p)
-            left = add_node(p, ast.AstKind.Cast, tok, left, t)
+            left = add_node(p, tok, AstData.Cast(ast.AstCast { expr: left, target_type: t }))
             continue
         }
         if tok.kind == lexer.TokenKind.Or && minimum <= PREC_OR {
@@ -483,18 +497,14 @@ fun parse_expression(p: *Parser, minimum: u32): u32 {
                 handler: handler,
                 is_block: is_block,
             }
-            var idx = p.tree.or_elses.len as u32
-            if !p.has_error && p.tree.or_elses.push(&oe) < 0 {
-                fail(p, "could not allocate AST storage")
-            }
-            left = add_node(p, ast.AstKind.OrElse, tok, idx, 0)
+            left = add_node(p, tok, AstData.OrElse(oe))
             continue
         }
         var prec = infix_prec(tok.kind)
         if prec < minimum {
             break
         }
-        var op_kind = infix_kind(tok.kind)
+        var op_kind = infix_op(tok.kind)
         advance(p)
         for p.current.kind == lexer.TokenKind.Newline {
             advance(p)
@@ -504,7 +514,7 @@ fun parse_expression(p: *Parser, minimum: u32): u32 {
             next_min += 1
         }
         var right = parse_expression(p, next_min)
-        left = add_node(p, op_kind, tok, left, right)
+        left = add_node(p, tok, AstData.Binary(ast.AstBinary { op: op_kind, left: left, right: right }))
     }
     p.recursion_depth -= 1
     return left
@@ -513,19 +523,19 @@ fun parse_expression(p: *Parser, minimum: u32): u32 {
 fun parse_type_name(p: *Parser): u32 {
     var t = expect_tok(p, lexer.TokenKind.Identifier, "expected a type name")
     if !match_tok(p, lexer.TokenKind.Dot) {
-        return add_node(p, ast.AstKind.TypeName, t, t.length as u32, 0)
+        return add_node(p, t, AstData.TypeName(t.length as u32))
     }
     var mark = p.pending.len
-    push_child(p, add_node(p, ast.AstKind.Identifier, t, t.length as u32, 0))
+    push_child(p, add_node(p, t, AstData.Identifier(t.length as u32)))
     for {
         var part = expect_tok(p, lexer.TokenKind.Identifier, "expected a type path component")
-        push_child(p, add_node(p, ast.AstKind.Identifier, part, part.length as u32, 0))
+        push_child(p, add_node(p, part, AstData.Identifier(part.length as u32)))
         if !match_tok(p, lexer.TokenKind.Dot) {
             break
         }
     }
     var path = finish_children(p, mark)
-    return add_node(p, ast.AstKind.QualifiedType, t, path.first, path.count)
+    return add_node(p, t, AstData.QualifiedType(path))
 }
 
 fun parse_type(p: *Parser): u32 {
@@ -536,7 +546,7 @@ fun parse_type(p: *Parser): u32 {
     var res = ast.NODE_NONE
     if match_tok(p, lexer.TokenKind.Bang) {
         var inner = parse_type(p)
-        res = add_node(p, ast.AstKind.ResultType, opening, inner, 0)
+        res = add_node(p, opening, AstData.ResultType(inner))
     } else if match_tok(p, lexer.TokenKind.Fun) {
         if p.current.kind != lexer.TokenKind.LeftParen {
             fail(p, "expected '(' after 'fun'")
@@ -557,23 +567,16 @@ fun parse_type(p: *Parser): u32 {
                 ret = parse_type(p)
             }
             var ft = ast.AstFuncType { params: finish_children(p, mark), return_type: ret }
-            var idx = p.tree.func_types.len as u32
-            if !p.has_error && p.tree.func_types.push(&ft) < 0 {
-                fail(p, "could not allocate AST storage")
-            }
-            res = add_node(p, ast.AstKind.FuncType, opening, idx, 0)
+            res = add_node(p, opening, AstData.FuncType(ft))
         }
     } else if match_tok(p, lexer.TokenKind.Star) {
-        var read_only: u32 = 0
-        if match_tok(p, lexer.TokenKind.Const) {
-            read_only = 1
-        }
+        var read_only = match_tok(p, lexer.TokenKind.Const)
         var pointee = parse_type(p)
-        res = add_node(p, ast.AstKind.PointerType, opening, pointee, read_only)
+        res = add_node(p, opening, AstData.PointerType(ast.AstPointerType { pointee: pointee, read_only: read_only }))
     } else if opening.kind != lexer.TokenKind.LeftBracket {
         var base = parse_type_name(p)
         if !p.has_error && p.current.kind == lexer.TokenKind.LeftBracket {
-            res = parse_type_application(p, ast.AstKind.GenericType, base)
+            res = parse_type_application(p, false, base)
         } else {
             res = base
         }
@@ -584,19 +587,19 @@ fun parse_type(p: *Parser): u32 {
             var len_tok = p.current
             if len_tok.kind == lexer.TokenKind.Identifier {
                 advance(p)
-                count = add_node(p, ast.AstKind.Identifier, len_tok, len_tok.length as u32, 0)
+                count = add_node(p, len_tok, AstData.Identifier(len_tok.length as u32))
             } else {
                 len_tok = expect_tok(p, lexer.TokenKind.Integer, "expected an integer array length or ']'")
-                count = add_node(p, ast.AstKind.Integer, len_tok, len_tok.length as u32, 0)
+                count = add_node(p, len_tok, AstData.Integer(len_tok.length as u32))
             }
         }
         close_group(p, lexer.TokenKind.RightBracket, "expected ']' after array length")
         var is_const = match_tok(p, lexer.TokenKind.Const)
         var elem = parse_type(p)
         if is_const {
-            elem = add_node(p, ast.AstKind.ConstType, opening, elem, 0)
+            elem = add_node(p, opening, AstData.ConstType(elem))
         }
-        res = add_node(p, ast.AstKind.ArrayType, opening, elem, count)
+        res = add_node(p, opening, AstData.ArrayType(ast.AstArrayType { elem: elem, count: count }))
     }
     p.recursion_depth -= 1
     return res
@@ -631,20 +634,16 @@ fun parse_if(p: *Parser): u32 {
     p.disallow_struct_literal = true
     var cond = parse_expression(p, PREC_ASSIGNMENT)
     p.disallow_struct_literal = saved
-    var branches = ast.AstIfBranches { then_branch: parse_block(p), else_branch: ast.NODE_NONE }
+    var if_node = ast.AstIf { condition: cond, then_branch: parse_block(p), else_branch: ast.NODE_NONE }
     if match_else(p) {
         if p.current.kind == lexer.TokenKind.If {
-            branches.else_branch = parse_if(p)
+            if_node.else_branch = parse_if(p)
         } else {
-            branches.else_branch = parse_block(p)
+            if_node.else_branch = parse_block(p)
         }
     }
-    var idx = p.tree.if_branches.len as u32
-    if !p.has_error && p.tree.if_branches.push(&branches) < 0 {
-        fail(p, "could not allocate AST storage")
-    }
     p.recursion_depth -= 1
-    return add_node(p, ast.AstKind.If, kw, cond, idx)
+    return add_node(p, kw, AstData.If(if_node))
 }
 
 fun is_match_type_kw(p: *Parser): bool {
@@ -707,7 +706,7 @@ fun parse_match(p: *Parser): u32 {
         }
         push_child(p, body)
         var arm_items = finish_children(p, arm_mark)
-        push_child(p, add_node(p, ast.AstKind.MatchArm, arm_tok, arm_items.first, arm_items.count))
+        push_child(p, add_node(p, arm_tok, AstData.MatchArm(arm_items)))
         if p.current.kind == lexer.TokenKind.Eof {
             break
         }
@@ -717,9 +716,9 @@ fun parse_match(p: *Parser): u32 {
     var items = finish_children(p, mark)
     p.recursion_depth -= 1
     if is_type_match {
-        return add_node(p, ast.AstKind.MatchType, kw, items.first, items.count)
+        return add_node(p, kw, AstData.MatchType(items))
     }
-    return add_node(p, ast.AstKind.Match, kw, items.first, items.count)
+    return add_node(p, kw, AstData.Match(items))
 }
 
 fun parse_variable(p: *Parser): u32 {
@@ -734,11 +733,7 @@ fun parse_variable(p: *Parser): u32 {
     } else if v.type_node == ast.NODE_NONE {
         fail(p, "expected ':' or '=' after variable name")
     }
-    var idx = p.tree.variables.len as u32
-    if !p.has_error && p.tree.variables.push(&v) < 0 {
-        fail(p, "could not allocate AST storage")
-    }
-    return add_node(p, ast.AstKind.Var, name, idx, 0)
+    return add_node(p, name, AstData.Var(v))
 }
 
 fun parse_for_with_label(p: *Parser, label: ast.Span): u32 {
@@ -748,15 +743,8 @@ fun parse_for_with_label(p: *Parser, label: ast.Span): u32 {
     }
     if p.current.kind == lexer.TokenKind.LeftBrace {
         var body = parse_block(p)
-        if label.length == 0 {
-            return add_node(p, ast.AstKind.For, kw, ast.NODE_NONE, body)
-        }
-        var header = ast.AstForHeader { initializer: ast.NODE_NONE, condition: ast.NODE_NONE, step: ast.NODE_NONE, label: label }
-        var idx = p.tree.for_headers.len as u32
-        if !p.has_error && p.tree.for_headers.push(&header) < 0 {
-            fail(p, "could not allocate AST storage")
-        }
-        return add_node(p, ast.AstKind.ForCStyle, kw, idx, body)
+        var header = ast.AstForHeader { initializer: ast.NODE_NONE, condition: ast.NODE_NONE, step: ast.NODE_NONE, body: body, label: label }
+        return add_node(p, kw, AstData.For(header))
     }
 
     if p.current.kind == lexer.TokenKind.Identifier {
@@ -799,13 +787,10 @@ fun parse_for_with_label(p: *Parser, label: ast.Span): u32 {
                 item_name: item_sp,
                 iterable: iterable,
                 range_end: range_end,
+                body: body,
                 label: label,
             }
-            var idx = p.tree.for_in_headers.len as u32
-            if !p.has_error && p.tree.for_in_headers.push(&hdr) < 0 {
-                fail(p, "could not allocate AST storage")
-            }
-            return add_node(p, ast.AstKind.ForIn, kw, idx, body)
+            return add_node(p, kw, AstData.ForIn(hdr))
         }
         p.lex = saved_lex
         p.current = saved_cur
@@ -827,18 +812,11 @@ fun parse_for_with_label(p: *Parser, label: ast.Span): u32 {
             fail(p, "expected ';' after for initializer")
         }
         var body = parse_block(p)
-        if label.length == 0 {
-            return add_node(p, ast.AstKind.For, kw, first, body)
-        }
-        var header = ast.AstForHeader { initializer: ast.NODE_NONE, condition: first, step: ast.NODE_NONE, label: label }
-        var idx = p.tree.for_headers.len as u32
-        if !p.has_error && p.tree.for_headers.push(&header) < 0 {
-            fail(p, "could not allocate AST storage")
-        }
-        return add_node(p, ast.AstKind.ForCStyle, kw, idx, body)
+        var header = ast.AstForHeader { initializer: ast.NODE_NONE, condition: first, step: ast.NODE_NONE, body: body, label: label }
+        return add_node(p, kw, AstData.For(header))
     }
 
-    var header = ast.AstForHeader { initializer: first, condition: ast.NODE_NONE, step: ast.NODE_NONE, label: label }
+    var header = ast.AstForHeader { initializer: first, condition: ast.NODE_NONE, step: ast.NODE_NONE, body: ast.NODE_NONE, label: label }
     if p.current.kind != lexer.TokenKind.Semicolon {
         header.condition = parse_expression(p, PREC_ASSIGNMENT)
     }
@@ -847,12 +825,8 @@ fun parse_for_with_label(p: *Parser, label: ast.Span): u32 {
         header.step = parse_expression(p, PREC_ASSIGNMENT)
     }
     p.disallow_struct_literal = saved
-    var body = parse_block(p)
-    var idx = p.tree.for_headers.len as u32
-    if !p.has_error && p.tree.for_headers.push(&header) < 0 {
-        fail(p, "could not allocate AST storage")
-    }
-    return add_node(p, ast.AstKind.ForCStyle, kw, idx, body)
+    header.body = parse_block(p)
+    return add_node(p, kw, AstData.For(header))
 }
 
 fun parse_const(p: *Parser, public: bool, local: bool): u32 {
@@ -876,7 +850,7 @@ fun parse_const(p: *Parser, public: bool, local: bool): u32 {
     if !p.has_error && p.tree.consts.push(&c) < 0 {
         fail(p, "could not allocate AST storage")
     }
-    return add_node(p, ast.AstKind.Const, kw, idx, 0)
+    return add_node(p, kw, AstData.Const(idx))
 }
 
 fun parse_statement(p: *Parser): u32 {
@@ -899,12 +873,12 @@ fun parse_statement(p: *Parser): u32 {
         if p.current.kind == lexer.TokenKind.Identifier {
             var target = p.current
             advance(p)
-            lbl = add_node(p, ast.AstKind.Identifier, target, target.length as u32, 0)
+            lbl = add_node(p, target, AstData.Identifier(target.length as u32))
         }
         if tok.kind == lexer.TokenKind.Break {
-            return add_node(p, ast.AstKind.Break, tok, lbl, 0)
+            return add_node(p, tok, AstData.Break(lbl))
         }
-        return add_node(p, ast.AstKind.Continue, tok, lbl, 0)
+        return add_node(p, tok, AstData.Continue(lbl))
     }
     if tok.kind == lexer.TokenKind.Defer {
         advance(p)
@@ -914,7 +888,7 @@ fun parse_statement(p: *Parser): u32 {
         } else {
             body = parse_statement(p)
         }
-        return add_node(p, ast.AstKind.Defer, tok, body, 0)
+        return add_node(p, tok, AstData.Defer(body))
     }
     if tok.kind == lexer.TokenKind.Var { return parse_variable(p) }
     if tok.kind == lexer.TokenKind.Const { return parse_const(p, false, true) }
@@ -925,7 +899,7 @@ fun parse_statement(p: *Parser): u32 {
         if !is_separator(nk) && nk != lexer.TokenKind.RightBrace && nk != lexer.TokenKind.Eof {
             val = parse_expression(p, PREC_ASSIGNMENT)
         }
-        return add_node(p, ast.AstKind.Return, tok, val, 0)
+        return add_node(p, tok, AstData.Return(val))
     }
     return parse_expression(p, PREC_ASSIGNMENT)
 }
@@ -949,7 +923,7 @@ fun parse_block(p: *Parser): u32 {
     expect_tok(p, lexer.TokenKind.RightBrace, "expected '}' to end block")
     var stmts = finish_children(p, mark)
     p.recursion_depth -= 1
-    return add_node(p, ast.AstKind.Block, opening, stmts.first, stmts.count)
+    return add_node(p, opening, AstData.Block(stmts))
 }
 
 fun parse_type_parameters(p: *Parser): ast.NodeRange {
@@ -960,7 +934,7 @@ fun parse_type_parameters(p: *Parser): ast.NodeRange {
     open_group(p)
     for {
         var name = expect_tok(p, lexer.TokenKind.Identifier, "expected a type parameter name")
-        var bounds_idx: u32 = 0
+        var bounds = ast.NodeRange { first: 0, count: 0 }
         if match_tok(p, lexer.TokenKind.Colon) {
             var bmark = p.pending.len
             for !p.has_error {
@@ -969,13 +943,9 @@ fun parse_type_parameters(p: *Parser): ast.NodeRange {
                     break
                 }
             }
-            var brange = finish_children(p, bmark)
-            bounds_idx = (p.tree.type_bounds.len as u32) + 1
-            if !p.has_error && p.tree.type_bounds.push(&brange) < 0 {
-                fail(p, "could not allocate AST storage")
-            }
+            bounds = finish_children(p, bmark)
         }
-        push_child(p, add_node(p, ast.AstKind.Identifier, name, name.length as u32, bounds_idx))
+        push_child(p, add_node(p, name, AstData.TypeParam(ast.AstTypeParam { name_length: name.length as u32, bounds: bounds })))
         if !match_tok(p, lexer.TokenKind.Comma) || p.current.kind == lexer.TokenKind.RightBracket {
             break
         }
@@ -1001,7 +971,7 @@ fun parse_parameters(p: *Parser, out_variadic: *bool): ast.NodeRange {
             expect_tok(p, lexer.TokenKind.Colon, "expected ':' after parameter name")
             var variadic = match_tok(p, lexer.TokenKind.DotDotDot)
             var t = parse_type(p)
-            push_child(p, add_node(p, ast.AstKind.Parameter, name, name.length as u32, t))
+            push_child(p, add_node(p, name, AstData.Parameter(ast.AstNamedType { name_length: name.length as u32, type_node: t })))
             if variadic {
                 *out_variadic = true
                 if p.current.kind == lexer.TokenKind.Comma {
@@ -1057,7 +1027,7 @@ fun parse_function(p: *Parser, public: bool): u32 {
     if !p.has_error && p.tree.functions.push(&fn) < 0 {
         fail(p, "could not allocate AST storage")
     }
-    return add_node(p, ast.AstKind.Function, start, idx, 0)
+    return add_node(p, start, AstData.Function(idx))
 }
 
 fun parse_trait_list(p: *Parser): ast.NodeRange {
@@ -1125,7 +1095,7 @@ fun parse_trait(p: *Parser, public: bool): u32 {
         if !p.has_error && p.tree.functions.push(&fn) < 0 {
             fail(p, "could not allocate AST storage")
         }
-        push_child(p, add_node(p, ast.AstKind.Function, mstart, fidx, 0))
+        push_child(p, add_node(p, mstart, AstData.Function(fidx)))
         if p.current.kind == lexer.TokenKind.Eof {
             break
         }
@@ -1142,7 +1112,7 @@ fun parse_trait(p: *Parser, public: bool): u32 {
     if !p.has_error && p.tree.traits.push(&tr) < 0 {
         fail(p, "could not allocate AST storage")
     }
-    return add_node(p, ast.AstKind.Trait, kw, idx, 0)
+    return add_node(p, kw, AstData.Trait(idx))
 }
 
 fun parse_struct(p: *Parser, public: bool): u32 {
@@ -1164,7 +1134,11 @@ fun parse_struct(p: *Parser, public: bool): u32 {
             var m_pub = match_tok(p, lexer.TokenKind.Pub)
             var fn_node = parse_function(p, m_pub)
             if !p.has_error {
-                var fn_idx = p.tree.nodes.data[fn_node].a
+                var fn_idx: u32 = 0
+                match p.tree.nodes.data[fn_node].data {
+                    AstData.Function(fi) => fn_idx = fi
+                    else => {}
+                }
                 p.tree.functions.data[fn_idx].owner_struct = struct_idx
                 if type_params.count > 0 {
                     var own_tp = p.tree.functions.data[fn_idx].type_parameters
@@ -1195,7 +1169,7 @@ fun parse_struct(p: *Parser, public: bool): u32 {
         var field = expect_tok(p, lexer.TokenKind.Identifier, "expected a field name")
         expect_tok(p, lexer.TokenKind.Colon, "expected ':' after field name")
         var t = parse_type(p)
-        push_child(p, add_node(p, ast.AstKind.Field, field, field.length as u32, t))
+        push_child(p, add_node(p, field, AstData.Field(ast.AstNamedType { name_length: field.length as u32, type_node: t })))
         if p.current.kind == lexer.TokenKind.Eof {
             break
         }
@@ -1214,7 +1188,7 @@ fun parse_struct(p: *Parser, public: bool): u32 {
     if !p.has_error && p.tree.structs.push(&rec) < 0 {
         fail(p, "could not allocate AST storage")
     }
-    return add_node(p, ast.AstKind.Struct, kw, idx, 0)
+    return add_node(p, kw, AstData.Struct(idx))
 }
 
 fun parse_enum(p: *Parser, public: bool): u32 {
@@ -1227,7 +1201,7 @@ fun parse_enum(p: *Parser, public: bool): u32 {
         if is_int_backing_tok(p, p.current) {
             var t = p.current
             advance(p)
-            backing = add_node(p, ast.AstKind.TypeName, t, t.length as u32, 0)
+            backing = add_node(p, t, AstData.TypeName(t.length as u32))
             if match_tok(p, lexer.TokenKind.Comma) {
                 traits = parse_trait_list(p)
             }
@@ -1269,21 +1243,18 @@ fun parse_enum(p: *Parser, public: bool): u32 {
             } else {
                 lit = expect_tok(p, lexer.TokenKind.Integer, "expected an integer enum value")
             }
-            val = add_node(p, ast.AstKind.Integer, lit, lit.length as u32, 0)
+            val = add_node(p, lit, AstData.Integer(lit.length as u32))
             if neg {
-                val = add_node(p, ast.AstKind.Negate, sign, val, 0)
+                val = add_node(p, sign, AstData.Unary(ast.AstUnary { op: ast.UnaryOp.Negate, operand: val }))
             }
         }
         var ec = ast.AstEnumCase {
+            name_length: member.length as u32,
             fields: case_fields,
             value: val,
             has_payload: has_case_payload,
         }
-        var ec_idx = p.tree.enum_cases.len as u32
-        if !p.has_error && p.tree.enum_cases.push(&ec) < 0 {
-            fail(p, "could not allocate AST storage")
-        }
-        push_child(p, add_node(p, ast.AstKind.EnumCase, member, member.length as u32, ec_idx))
+        push_child(p, add_node(p, member, AstData.EnumCase(ec)))
         if match_tok(p, lexer.TokenKind.Comma) {
             finish_item(p, lexer.TokenKind.RightBrace, "")
         } else {
@@ -1305,7 +1276,7 @@ fun parse_enum(p: *Parser, public: bool): u32 {
     if !p.has_error && p.tree.enums.push(&en) < 0 {
         fail(p, "could not allocate AST storage")
     }
-    return add_node(p, ast.AstKind.Enum, kw, idx, 0)
+    return add_node(p, kw, AstData.Enum(idx))
 }
 
 fun parse_import(p: *Parser): u32 {
@@ -1323,7 +1294,7 @@ fun parse_import(p: *Parser): u32 {
             break
         }
         var part = expect_tok(p, lexer.TokenKind.Identifier, "expected a module path component")
-        push_child(p, add_node(p, ast.AstKind.Identifier, part, part.length as u32, 0))
+        push_child(p, add_node(p, part, AstData.Identifier(part.length as u32)))
         if !match_tok(p, lexer.TokenKind.Dot) {
             break
         }
@@ -1340,9 +1311,9 @@ fun parse_import(p: *Parser): u32 {
             var alias_node = ast.NODE_NONE
             if match_tok(p, lexer.TokenKind.As) {
                 var tok = expect_tok(p, lexer.TokenKind.Identifier, "expected an import alias")
-                alias_node = add_node(p, ast.AstKind.Identifier, tok, tok.length as u32, 0)
+                alias_node = add_node(p, tok, AstData.Identifier(tok.length as u32))
             }
-            push_child(p, add_node(p, ast.AstKind.ImportItem, name, name.length as u32, alias_node))
+            push_child(p, add_node(p, name, AstData.ImportItem(ast.AstImportItem { name_length: name.length as u32, alias_node: alias_node })))
             if !match_tok(p, lexer.TokenKind.Comma) || p.current.kind == lexer.TokenKind.RightBrace {
                 break
             }
@@ -1355,7 +1326,7 @@ fun parse_import(p: *Parser): u32 {
     if !p.has_error && p.tree.imports.push(&item) < 0 {
         fail(p, "could not allocate AST storage")
     }
-    return add_node(p, ast.AstKind.Import, kw, idx, 0)
+    return add_node(p, kw, AstData.Import(idx))
 }
 
 pub fun parse_append(arena: *mem.Arena, tree: *ast.Ast, slice: []u8, source_base: u32, module: u32,

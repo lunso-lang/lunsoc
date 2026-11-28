@@ -30,7 +30,7 @@ fun has_entry_point(mod: *ir.IrModule): bool {
         var start = f.name.offset as i64
         var end = (f.name.offset + f.name.length) as i64
         var name = mod.source[start..end]
-        if !f.external && str.equals(name, "main") {
+        if !f.external && name == "main" {
             return f.result.kind == sema.TypeKind.I32 && f.parameter_count == 0
         }
     }
@@ -85,7 +85,7 @@ pub fun build(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *Na
         io.eprintln("output path is empty")
         return false
     }
-    if str.equals(source_path, opts.output) {
+    if source_path == opts.output {
         io.eprint(opts.output)
         io.eprintln(": output would overwrite the source file")
         return false
