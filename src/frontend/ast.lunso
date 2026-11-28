@@ -9,6 +9,7 @@ pub enum AstKind : u8 {
     Struct,
     Enum,
     EnumCase,
+    Trait,
     Const,
     Import,
     ImportItem,
@@ -120,10 +121,18 @@ pub struct AstFunction {
     is_variadic: bool
 }
 
+pub struct AstTrait {
+    name: Span
+    methods: NodeRange
+    module: u32
+    public: bool
+}
+
 pub struct AstStruct {
     name: Span
     fields: NodeRange
     type_parameters: NodeRange
+    traits: NodeRange
     module: u32
     public: bool
 }
@@ -138,6 +147,7 @@ pub struct AstEnum {
     name: Span
     cases: NodeRange
     type_parameters: NodeRange
+    traits: NodeRange
     backing: u32
     module: u32
     public: bool
@@ -208,6 +218,7 @@ pub enum AstBindingKind : u8 {
     Function,
     Struct,
     Enum,
+    Trait,
     Const,
     Module,
 }
@@ -238,6 +249,8 @@ pub struct Ast {
     structs: Vec[AstStruct]
     enums: Vec[AstEnum]
     enum_cases: Vec[AstEnumCase]
+    traits: Vec[AstTrait]
+    type_bounds: Vec[NodeRange]
     consts: Vec[AstConst]
     imports: Vec[AstImport]
     if_branches: Vec[AstIfBranches]
@@ -260,6 +273,8 @@ pub fun init(arena: *mem.Arena, source: []u8, out: *Ast): bool {
     if out.structs.init(arena, 16) < 0 { return false }
     if out.enums.init(arena, 16) < 0 { return false }
     if out.enum_cases.init(arena, 32) < 0 { return false }
+    if out.traits.init(arena, 16) < 0 { return false }
+    if out.type_bounds.init(arena, 16) < 0 { return false }
     if out.consts.init(arena, 16) < 0 { return false }
     if out.imports.init(arena, 16) < 0 { return false }
     if out.if_branches.init(arena, 32) < 0 { return false }

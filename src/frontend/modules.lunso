@@ -315,6 +315,13 @@ fun declaration_info(tree: *Ast, id: u32, out_name: *Span, out_kind: *AstBinding
         *out_kind = AstBindingKind.Enum
         return true
     }
+    if node.kind == AstKind.Trait {
+        var ts = tree.traits.as_slice()
+        *out_name = ts[node.a].name
+        *out_pub = ts[node.a].public
+        *out_kind = AstBindingKind.Trait
+        return true
+    }
     if node.kind == AstKind.Const {
         var cs = tree.consts.as_slice()
         if !cs[node.a].local {
@@ -575,7 +582,7 @@ fun qualify(l: *Loader, owner: u32, id: u32, parts: []Span, expected: AstBinding
         if !declaration_info(tree, decl_id, &dname, &dkind, &is_pub) {
             continue
         }
-        if dkind != expected && !(expected == AstBindingKind.Struct && dkind == AstBindingKind.Enum) {
+        if dkind != expected && !(expected == AstBindingKind.Struct && (dkind == AstBindingKind.Enum || dkind == AstBindingKind.Trait)) {
             continue
         }
         if !str.equals(span_bytes(tree, dname), req_bytes) {
