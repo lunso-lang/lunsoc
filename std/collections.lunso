@@ -417,3 +417,59 @@ fun next_pow2(n: u64): u64 {
     }
     return cap
 }
+
+pub struct Stack[T] {
+    items: Vec[T]
+
+    pub fun init(self: *Self, arena: *mem.Arena, initial_cap: u64): !void {
+        if self == null || self.items.init(arena, initial_cap) < 0 {
+            return fail("Stack.init failed")
+        }
+    }
+
+    pub fun push(self: *Self, value: T): !void {
+        if self == null || self.items.push_value(value) < 0 {
+            return fail("Stack.push failed")
+        }
+    }
+
+    pub fun pop(self: *Self): !T {
+        var out: T
+        if self == null || !self.items.pop(&out) {
+            return fail("Stack.pop empty")
+        }
+        return out
+    }
+
+    pub fun peek(self: *const Self): !T {
+        if self == null || self.items.len == 0 {
+            return fail("Stack.peek empty")
+        }
+        return self.items.data[self.items.len - 1]
+    }
+
+    pub fun len(self: *const Self): u64 {
+        if self == null {
+            return 0
+        }
+        return self.items.len
+    }
+
+    pub fun is_empty(self: *const Self): bool {
+        return self.len() == 0
+    }
+
+    pub fun clear(self: *Self) {
+        if self != null {
+            self.items.clear()
+        }
+    }
+
+    pub fun as_slice(self: *Self): []T {
+        if self == null {
+            var empty: []T
+            return empty
+        }
+        return self.items.as_slice()
+    }
+}

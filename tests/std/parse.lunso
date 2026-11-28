@@ -1,5 +1,5 @@
 // expect-exit: 0
-import std.parse.parse
+import std.parse { parse }
 
 fun i8_fails(s: []const u8): bool {
     _ = parse.[i8](s) or { return true }

@@ -1,6 +1,16 @@
 // expect-exit: 0
-import std.collections { Vec, StrMap }
-import std.mem.Arena
+import std.collections { Vec, StrMap, Stack }
+import std.mem { Arena }
+
+fun stack_pop_fails(s: *Stack[i32]): bool {
+    _ = s.pop() or { return true }
+    return false
+}
+
+fun stack_peek_fails(s: *const Stack[i32]): bool {
+    _ = s.peek() or { return true }
+    return false
+}
 
 fun main(): i32 {
     var arena: Arena
@@ -28,6 +38,21 @@ fun main(): i32 {
     if !m.get("one", &val) || val != 1 {
         return 5
     }
+
+    var st: Stack[i32]
+    st.init(&arena, 4) or { return 6 }
+    if !st.is_empty() || st.len() != 0 { return 7 }
+    if !stack_pop_fails(&st) || !stack_peek_fails(&st) { return 8 }
+
+    st.push(10) or { return 9 }
+    st.push(20) or { return 9 }
+    st.push(30) or { return 9 }
+    if st.is_empty() || st.len() != 3 { return 10 }
+    if (st.peek() or -1) != 30 { return 11 }
+    if (st.pop() or -1) != 30 { return 12 }
+    if (st.pop() or -1) != 20 { return 13 }
+    st.clear()
+    if !st.is_empty() || !stack_pop_fails(&st) { return 14 }
 
     return 0
 }
