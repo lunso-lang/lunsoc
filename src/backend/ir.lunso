@@ -349,8 +349,8 @@ fun emit_eq_values(l: *Lowering, t: SemaType, lhs: u32, rhs: u32): u32 {
         emit_branch(l, cond, loop_body, set_true)
 
         emit_label(l, loop_body)
-        var pl = emit_value(l, IrOp.PointerIndex, ptr_t, data_l, idx, 1)
-        var pr = emit_value(l, IrOp.PointerIndex, ptr_t, data_r, idx, 1)
+        var pl = emit_value(l, IrOp.PointerIndex, u8_t, data_l, idx, 1)
+        var pr = emit_value(l, IrOp.PointerIndex, u8_t, data_r, idx, 1)
         var bl = emit_value(l, IrOp.MemoryLoad, u8_t, pl, 0, 0)
         var br = emit_value(l, IrOp.MemoryLoad, u8_t, pr, 0, 0)
         var beq = emit_value(l, IrOp.Equal, u8_t, bl, br, 0)
@@ -473,7 +473,7 @@ fun emit_hash_value(l: *Lowering, t: SemaType, val: u32): u32 {
         emit_branch(l, cond, loop_body, done_lbl)
 
         emit_label(l, loop_body)
-        var p = emit_value(l, IrOp.PointerIndex, ptr_t, data_ptr, idx, 1)
+        var p = emit_value(l, IrOp.PointerIndex, u8_t, data_ptr, idx, 1)
         var b = emit_value(l, IrOp.MemoryLoad, u8_t, p, 0, 0)
         var b64 = emit_value(l, IrOp.Cast, u64_t, b, TypeKind.U8 as u32, 0)
         var h = emit_value(l, IrOp.MemoryLoad, u64_t, h_slot, 0, 0)
