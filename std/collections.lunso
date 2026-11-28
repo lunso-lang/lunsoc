@@ -1,0 +1,419 @@
+import std.mem
+import std.str
+
+pub struct Vec[T] {
+    data: *T
+    len: u64
+    cap: u64
+    arena: *mem.Arena
+
+    pub fun init(self: *Self, arena: *mem.Arena, initial_cap: u64): i64 {
+        if self == null || arena == null {
+            return -22
+        }
+        self.data = null
+        self.len = 0
+        self.cap = 0
+        self.arena = arena
+        if initial_cap == 0 {
+            return 0
+        }
+        return self.reserve(initial_cap)
+    }
+
+    pub fun reserve(self: *Self, min_cap: u64): i64 {
+        if self == null || self.arena == null {
+            return -22
+        }
+        if min_cap <= self.cap {
+            return 0
+        }
+
+        var probe: T
+        var elem_size = size_of(probe)
+        if elem_size == 0 {
+            self.cap = min_cap
+            return 0
+        }
+
+        var new_cap = self.cap
+        if new_cap == 0 {
+            new_cap = 8
+        }
+        var max: u64 = ~0
+        for new_cap < min_cap {
+            if new_cap > max / 2 {
+                new_cap = min_cap
+                break
+            }
+            new_cap = new_cap * 2
+        }
+        if new_cap > max / elem_size {
+            return -75
+        }
+
+        var raw: *u8
+        var status = self.arena.alloc(new_cap * elem_size, elem_align(elem_size), &raw)
+        if status < 0 {
+            return status
+        }
+
+        var new_data = raw as *T
+        for var i: u64 = 0; i < self.len; i += 1 {
+            new_data[i] = self.data[i]
+        }
+        self.data = new_data
+        self.cap = new_cap
+        return 0
+    }
+
+    pub fun alloc_slot(self: *Self, out: **T): i64 {
+        if self == null || out == null {
+            return -22
+        }
+        if self.len >= self.cap {
+            var status = self.reserve(self.len + 1)
+            if status < 0 {
+                return status
+            }
+        }
+        *out = &self.data[self.len]
+        self.len += 1
+        return 0
+    }
+
+    pub fun push(self: *Self, value: *const T): i64 {
+        if self == null || value == null {
+            return -22
+        }
+        if self.len >= self.cap {
+            var status = self.reserve(self.len + 1)
+            if status < 0 {
+                return status
+            }
+        }
+        self.data[self.len] = *value
+        self.len += 1
+        return 0
+    }
+
+    pub fun push_value(self: *Self, value: T): i64 {
+        if self == null {
+            return -22
+        }
+        if self.len >= self.cap {
+            var status = self.reserve(self.len + 1)
+            if status < 0 {
+                return status
+            }
+        }
+        self.data[self.len] = value
+        self.len += 1
+        return 0
+    }
+
+    pub fun append_slice(self: *Self, items: []const T): i64 {
+        if self == null {
+            return -22
+        }
+        var count = len(items) as u64
+        if count == 0 {
+            return 0
+        }
+        var max: u64 = ~0
+        if self.len > max - count {
+            return -75
+        }
+        var needed = self.len + count
+        if needed > self.cap {
+            var status = self.reserve(needed)
+            if status < 0 {
+                return status
+            }
+        }
+        for var i: u64 = 0; i < count; i += 1 {
+            self.data[self.len + i] = items[i]
+        }
+        self.len = needed
+        return 0
+    }
+
+    pub fun pop(self: *Self, out: *T): bool {
+        if self == null || self.len == 0 {
+            return false
+        }
+        self.len -= 1
+        if out != null {
+            *out = self.data[self.len]
+        }
+        return true
+    }
+
+    pub fun get(self: *const Self, index: u64, out: *T): bool {
+        if self == null || out == null || index >= self.len {
+            return false
+        }
+        *out = self.data[index]
+        return true
+    }
+
+    pub fun get_ptr(self: *Self, index: u64, out: **T): bool {
+        if self == null || out == null || index >= self.len {
+            return false
+        }
+        *out = &self.data[index]
+        return true
+    }
+
+    pub fun clear(self: *Self) {
+        if self != null {
+            self.len = 0
+        }
+    }
+
+    pub fun as_slice(self: *Self): []T {
+        if self == null || self.len == 0 {
+            var empty: []T
+            return empty
+        }
+        return self.data[0..self.len]
+    }
+
+    pub fun as_const_slice(self: *const Self): []const T {
+        if self == null || self.len == 0 {
+            var empty: []const T
+            return empty
+        }
+        return self.data[0..self.len]
+    }
+}
+
+fun elem_align(elem_size: u64): u64 {
+    if elem_size <= 1 { return 1 }
+    if elem_size <= 2 { return 2 }
+    if elem_size <= 4 { return 4 }
+    if elem_size <= 8 { return 8 }
+    return 16
+}
+
+const SLOT_EMPTY: u8 = 0
+const SLOT_USED: u8 = 1
+const SLOT_TOMBSTONE: u8 = 2
+
+pub struct StrMap[V] {
+    keys: *[]u8
+    values: *V
+    hashes: *u64
+    states: *u8
+    len: u64
+    used: u64
+    cap: u64
+    arena: *mem.Arena
+
+    pub fun init(self: *Self, arena: *mem.Arena, initial_cap: u64): i64 {
+        if self == null || arena == null {
+            return -22
+        }
+        self.keys = null
+        self.values = null
+        self.hashes = null
+        self.states = null
+        self.len = 0
+        self.used = 0
+        self.cap = 0
+        self.arena = arena
+        if initial_cap == 0 {
+            return 0
+        }
+        return self.reserve(initial_cap)
+    }
+
+    pub fun reserve(self: *Self, min_cap: u64): i64 {
+        if self == null || self.arena == null {
+            return -22
+        }
+        var new_cap = next_pow2(min_cap)
+        if new_cap == 0 {
+            return -75
+        }
+        if new_cap <= self.cap && self.used == self.len {
+            return 0
+        }
+
+        var next_keys: *[]u8
+        var next_values: *V
+        var next_hashes: *u64
+        var next_states: *u8
+        var status = mem.alloc_many(self.arena, new_cap, &next_keys)
+        if status < 0 { return status }
+        status = mem.alloc_many(self.arena, new_cap, &next_values)
+        if status < 0 { return status }
+        status = mem.alloc_many(self.arena, new_cap, &next_hashes)
+        if status < 0 { return status }
+        status = mem.alloc_many(self.arena, new_cap, &next_states)
+        if status < 0 { return status }
+
+        for var i: u64 = 0; i < new_cap; i += 1 {
+            next_states[i] = SLOT_EMPTY
+        }
+
+        var mask = new_cap - 1
+        var old_cap = self.cap
+        for var i: u64 = 0; i < old_cap; i += 1 {
+            if self.states[i] != SLOT_USED {
+                continue
+            }
+            var idx = self.hashes[i] & mask
+            for next_states[idx] == SLOT_USED {
+                idx = (idx + 1) & mask
+            }
+            next_keys[idx] = self.keys[i]
+            next_values[idx] = self.values[i]
+            next_hashes[idx] = self.hashes[i]
+            next_states[idx] = SLOT_USED
+        }
+
+        self.keys = next_keys
+        self.values = next_values
+        self.hashes = next_hashes
+        self.states = next_states
+        self.cap = new_cap
+        self.used = self.len
+        return 0
+    }
+
+    fun find_index(self: *const Self, key: []const u8, h: u64): i64 {
+        if self == null || self.cap == 0 || self.len == 0 {
+            return -1
+        }
+        var mask = self.cap - 1
+        var idx = h & mask
+        for var step: u64 = 0; step < self.cap; step += 1 {
+            var st = self.states[idx]
+            if st == SLOT_EMPTY {
+                return -1
+            }
+            if st == SLOT_USED && self.hashes[idx] == h && str.equals(self.keys[idx], key) {
+                return idx as i64
+            }
+            idx = (idx + 1) & mask
+        }
+        return -1
+    }
+
+    pub fun set(self: *Self, key: []const u8, value: V): i64 {
+        if self == null || self.arena == null {
+            return -22
+        }
+        if self.cap == 0 || (self.used + 1) * 10 >= self.cap * 7 {
+            var target = self.cap * 2
+            if target < 16 {
+                target = 16
+            }
+            if self.cap >= 16 && self.len * 4 <= self.cap {
+                target = self.cap
+            }
+            var status = self.reserve(target)
+            if status < 0 {
+                return status
+            }
+        }
+
+        var h = str.hash(key)
+        var mask = self.cap - 1
+        var idx = h & mask
+        var first_tomb: i64 = -1
+        for var step: u64 = 0; step < self.cap; step += 1 {
+            var st = self.states[idx]
+            if st == SLOT_EMPTY {
+                var dst = idx
+                if first_tomb >= 0 {
+                    dst = first_tomb as u64
+                } else {
+                    self.used += 1
+                }
+                var stored_key = str.clone(self.arena, key)
+                if len(key) > 0 && len(stored_key) == 0 {
+                    return -12
+                }
+                self.keys[dst] = stored_key
+                self.values[dst] = value
+                self.hashes[dst] = h
+                self.states[dst] = SLOT_USED
+                self.len += 1
+                return 0
+            }
+            if st == SLOT_TOMBSTONE {
+                if first_tomb < 0 {
+                    first_tomb = idx as i64
+                }
+            } else if self.hashes[idx] == h && str.equals(self.keys[idx], key) {
+                self.values[idx] = value
+                return 0
+            }
+            idx = (idx + 1) & mask
+        }
+        return -12
+    }
+
+    pub fun get_ptr(self: *Self, key: []const u8, out: **V): bool {
+        if out == null {
+            return false
+        }
+        var idx = self.find_index(key, str.hash(key))
+        if idx < 0 {
+            return false
+        }
+        *out = &self.values[idx]
+        return true
+    }
+
+    pub fun get(self: *const Self, key: []const u8, out: *V): bool {
+        if out == null {
+            return false
+        }
+        var idx = self.find_index(key, str.hash(key))
+        if idx < 0 {
+            return false
+        }
+        *out = self.values[idx]
+        return true
+    }
+
+    pub fun has(self: *const Self, key: []const u8): bool {
+        return self.find_index(key, str.hash(key)) >= 0
+    }
+
+    pub fun remove(self: *Self, key: []const u8): bool {
+        var idx = self.find_index(key, str.hash(key))
+        if idx < 0 {
+            return false
+        }
+        self.states[idx] = SLOT_TOMBSTONE
+        self.len -= 1
+        return true
+    }
+
+    pub fun clear(self: *Self) {
+        if self == null {
+            return
+        }
+        for var i: u64 = 0; i < self.cap; i += 1 {
+            self.states[i] = SLOT_EMPTY
+        }
+        self.len = 0
+        self.used = 0
+    }
+}
+
+fun next_pow2(n: u64): u64 {
+    var cap: u64 = 16
+    var max: u64 = (~0 as u64) >> 1
+    for cap < n {
+        if cap > max {
+            return 0
+        }
+        cap *= 2
+    }
+    return cap
+}

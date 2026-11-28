@@ -1,0 +1,33 @@
+// expect-exit: 0
+import std.collections { Vec, StrMap }
+import std.mem.Arena
+
+fun main(): i32 {
+    var arena: Arena
+    if arena.init(4096) < 0 {
+        return 1
+    }
+    defer arena.deinit()
+
+    var v: Vec[i32]
+    if v.init(&arena, 4) < 0 {
+        return 2
+    }
+    v.push_value(10)
+    v.push_value(20)
+    if v.len != 2 {
+        return 3
+    }
+
+    var m: StrMap[i32]
+    if m.init(&arena, 8) < 0 {
+        return 4
+    }
+    m.set("one", 1)
+    var val: i32 = 0
+    if !m.get("one", &val) || val != 1 {
+        return 5
+    }
+
+    return 0
+}
