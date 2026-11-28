@@ -11,8 +11,7 @@ fun main(): i32 {
     }
     defer arena.deinit()
 
-    var argv: [][]u8
-    if args.load(&arena, &argv) < 0 {
+    var argv = args.load(&arena) or {
         io.eprintln("lunsoc: could not load arguments")
         return 1
     }

@@ -89,8 +89,7 @@ fun main(): i32 {
     var arena: mem.Arena
     if mem.init(&arena, 65536) < 0 { return 1 }
 
-    var argv: [][]u8
-    if args.load(&arena, &argv) < 0 {
+    var argv = args.load(&arena) or {
         mem.deinit(&arena)
         return 1
     }
