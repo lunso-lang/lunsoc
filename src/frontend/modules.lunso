@@ -1,7 +1,7 @@
 import std.file
 import std.fmt
 import std.io
-import std.collections { Vec, StrMap }
+import std.collections { Vec, StrMap, HashMap }
 import std.mem
 import std.os
 import std.path
@@ -49,6 +49,7 @@ struct Loader {
     include_dirs: [][]u8
     overlays: *StrMap[[]u8]
     modules: Vec[ModuleEntry]
+    module_map: HashMap[[]u8, u32]
     depth: u32
 }
 
@@ -190,14 +191,10 @@ fun item_name(tree: *Ast, id: u32): Span {
 fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
     *out = NO_MODULE
     var in_std = len(l.std_root) > 0 && is_std_module(name)
-    var mods = l.modules.as_slice()
-    var start_idx: i64 = 0
-    if in_std { start_idx = 1 }
-    for var i = start_idx; i < len(mods); i += 1 {
-        if mods[i].name == name {
-            *out = i as u32
-            return true
-        }
+    var found_idx: u32 = 0
+    if l.module_map.get(name, &found_idx) && !(in_std && found_idx == 0) {
+        *out = found_idx
+        return true
     }
     var std_root_mod = in_std && len(name) == 3
     var file_path: []u8 = ""
@@ -241,6 +238,9 @@ fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
     var idx = l.modules.len as u32
     if l.modules.push(&entry) < 0 {
         return err_at(l, offset, "could not allocate module storage")
+    }
+    if l.module_map.put(name, idx) < 0 {
+        return err_at(l, offset, "could not index module")
     }
     *out = idx
     return true
@@ -869,12 +869,16 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
         include_dirs: include_dirs,
         overlays: overlays,
         modules: Vec[ModuleEntry] { arena: arena },
+        module_map: HashMap[[]u8, u32] { arena: arena },
         depth: 1,
     }
     if l.source_buf.init(arena, (len(source) + 1024) as u64) < 0 {
         return false
     }
     if l.modules.init(arena, 8) < 0 {
+        return false
+    }
+    if l.module_map.init(arena, 16) < 0 {
         return false
     }
     var entry = ModuleEntry {
@@ -889,6 +893,9 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
         return false
     }
     if l.modules.push(&entry) < 0 {
+        return false
+    }
+    if l.module_map.put("main", 0) < 0 {
         return false
     }
     if !parse_file(&l, 0, source, 0) {
