@@ -1,0 +1,5 @@
+// expect-stderr: unknown variable
+fun main(): i32 {
+    _ = 123
+    return _
+}

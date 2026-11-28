@@ -2503,19 +2503,31 @@ fun check_expr(c: *Checker, id: u32, expected: SemaType): SemaType {
         check_value(c, node.b, simple_type(TypeKind.Bool))
         res = simple_type(TypeKind.Bool)
     } else if node.kind >= AstKind.Assign && node.kind <= AstKind.AssignShiftRight {
-        var lt = check_expr(c, node.a, empty_type())
-        if !c.has_error {
-            if !is_writable_lvalue(c, node.a) {
-                var target_k = nodes[node.a].kind
-                if target_k == AstKind.Dereference ||
-                   (target_k == AstKind.Index && node_info(c, nodes[node.a].a).type_info.kind == TypeKind.Pointer) {
-                    res = fail(c, node.a, "cannot write through a read-only pointer")
+        if node.kind == AstKind.Assign && nodes[node.a].kind == AstKind.Identifier &&
+           str.equals(span_bytes(c.tree, node_span(c.tree, node.a, nodes[node.a].a)), "_") {
+            var rt = check_expr(c, node.b, empty_type())
+            if !c.has_error && rt.kind == TypeKind.Null {
+                res = fail(c, node.b, "cannot infer type from null")
+            } else if !c.has_error {
+                node_info(c, node.a).binding = ~0 as u32
+                node_info(c, node.a).type_info = rt
+                res = rt
+            }
+        } else {
+            var lt = check_expr(c, node.a, empty_type())
+            if !c.has_error {
+                if !is_writable_lvalue(c, node.a) {
+                    var target_k = nodes[node.a].kind
+                    if target_k == AstKind.Dereference ||
+                       (target_k == AstKind.Index && node_info(c, nodes[node.a].a).type_info.kind == TypeKind.Pointer) {
+                        res = fail(c, node.a, "cannot write through a read-only pointer")
+                    } else {
+                        res = fail(c, node.a, "cannot assign to non-writable target")
+                    }
                 } else {
-                    res = fail(c, node.a, "cannot assign to non-writable target")
+                    check_value(c, node.b, lt)
+                    res = lt
                 }
-            } else {
-                check_value(c, node.b, lt)
-                res = lt
             }
         }
     } else if node.kind >= AstKind.Equal && node.kind <= AstKind.GreaterEqual {
@@ -2686,20 +2698,25 @@ fun check_statement(c: *Checker, id: u32): bool {
             }
         }
         if c.has_error { return true }
-        var slot = c.slot_count
-        c.slot_count += 1
-        var lv = LocalVar {
-            name: name,
-            slot: slot,
-            type_info: vt,
-            is_const: false,
-            const_idx: 0,
-            depth: c.scope_depth,
-        }
-        c.locals.push(&lv)
         var sn = node_info(c, id)
-        sn.binding = slot
-        sn.type_info = vt
+        if str.equals(span_bytes(c.tree, name), "_") {
+            sn.binding = ~0 as u32
+            sn.type_info = vt
+        } else {
+            var slot = c.slot_count
+            c.slot_count += 1
+            var lv = LocalVar {
+                name: name,
+                slot: slot,
+                type_info: vt,
+                is_const: false,
+                const_idx: 0,
+                depth: c.scope_depth,
+            }
+            c.locals.push(&lv)
+            sn.binding = slot
+            sn.type_info = vt
+        }
         falls = true
     } else if node.kind == AstKind.Const {
         var idx = node.a
@@ -2905,27 +2922,31 @@ fun check_statement(c: *Checker, id: u32): bool {
             if h.index_name.length > 0 {
                 var idx_slot = c.slot_count
                 c.slot_count += 1
-                var ilv = LocalVar {
-                    name: h.index_name,
-                    slot: idx_slot,
-                    type_info: simple_type(TypeKind.I64),
+                if !str.equals(span_bytes(c.tree, h.index_name), "_") {
+                    var ilv = LocalVar {
+                        name: h.index_name,
+                        slot: idx_slot,
+                        type_info: simple_type(TypeKind.I64),
+                        is_const: false,
+                        const_idx: 0,
+                        depth: c.scope_depth,
+                    }
+                    c.locals.push(&ilv)
+                }
+            }
+            var item_slot = c.slot_count
+            c.slot_count += 1
+            if !str.equals(span_bytes(c.tree, h.item_name), "_") {
+                var lv = LocalVar {
+                    name: h.item_name,
+                    slot: item_slot,
+                    type_info: item_t,
                     is_const: false,
                     const_idx: 0,
                     depth: c.scope_depth,
                 }
-                c.locals.push(&ilv)
+                c.locals.push(&lv)
             }
-            var item_slot = c.slot_count
-            c.slot_count += 1
-            var lv = LocalVar {
-                name: h.item_name,
-                slot: item_slot,
-                type_info: item_t,
-                is_const: false,
-                const_idx: 0,
-                depth: c.scope_depth,
-            }
-            c.locals.push(&lv)
             node_info(c, id).binding = item_slot
             node_info(c, id).type_info = item_t
         }
@@ -2948,7 +2969,7 @@ fun check_statement(c: *Checker, id: u32): bool {
         falls = true
     } else {
         var et = check_expr(c, id, empty_type())
-        if !c.has_error && et.kind == TypeKind.Result {
+        if !c.has_error && et.kind == TypeKind.Result && !(node.kind >= AstKind.Assign && node.kind <= AstKind.AssignShiftRight) {
             fail_at(c, nodes[id].pos, "unused error union result; handle it with '?' or 'or'")
         }
         falls = true

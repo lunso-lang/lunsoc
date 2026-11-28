@@ -614,6 +614,9 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
         return lower_logical(l, node.kind, node.a, node.b, info.type_info)
     }
     if node.kind >= AstKind.Assign && node.kind <= AstKind.AssignShiftRight {
+        if node.kind == AstKind.Assign && nodes[node.a].kind == AstKind.Identifier && lower_node(l, node.a).binding == (~0 as u32) {
+            return lower_expression(l, node.b)
+        }
         var tk = nodes[node.a].kind
         var memory = tk == AstKind.Index || tk == AstKind.Member || tk == AstKind.Dereference
         var target = lower_node(l, node.a).binding
@@ -1049,6 +1052,12 @@ fun lower_statement(l: *Lowering, id: u32) {
         var info = lower_node(l, id)
         var vars = l.tree.variables.as_slice()
         var init_id = vars[node.a].initializer
+        if info.binding == (~0 as u32) {
+            if init_id != NODE_NONE {
+                lower_expression(l, init_id)
+            }
+            return
+        }
         if uses_storage(info.type_info) {
             var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
             var src: u32 = 0
