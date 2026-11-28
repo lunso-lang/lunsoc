@@ -691,7 +691,7 @@ fun specialize_record_with_args(c: *Checker, id: u32, decl: u32, args: vec.Vec[S
         size: 0,
         alignment: 1,
         state: 0,
-        fields: vec.Vec[SemaNode] { data: 0 as *SemaNode, len: 0, cap: 0, arena: c.arena },
+        fields: vec.Vec[SemaNode] { arena: c.arena },
         arguments: args,
     }
     sr.fields.init(c.arena, 8)
@@ -837,7 +837,7 @@ fun resolve_type_inner(c: *Checker, id: u32, allow_incomplete: bool): SemaType {
         var children = c.tree.children.as_slice()
         var aft = c.tree.func_types.as_slice()[node.a]
         var sft = SemaFuncType {
-            params: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: c.arena },
+            params: vec.Vec[SemaType] { arena: c.arena },
             result: simple_type(TypeKind.Void),
         }
         sft.params.init(c.arena, aft.params.count as u64)
@@ -1522,9 +1522,9 @@ fun specialize_function_with_args(c: *Checker, site_id: u32, decl_idx: u32, args
         slot_count: 0,
         declaration: decl_idx,
         instantiated_at: site_id,
-        param_types: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: c.arena },
+        param_types: vec.Vec[SemaType] { arena: c.arena },
         arguments: args,
-        nodes: vec.Vec[SemaNode] { data: 0 as *SemaNode, len: 0, cap: 0, arena: c.arena },
+        nodes: vec.Vec[SemaNode] { arena: c.arena },
     }
     sf.param_types.init(c.arena, fdecl.parameters.count as u64)
     sf.nodes.init(c.arena, fdecl.nodes.count as u64)
@@ -1715,7 +1715,7 @@ fun is_literal_expr(tree: *Ast, id: u32): bool {
 fun make_fn_type(c: *Checker, fi: u32): SemaType {
     var sf = &c.sema.functions.data[fi]
     var sft = SemaFuncType {
-        params: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: c.arena },
+        params: vec.Vec[SemaType] { arena: c.arena },
         result: sf.result,
     }
     sft.params.init(c.arena, sf.param_types.len)
@@ -3018,8 +3018,8 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
             size: 0,
             alignment: 1,
             state: 0,
-            fields: vec.Vec[SemaNode] { data: 0 as *SemaNode, len: 0, cap: 0, arena: arena },
-            arguments: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: arena },
+            fields: vec.Vec[SemaNode] { arena: arena },
+            arguments: vec.Vec[SemaType] { arena: arena },
         }
         sr.fields.init(arena, 8)
         out.records.push(&sr)
@@ -3081,9 +3081,9 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
             slot_count: 0,
             declaration: i as u32,
             instantiated_at: NODE_NONE,
-            param_types: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: arena },
-            arguments: vec.Vec[SemaType] { data: 0 as *SemaType, len: 0, cap: 0, arena: arena },
-            nodes: vec.Vec[SemaNode] { data: 0 as *SemaNode, len: 0, cap: 0, arena: arena },
+            param_types: vec.Vec[SemaType] { arena: arena },
+            arguments: vec.Vec[SemaType] { arena: arena },
+            nodes: vec.Vec[SemaNode] { arena: arena },
         }
         sf.param_types.init(arena, 8)
         out.functions.push(&sf)

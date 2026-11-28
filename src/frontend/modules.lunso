@@ -227,7 +227,7 @@ fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
         state: LoadState.Unloaded,
         parent: NO_MODULE,
         declarations: NodeRange { first: 0, count: 0 },
-        scope: AstModuleScope { bindings: vec.Vec[AstBinding] { data: 0 as *AstBinding, len: 0, cap: 0, arena: l.arena } },
+        scope: AstModuleScope { bindings: vec.Vec[AstBinding] { arena: l.arena } },
     }
     if entry.scope.bindings.init(l.arena, 16) < 0 {
         return err_at(l, offset, "could not allocate module scope")
@@ -759,12 +759,12 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
     var l = Loader {
         arena: arena,
         program: out,
-        source_buf: vec.Vec[u8] { data: 0 as *u8, len: 0, cap: 0, arena: arena },
+        source_buf: vec.Vec[u8] { arena: arena },
         root: path.dir_prefix(entry_path),
         std_root: select_std_root(arena, std_dir),
         include_dirs: include_dirs,
         overlays: overlays,
-        modules: vec.Vec[ModuleEntry] { data: 0 as *ModuleEntry, len: 0, cap: 0, arena: arena },
+        modules: vec.Vec[ModuleEntry] { arena: arena },
         depth: 1,
     }
     if l.source_buf.init(arena, (len(source) + 1024) as u64) < 0 {
@@ -779,7 +779,7 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
         state: LoadState.Loading,
         parent: NO_MODULE,
         declarations: NodeRange { first: 0, count: 0 },
-        scope: AstModuleScope { bindings: vec.Vec[AstBinding] { data: 0 as *AstBinding, len: 0, cap: 0, arena: arena } },
+        scope: AstModuleScope { bindings: vec.Vec[AstBinding] { arena: arena } },
     }
     if entry.scope.bindings.init(arena, 16) < 0 {
         return false
