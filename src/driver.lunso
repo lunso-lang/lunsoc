@@ -7,7 +7,7 @@ import std.os
 import std.path
 import std.process
 import std.str
-import std.collections { Vec }
+import std.collections.Vec
 import frontend.ast
 import backend.ir
 import frontend.lexer

@@ -1,5 +1,5 @@
 import std.mem
-import std.collections { Vec }
+import std.collections.Vec
 
 pub fun equals(a: []const u8, b: []const u8): bool {
     if len(a) != len(b) {

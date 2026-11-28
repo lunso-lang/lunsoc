@@ -6,7 +6,7 @@ import std.os
 import std.path
 import std.str
 import std.time
-import std.collections { Vec }
+import std.collections.Vec
 import backend.ir
 import backend.qbe
 import frontend.sema

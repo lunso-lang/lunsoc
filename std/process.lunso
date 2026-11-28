@@ -2,7 +2,7 @@ import std.file
 import std.mem
 import std.os
 import std.str
-import std.collections { Vec }
+import std.collections.Vec
 
 ext fun lunso_sys_getpid(): i64
 ext fun lunso_sys_getppid(): i64

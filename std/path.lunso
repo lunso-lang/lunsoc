@@ -1,6 +1,6 @@
 import std.mem
 import std.str
-import std.collections { Vec }
+import std.collections.Vec
 
 pub fun is_abs(p: []const u8): bool {
     return len(p) > 0 && p[0] == '/'

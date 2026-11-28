@@ -2,7 +2,7 @@ import std.file
 import std.mem
 import std.os
 import std.str
-import std.collections { Vec }
+import std.collections.Vec
 
 ext fun lunso_sys_access(path: *const u8, mode: i32): i64
 ext fun lunso_sys_open_dir(path: *const u8): i64

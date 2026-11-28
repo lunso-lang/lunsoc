@@ -1,7 +1,7 @@
 import std.fmt
 import std.io
 import std.mem
-import std.collections { Vec }
+import std.collections.Vec
 import frontend.ast.*
 import frontend.sema.*
 

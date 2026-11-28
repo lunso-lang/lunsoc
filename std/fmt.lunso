@@ -1,6 +1,6 @@
 import std.mem
 import std.str
-import std.collections { Vec }
+import std.collections.Vec
 
 ext fun lunso_sys_write(fd: i32, buffer: *const u8, count: u64): i64
 

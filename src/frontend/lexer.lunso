@@ -1,5 +1,5 @@
 import std.str
-import std.collections { Vec }
+import std.collections.Vec
 
 pub enum TokenKind : u16 {
     Fun,
