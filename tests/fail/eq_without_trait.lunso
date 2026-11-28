@@ -1,0 +1,12 @@
+struct Plain {
+    x: i32
+}
+
+fun main(): i32 {
+    var a = Plain { x: 1 }
+    var b = Plain { x: 1 }
+    if a == b {
+        return 1
+    }
+    return 0
+}
