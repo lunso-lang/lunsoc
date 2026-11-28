@@ -964,6 +964,15 @@ fun emit_defers(l: *Lowering, base: u64) {
     }
 }
 
+fun emit_ok_void_result(l: *Lowering, ret_t: SemaType): u32 {
+    var slot_addr = emit_value(l, IrOp.StorageAlloc, ret_t, 0, 0, 0)
+    var bool_t = simple_type(TypeKind.Bool)
+    var ok_addr = emit_value(l, IrOp.FieldAddress, ret_t, slot_addr, 0, 0)
+    var ok_val = emit_value(l, IrOp.Bool, bool_t, 1, 0, 0)
+    emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: ok_addr, b: ok_val, c: 0 })
+    return slot_addr
+}
+
 fun lower_statement(l: *Lowering, id: u32) {
     if l.failed || id == NODE_NONE { return }
     var nodes = l.tree.nodes.as_slice()
@@ -993,12 +1002,7 @@ fun lower_statement(l: *Lowering, id: u32) {
         } else if l.current_fn < (l.sem.functions.len as u32) {
             var ret_t = l.sem.functions.data[l.current_fn].result
             if ret_t.kind == TypeKind.Result {
-                var slot_addr = emit_value(l, IrOp.StorageAlloc, ret_t, 0, 0, 0)
-                var bool_t = simple_type(TypeKind.Bool)
-                var ok_addr = emit_value(l, IrOp.FieldAddress, ret_t, slot_addr, 0, 0)
-                var ok_val = emit_value(l, IrOp.Bool, bool_t, 1, 0, 0)
-                emit(l, IrInstruction { op: IrOp.MemoryStore, type_info: bool_t, result: 0, a: ok_addr, b: ok_val, c: 0 })
-                val = slot_addr
+                val = emit_ok_void_result(l, ret_t)
             }
         }
         emit_defers(l, 0)
@@ -1122,7 +1126,11 @@ pub fun lower(arena: *mem.Arena, tree: *Ast, sem: *Sema, out: *IrModule): bool {
             emit_label(&l, entry)
             lower_statement(&l, fdecl.body)
             if lower_node(&l, fdecl.body).falls_through {
-                emit(&l, IrInstruction { op: IrOp.Return, type_info: empty_type(), result: 0, a: 0, b: 0, c: 0 })
+                var val: u32 = 0
+                if sf.result.kind == TypeKind.Result {
+                    val = emit_ok_void_result(&l, sf.result)
+                }
+                emit(&l, IrInstruction { op: IrOp.Return, type_info: empty_type(), result: 0, a: val, b: 0, c: 0 })
             }
             var fn_ptr = out.functions.data
             fn_ptr[i].instruction_count = (out.instructions.len as u32) - fn_ptr[i].first_instruction

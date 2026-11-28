@@ -3133,7 +3133,11 @@ pub fun check(arena: *mem.Arena, tree: *Ast, out: *Sema, err: *SemaError): bool 
             c.locals.push(&lv)
         }
         var falls = check_block(&c, fdecl.body)
-        if !c.has_error && c.current_return.kind != TypeKind.Void && falls {
+        var needs_return = c.current_return.kind != TypeKind.Void
+        if c.current_return.kind == TypeKind.Result && c.sema.elements.data[c.current_return.element_type].kind == TypeKind.Void {
+            needs_return = false
+        }
+        if !c.has_error && needs_return && falls {
             fail_at(&c, fdecl.name.offset, "function can finish without returning a value")
         }
         sf_list = out.functions.data
