@@ -1,4 +1,5 @@
 // lunsoc-only
+// expect-exit: 0
 import std.str
 
 fun div_pos(a: i32, b: i32): !i32 {
@@ -10,7 +11,6 @@ fun div_pos(a: i32, b: i32): !i32 {
 
 fun bump(flag: *bool): !void {
     *flag = true
-    return
 }
 
 fun chain(a: i32, b: i32, deferred_ran: *bool): !i64 {

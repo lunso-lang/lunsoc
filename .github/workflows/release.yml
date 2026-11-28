@@ -23,13 +23,13 @@ jobs:
           make -C /tmp/qbe-1.3 -j"$(nproc)"
           sudo make -C /tmp/qbe-1.3 install PREFIX=/usr/local
 
-      - name: Download lunsoc v0.3.3
+      - name: Download lunsoc v0.4.0
         run: |
-          curl -fsSL https://github.com/lunso-lang/lunsoc/releases/download/v0.3.3/lunsoc-linux-x86_64 -o /tmp/lunsoc-v0.3.3
-          chmod +x /tmp/lunsoc-v0.3.3
+          curl -fsSL https://github.com/lunso-lang/lunsoc/releases/download/v0.4.0/lunsoc-linux-x86_64 -o /tmp/lunsoc-v0.4.0
+          chmod +x /tmp/lunsoc-v0.4.0
 
       - name: Build and test lunsoc
-        run: make test LUNSO=/tmp/lunsoc-v0.3.3
+        run: make test LUNSO=/tmp/lunsoc-v0.4.0
 
       - name: Package self-hosted release binary
         run: |
@@ -49,7 +49,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            dist/assets/* \
-            --title "lunsoc ${GITHUB_REF_NAME}" \
-            --generate-notes
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES_FILE="/tmp/release-notes.md"
+          awk -v ver="[$VERSION]" '
+            $0 ~ "^## " {
+              if (found) exit
+              if (index($0, ver) > 0) { found = 1; next }
+            }
+            found { print }
+          ' CHANGELOG.md > "$NOTES_FILE"
+          if [ -s "$NOTES_FILE" ]; then
+            gh release create "$GITHUB_REF_NAME" \
+              dist/assets/* \
+              --title "lunsoc ${GITHUB_REF_NAME}" \
+              --notes-file "$NOTES_FILE"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              dist/assets/* \
+              --title "lunsoc ${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi

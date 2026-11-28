@@ -1,0 +1,8 @@
+fun takes_two(a: i32, b: i32): i32 {
+    return a + b
+}
+
+fun main(): i32 {
+    var arr: [2]i32 = [1, 2]
+    return takes_two(...arr)
+}

@@ -26,8 +26,7 @@ pub struct NativeOptions {
 
 fun has_entry_point(mod: *ir.IrModule): bool {
     var fns = mod.functions.as_slice()
-    for var i: i64 = 0; i < len(fns); i += 1 {
-        var f = fns[i]
+    for f in fns {
         var start = f.name.offset as i64
         var end = (f.name.offset + f.name.length) as i64
         var name = mod.source[start..end]
@@ -142,8 +141,8 @@ pub fun build(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *Na
         link_args.push_value("-nostdlib")
     }
     link_args.push_value(asm_path)
-    for var i: i64 = 0; i < len(opts.objects); i += 1 {
-        link_args.push_value(opts.objects[i])
+    for obj in opts.objects {
+        link_args.push_value(obj)
     }
     link_args.push_value("-o")
     link_args.push_value(opts.output)
@@ -176,8 +175,8 @@ pub fun run_exe(arena: *mem.Arena, mod: *ir.IrModule, source_path: []u8, opts: *
         return 1
     }
     argv_buf.push_value(exe_path)
-    for var i: i64 = 0; i < len(run_args); i += 1 {
-        argv_buf.push_value(run_args[i])
+    for run_arg in run_args {
+        argv_buf.push_value(run_arg)
     }
     var status = os.run(exe_path, argv_buf.as_slice())
     if status < 0 {

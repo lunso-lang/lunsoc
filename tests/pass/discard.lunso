@@ -1,0 +1,49 @@
+// lunsoc-only
+// expect-exit: 0
+
+fun side_effect(counter: *i32): i32 {
+    *counter += 1
+    return *counter
+}
+
+fun might_fail(ok: bool): !i32 {
+    if !ok {
+        return fail("bad")
+    }
+    return 42
+}
+
+fun main(): i32 {
+    var count: i32 = 0
+    _ = side_effect(&count)
+    _ = side_effect(&count)
+    if count != 2 { return 1 }
+
+    var _ = side_effect(&count)
+    var _ = side_effect(&count)
+    if count != 4 { return 2 }
+
+    // Explicit discard of error union
+    _ = might_fail(true)
+
+    var sum: i32 = 0
+    var arr: [3]i32 = [10, 20, 30]
+    for _, v in arr {
+        sum += v
+    }
+    if sum != 60 { return 3 }
+
+    var idx_sum: i64 = 0
+    for i, _ in arr {
+        idx_sum += i
+    }
+    if idx_sum != 3 { return 4 }
+
+    var ticks: i32 = 0
+    for _ in 0..5 {
+        ticks += 1
+    }
+    if ticks != 5 { return 5 }
+
+    return 0
+}

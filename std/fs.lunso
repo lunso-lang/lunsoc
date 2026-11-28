@@ -24,26 +24,31 @@ fun copy_cstr(path: []const u8, buf: *u8, cap: i64): i64 {
     return 0
 }
 
-pub fun read_file(path: []const u8, arena: *mem.Arena, out: *[]u8): i64 {
-    return file.read_all(path, arena, out)
+pub fun read_file(path: []const u8, arena: *mem.Arena): ![]u8 {
+    var out: []u8
+    if file.read_all(path, arena, &out) < 0 {
+        return fail("read_file failed")
+    }
+    return out
 }
 
-pub fun write_file(path: []const u8, bytes: []const u8): i64 {
-    return file.write_all(path, bytes)
+pub fun write_file(path: []const u8, bytes: []const u8): !void {
+    if file.write_all(path, bytes) < 0 {
+        return fail("write_file failed")
+    }
+    return
 }
 
-pub fun copy_file(src: []const u8, dst: []const u8): i64 {
+pub fun copy_file(src: []const u8, dst: []const u8): !i64 {
     var in_f: file.File
-    var status = file.open_read(src, &in_f)
-    if status < 0 {
-        return status
+    if file.open_read(src, &in_f) < 0 {
+        return fail("copy_file open source failed")
     }
     defer file.close(&in_f)
 
     var out_f: file.File
-    status = file.open_write(dst, &out_f)
-    if status < 0 {
-        return status
+    if file.open_write(dst, &out_f) < 0 {
+        return fail("copy_file open destination failed")
     }
     defer file.close(&out_f)
 
@@ -52,14 +57,14 @@ pub fun copy_file(src: []const u8, dst: []const u8): i64 {
     for {
         var n = file.read_into(&in_f, &buf[0], 4096)
         if n < 0 {
-            return n
+            return fail("copy_file read failed")
         }
         if n == 0 {
             break
         }
         var w = file.write_to(&out_f, buf[0..n])
         if w < 0 {
-            return w
+            return fail("copy_file write failed")
         }
         total += w
     }
@@ -98,22 +103,25 @@ pub fun is_file(path: []const u8): bool {
     return exists(path) && !is_dir(path)
 }
 
-pub fun create_dir(path: []const u8): i64 {
-    return os.mkdir(path)
+pub fun create_dir(path: []const u8): !void {
+    if os.mkdir(path) < 0 {
+        return fail("create_dir failed")
+    }
+    return
 }
 
-pub fun create_dir_all(path: []const u8): i64 {
+pub fun create_dir_all(path: []const u8): !void {
     var n = len(path)
     if n == 0 {
-        return -22
+        return fail("create_dir_all empty path")
     }
     if n >= 4096 {
-        return -36
+        return fail("create_dir_all path too long")
     }
     var buf: [4096]u8
     for var i: i64 = 0; i < n; i += 1 {
         if path[i] == '\0' {
-            return -22
+            return fail("create_dir_all invalid path")
         }
         buf[i] = path[i]
     }
@@ -122,64 +130,77 @@ pub fun create_dir_all(path: []const u8): i64 {
             var sub = buf[0..i]
             var st = os.mkdir(sub)
             if st < 0 && st != -17 {
-                return st
+                return fail("create_dir_all failed")
             }
         }
     }
     var st = os.mkdir(buf[0..n])
-    if st == -17 && is_dir(buf[0..n]) {
-        return 0
+    if st < 0 {
+        if st == -17 && is_dir(buf[0..n]) {
+            return
+        }
+        return fail("create_dir_all failed")
     }
-    return st
+    return
 }
 
-pub fun remove_file(path: []const u8): i64 {
-    return os.remove(path)
+pub fun remove_file(path: []const u8): !void {
+    if os.remove(path) < 0 {
+        return fail("remove_file failed")
+    }
+    return
 }
 
-pub fun remove_dir(path: []const u8): i64 {
-    return os.rmdir(path)
+pub fun remove_dir(path: []const u8): !void {
+    if os.rmdir(path) < 0 {
+        return fail("remove_dir failed")
+    }
+    return
 }
 
-pub fun read_dir(path: []const u8, arena: *mem.Arena, out: *vec.Vec[os.DirEntry]): i64 {
-    return os.list_dir(path, arena, out)
+pub fun read_dir(path: []const u8, arena: *mem.Arena): !vec.Vec[os.DirEntry] {
+    var out: vec.Vec[os.DirEntry]
+    if os.list_dir(path, arena, &out) < 0 {
+        return fail("read_dir failed")
+    }
+    return out
 }
 
-pub fun rename(old_path: []const u8, new_path: []const u8): i64 {
+pub fun rename(old_path: []const u8, new_path: []const u8): !void {
     var obuf: [4096]u8
     var nbuf: [4096]u8
-    var st = copy_cstr(old_path, &obuf[0], 4096)
-    if st < 0 { return st }
-    st = copy_cstr(new_path, &nbuf[0], 4096)
-    if st < 0 { return st }
-    return lunso_sys_rename(data(obuf), data(nbuf))
+    if copy_cstr(old_path, &obuf[0], 4096) < 0 {
+        return fail("rename invalid old_path")
+    }
+    if copy_cstr(new_path, &nbuf[0], 4096) < 0 {
+        return fail("rename invalid new_path")
+    }
+    if lunso_sys_rename(data(obuf), data(nbuf)) < 0 {
+        return fail("rename failed")
+    }
+    return
 }
 
-pub fun remove_all(path: []const u8, arena: *mem.Arena): i64 {
+pub fun remove_all(path: []const u8, arena: *mem.Arena): !void {
     if !exists(path) {
-        return 0
+        return
     }
     if !is_dir(path) {
-        return remove_file(path)
+        remove_file(path)?
+        return
     }
-    var entries: vec.Vec[os.DirEntry]
-    var n = read_dir(path, arena, &entries)
-    if n < 0 {
-        return n
-    }
-    var items = entries.as_slice()
-    for var i: i64 = 0; i < len(items); i += 1 {
-        var child = str.concat3(arena, path, "/", items[i].name)
+    var entries = read_dir(path, arena)?
+    for item in entries.as_slice() {
+        var child = str.concat3(arena, path, "/", item.name)
         if len(path) > 0 && path[len(path) - 1] == '/' {
-            child = str.concat(arena, path, items[i].name)
+            child = str.concat(arena, path, item.name)
         }
-        if items[i].is_dir {
-            var st = remove_all(child, arena)
-            if st < 0 { return st }
+        if item.is_dir {
+            remove_all(child, arena)?
         } else {
-            var st = remove_file(child)
-            if st < 0 { return st }
+            remove_file(child)?
         }
     }
-    return remove_dir(path)
+    remove_dir(path)?
+    return
 }

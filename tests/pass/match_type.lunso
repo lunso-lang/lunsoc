@@ -1,0 +1,60 @@
+// lunsoc-only
+// expect-exit: 0
+struct Point {
+    x: i32
+    y: i32
+}
+
+// Only the matched arm is type-checked and lowered per instantiation.
+fun describe[T](v: T): i32 {
+    match type T {
+        bool => {
+            if v { return 1 }
+            return 0
+        }
+        f32, f64 => return (v * 2.0) as i32
+        []const u8 => return len(v) as i32
+        Point => return v.x + v.y
+        i8, i16, i32, i64 => return (v as i32) + 100
+        else => return -1
+    }
+}
+
+fun main(): i32 {
+    if describe(true) != 1 { return 1 }
+    if describe(false) != 0 { return 2 }
+    if describe(1.5) != 3 { return 3 }
+
+    var text: []const u8 = "hello"
+    if describe(text) != 5 { return 4 }
+
+    var p = Point { x: 3, y: 4 }
+    if describe(p) != 7 { return 5 }
+
+    var n: i32 = 5
+    if describe(n) != 105 { return 6 }
+
+    var u: u8 = 9
+    if describe(u) != -1 { return 7 }
+
+    // Concrete type scrutinee
+    var concrete_ok = 0
+    match type i32 {
+        u8, u16 => concrete_ok = 1
+        i32 => concrete_ok = 42
+        else => concrete_ok = 2
+    }
+    if concrete_ok != 42 { return 8 }
+
+    // Contextual 'type': a variable named 'type' still works in regular match
+    var type = 2
+    var var_ok = 0
+    match type {
+        1 => var_ok = 1
+        2 => var_ok = 10
+        else => var_ok = 3
+    }
+    if var_ok != 10 { return 9 }
+
+    return 0
+}

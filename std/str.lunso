@@ -311,8 +311,8 @@ pub fun join(arena: *mem.Arena, parts: []const []const u8, sep: []const u8): []u
     }
     var total: u64 = 0
     var seplen = len(sep) as u64
-    for var k: i64 = 0; k < count; k += 1 {
-        total += len(parts[k]) as u64
+    for p in parts {
+        total += len(p) as u64
     }
     total += ((count - 1) as u64) * seplen
     if total == 0 {
@@ -323,16 +323,15 @@ pub fun join(arena: *mem.Arena, parts: []const []const u8, sep: []const u8): []u
         return ""
     }
     var pos: i64 = 0
-    for var idx: i64 = 0; idx < count; idx += 1 {
-        var p = parts[idx]
+    for idx, p in parts {
         if idx > 0 {
-            for var j: i64 = 0; j < len(sep); j += 1 {
-                buf[pos] = sep[j]
+            for ch in sep {
+                buf[pos] = ch
                 pos += 1
             }
         }
-        for var j: i64 = 0; j < len(p); j += 1 {
-            buf[pos] = p[j]
+        for ch in p {
+            buf[pos] = ch
             pos += 1
         }
     }
@@ -370,8 +369,7 @@ pub fun to_lower(arena: *mem.Arena, s: []const u8): []u8 {
     if arena.alloc(n as u64, 1, &buf) < 0 {
         return ""
     }
-    for var i: i64 = 0; i < n; i += 1 {
-        var ch = s[i]
+    for i, ch in s {
         if ch >= 'A' && ch <= 'Z' {
             buf[i] = ch + ('a' - 'A')
         } else {
@@ -388,8 +386,7 @@ pub fun to_upper(arena: *mem.Arena, s: []const u8): []u8 {
     if arena.alloc(n as u64, 1, &buf) < 0 {
         return ""
     }
-    for var i: i64 = 0; i < n; i += 1 {
-        var ch = s[i]
+    for i, ch in s {
         if ch >= 'a' && ch <= 'z' {
             buf[i] = ch - ('a' - 'A')
         } else {

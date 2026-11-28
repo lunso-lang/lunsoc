@@ -6,7 +6,7 @@ pub struct Vec[T] {
     cap: u64
     arena: *mem.Arena
 
-    pub fun init(self: *Vec[T], arena: *mem.Arena, initial_cap: u64): i64 {
+    pub fun init(self: *Self, arena: *mem.Arena, initial_cap: u64): i64 {
         if (self as u64) == 0 || (arena as u64) == 0 {
             return -22
         }
@@ -21,7 +21,7 @@ pub struct Vec[T] {
         return self.reserve(initial_cap)
     }
 
-    pub fun reserve(self: *Vec[T], min_cap: u64): i64 {
+    pub fun reserve(self: *Self, min_cap: u64): i64 {
         if (self as u64) == 0 || (self.arena as u64) == 0 {
             return -22
         }
@@ -67,7 +67,7 @@ pub struct Vec[T] {
         return 0
     }
 
-    pub fun alloc_slot(self: *Vec[T], out: **T): i64 {
+    pub fun alloc_slot(self: *Self, out: **T): i64 {
         if (self as u64) == 0 || (out as u64) == 0 {
             return -22
         }
@@ -82,7 +82,7 @@ pub struct Vec[T] {
         return 0
     }
 
-    pub fun push(self: *Vec[T], value: *const T): i64 {
+    pub fun push(self: *Self, value: *const T): i64 {
         if (self as u64) == 0 || (value as u64) == 0 {
             return -22
         }
@@ -97,7 +97,7 @@ pub struct Vec[T] {
         return 0
     }
 
-    pub fun push_value(self: *Vec[T], value: T): i64 {
+    pub fun push_value(self: *Self, value: T): i64 {
         if (self as u64) == 0 {
             return -22
         }
@@ -112,7 +112,7 @@ pub struct Vec[T] {
         return 0
     }
 
-    pub fun append_slice(self: *Vec[T], items: []const T): i64 {
+    pub fun append_slice(self: *Self, items: []const T): i64 {
         if (self as u64) == 0 {
             return -22
         }
@@ -138,7 +138,7 @@ pub struct Vec[T] {
         return 0
     }
 
-    pub fun pop(self: *Vec[T], out: *T): bool {
+    pub fun pop(self: *Self, out: *T): bool {
         if (self as u64) == 0 || self.len == 0 {
             return false
         }
@@ -149,7 +149,7 @@ pub struct Vec[T] {
         return true
     }
 
-    pub fun get(self: *const Vec[T], index: u64, out: *T): bool {
+    pub fun get(self: *const Self, index: u64, out: *T): bool {
         if (self as u64) == 0 || (out as u64) == 0 || index >= self.len {
             return false
         }
@@ -157,7 +157,7 @@ pub struct Vec[T] {
         return true
     }
 
-    pub fun get_ptr(self: *Vec[T], index: u64, out: **T): bool {
+    pub fun get_ptr(self: *Self, index: u64, out: **T): bool {
         if (self as u64) == 0 || (out as u64) == 0 || index >= self.len {
             return false
         }
@@ -165,13 +165,13 @@ pub struct Vec[T] {
         return true
     }
 
-    pub fun clear(self: *Vec[T]) {
+    pub fun clear(self: *Self) {
         if (self as u64) != 0 {
             self.len = 0
         }
     }
 
-    pub fun as_slice(self: *Vec[T]): []T {
+    pub fun as_slice(self: *Self): []T {
         if (self as u64) == 0 || self.len == 0 {
             var empty: []T
             return empty
@@ -179,7 +179,7 @@ pub struct Vec[T] {
         return self.data[0..self.len]
     }
 
-    pub fun as_const_slice(self: *const Vec[T]): []const T {
+    pub fun as_const_slice(self: *const Self): []const T {
         if (self as u64) == 0 || self.len == 0 {
             var empty: []const T
             return empty

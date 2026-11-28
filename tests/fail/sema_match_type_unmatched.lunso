@@ -1,0 +1,11 @@
+// expect-stderr: match type did not match any arm
+fun check[T](v: T): i32 {
+    match type T {
+        bool => return 1
+        i64 => return 2
+    }
+}
+
+fun main(): i32 {
+    return check(42)
+}

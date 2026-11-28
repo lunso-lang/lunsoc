@@ -64,8 +64,7 @@ fun file_available(l: *Loader, p: []u8): bool {
 }
 
 pub fun find_file_at(files: []ModuleFile, offset: u32): i64 {
-    for var i: i64 = 0; i < len(files); i += 1 {
-        var f = files[i]
+    for i, f in files {
         if offset >= f.start && offset <= f.start + f.length {
             return i
         }
@@ -79,7 +78,7 @@ pub fun print_caret(src: []u8, file_start: u32, file_end: u32, offset: u32, line
     }
     var line_start = offset
     for line_start > file_start {
-        var prev = src[(line_start - 1) as i64]
+        var prev = src[line_start - 1]
         if prev == '\n' || prev == '\r' {
             break
         }
@@ -87,7 +86,7 @@ pub fun print_caret(src: []u8, file_start: u32, file_end: u32, offset: u32, line
     }
     var line_end = offset
     for line_end < file_end {
-        var ch = src[line_end as i64]
+        var ch = src[line_end]
         if ch == '\n' || ch == '\r' {
             break
         }
@@ -107,7 +106,7 @@ pub fun print_caret(src: []u8, file_start: u32, file_end: u32, offset: u32, line
     io.eprint(" | ")
     var p = line_start
     for p < offset && p < line_end {
-        if src[p as i64] == '\t' {
+        if src[p] == '\t' {
             io.eprint("\t")
         } else {
             io.eprint(" ")
@@ -131,9 +130,9 @@ pub fun report(program: *ModuleProgram, offset: u32, message: []u8) {
         var line: u64 = 1
         var col: u64 = 1
         for var p = f.start; p < offset; p += 1 {
-            var b = src[p as i64]
+            var b = src[p]
             if b == '\r' || b == '\n' {
-                if b == '\r' && p + 1 < offset && src[(p + 1) as i64] == '\n' {
+                if b == '\r' && p + 1 < offset && src[p + 1] == '\n' {
                     p += 1
                 }
                 line += 1
@@ -178,8 +177,8 @@ fun span_bytes(tree: *Ast, s: Span): []u8 {
 
 fun item_name(tree: *Ast, id: u32): Span {
     var nodes = tree.nodes.as_slice()
-    var pos = tree.nodes.as_slice()[id as i64].pos
-    return Span { offset: pos, length: nodes[id as i64].a }
+    var pos = tree.nodes.as_slice()[id].pos
+    return Span { offset: pos, length: nodes[id].a }
 }
 
 fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
@@ -208,8 +207,7 @@ fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
             if !file_available(l, file_path) {
                 file_path = ""
                 var fname = str.concat(l.arena, name, ".lunso")
-                for var k: i64 = 0; k < len(l.include_dirs); k += 1 {
-                    var inc = l.include_dirs[k]
+                for inc in l.include_dirs {
                     if len(inc) == 0 { continue }
                     var cand = path.join(l.arena, inc, fname)
                     if file_available(l, cand) {
@@ -229,7 +227,7 @@ fun get_module(l: *Loader, name: []u8, offset: u32, out: *u32): bool {
         state: LoadState.Unloaded,
         parent: NO_MODULE,
         declarations: NodeRange { first: 0, count: 0 },
-        scope: AstModuleScope { bindings: vec.Vec[AstBinding] { data: 0 as *AstBinding, len: 0, cap: 0, arena: l.arena } },
+        scope: AstModuleScope { bindings: vec.Vec[AstBinding] { arena: l.arena } },
     }
     if entry.scope.bindings.init(l.arena, 16) < 0 {
         return err_at(l, offset, "could not allocate module scope")
@@ -269,15 +267,15 @@ pub fun format_unexpected_byte(arena: *mem.Arena, b: u8): []u8 {
     for var i: i64 = 0; i < 18; i += 1 {
         buf[i] = prefix[i]
     }
-    buf[18] = hex[((b >> 4) & 15) as i64]
-    buf[19] = hex[(b & 15) as i64]
+    buf[18] = hex[(b >> 4) & 15]
+    buf[19] = hex[b & 15]
     return buf[0..20]
 }
 
 fun parse_file(l: *Loader, mod_id: u32, source: []u8, offset: u32): bool {
     var mods = l.modules.as_slice()
     var base: u32 = 0
-    if !add_source(l, mods[mod_id as i64].file, source, offset, &base) {
+    if !add_source(l, mods[mod_id].file, source, offset, &base) {
         return false
     }
     var slice = l.program.tree.source[(base as i64)..((base as i64) + len(source))]
@@ -285,44 +283,44 @@ fun parse_file(l: *Loader, mod_id: u32, source: []u8, offset: u32): bool {
     var decls: NodeRange
     if !parser.parse_append(l.arena, &l.program.tree, slice, base, mod_id, &decls, &perr) {
         if perr.token.kind == lexer.TokenKind.Invalid {
-            var byte = slice[perr.token.offset as i64]
+            var byte = slice[perr.token.offset]
             return err_at(l, base + (perr.token.offset as u32), format_unexpected_byte(l.arena, byte))
         }
         return err_at(l, base + (perr.token.offset as u32), perr.message)
     }
-    l.modules.data[mod_id as i64].declarations = decls
+    l.modules.data[mod_id].declarations = decls
     return true
 }
 
 fun declaration_info(tree: *Ast, id: u32, out_name: *Span, out_kind: *AstBindingKind, out_pub: *bool): bool {
     var nodes = tree.nodes.as_slice()
-    var node = nodes[id as i64]
+    var node = nodes[id]
     if node.kind == AstKind.Function {
         var fns = tree.functions.as_slice()
-        *out_name = fns[node.a as i64].name
-        *out_pub = fns[node.a as i64].public
+        *out_name = fns[node.a].name
+        *out_pub = fns[node.a].public
         *out_kind = AstBindingKind.Function
         return true
     }
     if node.kind == AstKind.Struct {
         var ss = tree.structs.as_slice()
-        *out_name = ss[node.a as i64].name
-        *out_pub = ss[node.a as i64].public
+        *out_name = ss[node.a].name
+        *out_pub = ss[node.a].public
         *out_kind = AstBindingKind.Struct
         return true
     }
     if node.kind == AstKind.Enum {
         var es = tree.enums.as_slice()
-        *out_name = es[node.a as i64].name
-        *out_pub = es[node.a as i64].public
+        *out_name = es[node.a].name
+        *out_pub = es[node.a].public
         *out_kind = AstBindingKind.Enum
         return true
     }
     if node.kind == AstKind.Const {
         var cs = tree.consts.as_slice()
-        if !cs[node.a as i64].local {
-            *out_name = cs[node.a as i64].name
-            *out_pub = cs[node.a as i64].public
+        if !cs[node.a].local {
+            *out_name = cs[node.a].name
+            *out_pub = cs[node.a].public
             *out_kind = AstBindingKind.Const
             return true
         }
@@ -332,9 +330,9 @@ fun declaration_info(tree: *Ast, id: u32, out_name: *Span, out_kind: *AstBinding
 
 fun binding_named(mod: *ModuleEntry, name: []u8, out: *AstBinding): bool {
     var bs = mod.scope.bindings.as_slice()
-    for var i: i64 = 0; i < len(bs); i += 1 {
-        if str.equals(bs[i].name, name) {
-            *out = bs[i]
+    for b in bs {
+        if str.equals(b.name, name) {
+            *out = b
             return true
         }
     }
@@ -342,7 +340,7 @@ fun binding_named(mod: *ModuleEntry, name: []u8, out: *AstBinding): bool {
 }
 
 fun bind_name(l: *Loader, owner: u32, name: []u8, kind: AstBindingKind, index: u32, offset: u32): bool {
-    var mod = &l.modules.data[owner as i64]
+    var mod = &l.modules.data[owner]
     var prior: AstBinding
     if binding_named(mod, name, &prior) {
         if prior.kind == kind && prior.index == index {
@@ -354,7 +352,7 @@ fun bind_name(l: *Loader, owner: u32, name: []u8, kind: AstBindingKind, index: u
     var tree = &l.program.tree
     var children = tree.children.as_slice()
     for var i: u32 = 0; i < mod.declarations.count; i += 1 {
-        var decl = children[(mod.declarations.first + i) as i64]
+        var decl = children[mod.declarations.first + i]
         var existing: Span
         var dk: AstBindingKind
         var pub_flag = false
@@ -364,7 +362,7 @@ fun bind_name(l: *Loader, owner: u32, name: []u8, kind: AstBindingKind, index: u
         }
     }
     var b = AstBinding { name: name, index: index, offset: offset, kind: kind }
-    if (l.modules.data[owner as i64].scope.bindings).push(&b) < 0 {
+    if (l.modules.data[owner].scope.bindings).push(&b) < 0 {
         return err_at(l, offset, "could not allocate module binding")
     }
     return true
@@ -376,7 +374,7 @@ fun module_path_str(l: *Loader, path: NodeRange): []u8 {
     var total: i64 = 0
     for var i: u32 = 0; i < path.count; i += 1 {
         if i > 0 { total += 1 }
-        var part = item_name(tree, children[(path.first + i) as i64])
+        var part = item_name(tree, children[path.first + i])
         total += part.length as i64
     }
     var buf: *u8
@@ -386,7 +384,7 @@ fun module_path_str(l: *Loader, path: NodeRange): []u8 {
     var pos: i64 = 0
     for var i: u32 = 0; i < path.count; i += 1 {
         if i > 0 { buf[pos] = '/'; pos += 1 }
-        var s = span_bytes(tree, item_name(tree, children[(path.first + i) as i64]))
+        var s = span_bytes(tree, item_name(tree, children[path.first + i]))
         for var j: i64 = 0; j < len(s); j += 1 {
             buf[pos] = s[j]
             pos += 1
@@ -397,7 +395,7 @@ fun module_path_str(l: *Loader, path: NodeRange): []u8 {
 
 fun child_module(l: *Loader, parent: u32, name: []u8, offset: u32, out: *u32): bool {
     var mods = l.modules.as_slice()
-    var p = str.concat3(l.arena, mods[parent as i64].name, "/", name)
+    var p = str.concat3(l.arena, mods[parent].name, "/", name)
     return get_module(l, p, offset, out)
 }
 
@@ -405,14 +403,14 @@ fun import_all(l: *Loader, owner: u32, target: u32, offset: u32): bool {
     var tree = &l.program.tree
     var children = tree.children.as_slice()
     var nodes = tree.nodes.as_slice()
-    var decls = l.modules.data[target as i64].declarations
+    var decls = l.modules.data[target].declarations
     for var i: u32 = 0; i < decls.count; i += 1 {
-        var id = children[(decls.first + i) as i64]
+        var id = children[decls.first + i]
         var name: Span
         var kind: AstBindingKind
         var is_pub = false
         if declaration_info(tree, id, &name, &kind, &is_pub) && is_pub {
-            if !bind_name(l, owner, span_bytes(tree, name), kind, nodes[id as i64].a, offset) {
+            if !bind_name(l, owner, span_bytes(tree, name), kind, nodes[id].a, offset) {
                 return false
             }
         }
@@ -424,11 +422,11 @@ fun import_selected(l: *Loader, owner: u32, target: u32, item: AstImport): bool 
     var tree = &l.program.tree
     var children = tree.children.as_slice()
     var nodes = tree.nodes.as_slice()
-    var decls = l.modules.data[target as i64].declarations
+    var decls = l.modules.data[target].declarations
     for var i: u32 = 0; i < item.items.count; i += 1 {
-        var id = children[(item.items.first + i) as i64]
+        var id = children[item.items.first + i]
         var req = item_name(tree, id)
-        var alias_id = nodes[id as i64].b
+        var alias_id = nodes[id].b
         var name_span = req
         if alias_id != NODE_NONE { name_span = item_name(tree, alias_id) }
         var req_bytes = span_bytes(tree, req)
@@ -436,7 +434,7 @@ fun import_selected(l: *Loader, owner: u32, target: u32, item: AstImport): bool 
         var found = false
         var is_priv = false
         for var j: u32 = 0; j < decls.count; j += 1 {
-            var decl_id = children[(decls.first + j) as i64]
+            var decl_id = children[decls.first + j]
             var exported: Span
             var kind: AstBindingKind
             var is_pub = false
@@ -447,7 +445,7 @@ fun import_selected(l: *Loader, owner: u32, target: u32, item: AstImport): bool 
                 continue
             }
             if is_pub {
-                if !bind_name(l, owner, name_bytes, kind, nodes[decl_id as i64].a, req.offset) {
+                if !bind_name(l, owner, name_bytes, kind, nodes[decl_id].a, req.offset) {
                     return false
                 }
                 found = true
@@ -476,9 +474,9 @@ fun import_selected(l: *Loader, owner: u32, target: u32, item: AstImport): bool 
 fun load_import(l: *Loader, owner: u32, id: u32): bool {
     var tree = &l.program.tree
     var nodes = tree.nodes.as_slice()
-    var offset = nodes[id as i64].pos
+    var offset = nodes[id].pos
     var imports = tree.imports.as_slice()
-    var item = imports[nodes[id as i64].a as i64]
+    var item = imports[nodes[id].a]
     var name = module_path_str(l, item.path)
     var target: u32 = NO_MODULE
     if !get_module(l, name, offset, &target) {
@@ -499,7 +497,7 @@ fun load_import(l: *Loader, owner: u32, id: u32): bool {
         return import_selected(l, owner, target, item)
     }
     var children = tree.children.as_slice()
-    var last = children[(item.path.first + item.path.count - 1) as i64]
+    var last = children[item.path.first + item.path.count - 1]
     var alias_span = item.alias
     if alias_span.length == 0 {
         alias_span = item_name(tree, last)
@@ -510,7 +508,7 @@ fun load_import(l: *Loader, owner: u32, id: u32): bool {
 fun add_qualified(l: *Loader, q: AstQualified): bool {
     if l.program.tree.qualified.push(&q) < 0 {
         var nodes = l.program.tree.nodes.as_slice()
-        return err_at(l, nodes[q.node as i64].pos, "could not allocate qualified reference")
+        return err_at(l, nodes[q.node].pos, "could not allocate qualified reference")
     }
     return true
 }
@@ -520,7 +518,7 @@ fun qualify(l: *Loader, owner: u32, id: u32, parts: []Span, expected: AstBinding
     var tree = &l.program.tree
     var first_name = span_bytes(tree, parts[0])
     var binding: AstBinding
-    if !binding_named(&l.modules.data[owner as i64], first_name, &binding) || binding.kind != AstBindingKind.Module {
+    if !binding_named(&l.modules.data[owner], first_name, &binding) || binding.kind != AstBindingKind.Module {
         if expected != AstBindingKind.Struct {
             return true
         }
@@ -542,11 +540,11 @@ fun qualify(l: *Loader, owner: u32, id: u32, parts: []Span, expected: AstBinding
         return false
     }
     var req_bytes = span_bytes(tree, requested)
-    var decls = l.modules.data[target as i64].declarations
+    var decls = l.modules.data[target].declarations
     var children = tree.children.as_slice()
     var nodes = tree.nodes.as_slice()
     for var i: u32 = 0; i < decls.count; i += 1 {
-        var decl_id = children[(decls.first + i) as i64]
+        var decl_id = children[decls.first + i]
         var dname: Span
         var dkind: AstBindingKind
         var is_pub = false
@@ -565,7 +563,7 @@ fun qualify(l: *Loader, owner: u32, id: u32, parts: []Span, expected: AstBinding
         }
         return add_qualified(l, AstQualified {
             node: id,
-            index: nodes[decl_id as i64].a,
+            index: nodes[decl_id].a,
             kind: dkind,
             inaccessible: inacc,
         })
@@ -581,12 +579,12 @@ fun member_path(tree: *Ast, id: u32, parts: *Span, cap: i64): i64 {
     var nodes = tree.nodes.as_slice()
     var start = cap
     var cur = id
-    for nodes[cur as i64].kind == AstKind.Member && start > 1 {
+    for nodes[cur].kind == AstKind.Member && start > 1 {
         start -= 1
-        parts[start] = Span { offset: nodes[cur as i64].pos, length: nodes[cur as i64].b }
-        cur = nodes[cur as i64].a
+        parts[start] = Span { offset: nodes[cur].pos, length: nodes[cur].b }
+        cur = nodes[cur].a
     }
-    if start == cap || nodes[cur as i64].kind != AstKind.Identifier {
+    if start == cap || nodes[cur].kind != AstKind.Identifier {
         return cap
     }
     start -= 1
@@ -600,28 +598,28 @@ fun resolve_references(l: *Loader, owner: u32, first: u32, end: u32, member_pref
     var children = tree.children.as_slice()
     var parts: [64]Span
     for var id = first; id < end; id += 1 {
-        var node = nodes[id as i64]
+        var node = nodes[id]
         if node.kind == AstKind.QualifiedType {
             if node.b > 64 {
                 return err_at(l, node.pos, "qualified path is too deep")
             }
             for var i: u32 = 0; i < node.b; i += 1 {
-                parts[i as i64] = item_name(tree, children[(node.a + i) as i64])
+                parts[i] = item_name(tree, children[node.a + i])
             }
             if !qualify(l, owner, id, parts[0..(node.b as i64)], AstBindingKind.Struct) {
                 return false
             }
         } else if (node.kind == AstKind.Call || node.kind == AstKind.GenericType ||
                   node.kind == AstKind.StructLiteral ||
-                  (node.kind == AstKind.Member && !member_prefixes[(id - first) as i64])) {
+                  (node.kind == AstKind.Member && !member_prefixes[id - first])) {
             var is_call = node.kind == AstKind.Call
             var is_type = node.kind == AstKind.GenericType || node.kind == AstKind.StructLiteral
             var base = id
             if is_call || is_type {
-                base = children[node.a as i64]
+                base = children[node.a]
             }
-            if nodes[base as i64].kind == AstKind.GenericCallee {
-                base = children[nodes[base as i64].a as i64]
+            if nodes[base].kind == AstKind.GenericCallee {
+                base = children[nodes[base].a]
             }
             var start = member_path(tree, base, &parts[0], 64)
             var count = 64 - start
@@ -650,10 +648,10 @@ fun finish_module(l: *Loader, mod_id: u32, first: u32, end: u32): bool {
     var tree = &l.program.tree
     var children = tree.children.as_slice()
     var nodes = tree.nodes.as_slice()
-    var decls = l.modules.data[mod_id as i64].declarations
+    var decls = l.modules.data[mod_id].declarations
     for var i: u32 = 0; i < decls.count; i += 1 {
-        var id = children[(decls.first + i) as i64]
-        if nodes[id as i64].kind == AstKind.Import {
+        var id = children[decls.first + i]
+        if nodes[id].kind == AstKind.Import {
             if !load_import(l, mod_id, id) {
                 return false
             }
@@ -665,30 +663,30 @@ fun finish_module(l: *Loader, mod_id: u32, first: u32, end: u32): bool {
     var prefixes: vec.Vec[bool]
     var count = (end - first) as u64
     if prefixes.init(l.arena, count) < 0 {
-        return err_at(l, nodes[first as i64].pos, "could not allocate prefix table")
+        return err_at(l, nodes[first].pos, "could not allocate prefix table")
     }
     for var i: u64 = 0; i < count; i += 1 {
         prefixes.push_value(false)
     }
     for var id = first; id < end; id += 1 {
-        var node = nodes[id as i64]
+        var node = nodes[id]
         var prefix = NODE_NONE
         if node.kind == AstKind.Member {
             prefix = node.a
         } else if node.kind == AstKind.Call || node.kind == AstKind.GenericType || node.kind == AstKind.GenericCallee || node.kind == AstKind.StructLiteral {
-            prefix = children[node.a as i64]
+            prefix = children[node.a]
         } else {
             continue
         }
-        if nodes[prefix as i64].kind == AstKind.Member {
-            prefixes.data[(prefix - first) as i64] = true
+        if nodes[prefix].kind == AstKind.Member {
+            prefixes.data[prefix - first] = true
         }
     }
     return resolve_references(l, mod_id, first, end, prefixes.as_slice())
 }
 
 fun load_module(l: *Loader, mod_id: u32, owner: u32, offset: u32): bool {
-    var st = l.modules.data[mod_id as i64].state
+    var st = l.modules.data[mod_id].state
     if st == LoadState.Loaded { return true }
     if st == LoadState.Loading {
         return err_at(l, offset, "cyclic module import")
@@ -696,9 +694,9 @@ fun load_module(l: *Loader, mod_id: u32, owner: u32, offset: u32): bool {
     if l.depth == MAX_MODULE_DEPTH {
         return err_at(l, offset, "module import nesting limit exceeded")
     }
-    var file_path = l.modules.data[mod_id as i64].file
+    var file_path = l.modules.data[mod_id].file
     if len(file_path) == 0 {
-        l.modules.data[mod_id as i64].state = LoadState.Loaded
+        l.modules.data[mod_id].state = LoadState.Loaded
         return true
     }
     var raw: []u8
@@ -707,8 +705,8 @@ fun load_module(l: *Loader, mod_id: u32, owner: u32, offset: u32): bool {
         return err_at(l, offset, "could not read imported module")
     }
     l.depth += 1
-    l.modules.data[mod_id as i64].state = LoadState.Loading
-    l.modules.data[mod_id as i64].parent = owner
+    l.modules.data[mod_id].state = LoadState.Loading
+    l.modules.data[mod_id].parent = owner
     var first = l.program.tree.nodes.len as u32
     var ok = parse_file(l, mod_id, raw, offset)
     if ok {
@@ -718,7 +716,7 @@ fun load_module(l: *Loader, mod_id: u32, owner: u32, offset: u32): bool {
     }
     l.depth -= 1
     if ok {
-        l.modules.data[mod_id as i64].state = LoadState.Loaded
+        l.modules.data[mod_id].state = LoadState.Loaded
     }
     return ok
 }
@@ -761,12 +759,12 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
     var l = Loader {
         arena: arena,
         program: out,
-        source_buf: vec.Vec[u8] { data: 0 as *u8, len: 0, cap: 0, arena: arena },
+        source_buf: vec.Vec[u8] { arena: arena },
         root: path.dir_prefix(entry_path),
         std_root: select_std_root(arena, std_dir),
         include_dirs: include_dirs,
         overlays: overlays,
-        modules: vec.Vec[ModuleEntry] { data: 0 as *ModuleEntry, len: 0, cap: 0, arena: arena },
+        modules: vec.Vec[ModuleEntry] { arena: arena },
         depth: 1,
     }
     if l.source_buf.init(arena, (len(source) + 1024) as u64) < 0 {
@@ -781,7 +779,7 @@ pub fun load_with_overlays(arena: *mem.Arena, entry_path: []u8, source: []u8, st
         state: LoadState.Loading,
         parent: NO_MODULE,
         declarations: NodeRange { first: 0, count: 0 },
-        scope: AstModuleScope { bindings: vec.Vec[AstBinding] { data: 0 as *AstBinding, len: 0, cap: 0, arena: arena } },
+        scope: AstModuleScope { bindings: vec.Vec[AstBinding] { arena: arena } },
     }
     if entry.scope.bindings.init(arena, 16) < 0 {
         return false

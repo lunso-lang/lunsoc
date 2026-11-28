@@ -21,6 +21,7 @@ pub enum TokenKind : u16 {
     Defer,
     Var,
     Or,
+    Null,
     Identifier,
     Integer,
     Float,
@@ -109,25 +110,25 @@ fun peek(l: *Lexer): u8 {
     if l.offset >= (len(l.source) as u64) {
         return 0
     }
-    return l.source[l.offset as i64]
+    return l.source[l.offset]
 }
 
 fun peek_next(l: *Lexer): u8 {
     if l.offset + 1 >= (len(l.source) as u64) {
         return 0
     }
-    return l.source[(l.offset + 1) as i64]
+    return l.source[l.offset + 1]
 }
 
 fun advance(l: *Lexer): u8 {
-    var b = l.source[l.offset as i64]
+    var b = l.source[l.offset]
     l.offset += 1
     l.column += 1
     return b
 }
 
 fun match_byte(l: *Lexer, expected: u8): bool {
-    if l.offset >= (len(l.source) as u64) || l.source[l.offset as i64] != expected {
+    if l.offset >= (len(l.source) as u64) || l.source[l.offset] != expected {
         return false
     }
     advance(l)
@@ -186,6 +187,7 @@ fun keyword_or_ident(text: []u8): TokenKind {
     if str.equals(text, "defer") { return TokenKind.Defer }
     if str.equals(text, "var") { return TokenKind.Var }
     if str.equals(text, "or") { return TokenKind.Or }
+    if str.equals(text, "null") { return TokenKind.Null }
     return TokenKind.Identifier
 }
 
@@ -443,6 +445,7 @@ pub fun token_name(kind: TokenKind): []u8 {
         TokenKind.Defer => return "DEFER"
         TokenKind.Var => return "VAR"
         TokenKind.Or => return "OR"
+        TokenKind.Null => return "NULL"
         TokenKind.Identifier => return "IDENTIFIER"
         TokenKind.Integer => return "INTEGER"
         TokenKind.Float => return "FLOAT"
