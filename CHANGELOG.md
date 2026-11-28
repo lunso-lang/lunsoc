@@ -2,6 +2,20 @@
 
 All notable changes to `lunsoc` are documented in this file.
 
+## [0.6.0] - 2026-11-28
+
+### Language & Compiler
+- **Tagged unions (extended `enum`)**:
+  - `enum` variants can now carry payloads (`enum Value { None, Int(i64), Pair(i32, i32) }`) and generic type parameters (`enum Option[T] { Some(T), None }`).
+  - `match` supports destructuring variant payloads (`Value.Int(n) => ...`), `_` wildcards (`Value.Pair(x, _) => ...`), and exhaustiveness checking.
+  - Plain enums without `: backing` default to `i32` (`enum Plain { A, B }`).
+- **Traits & generic bounds**:
+  - Added `trait Name { ... }` declarations and `struct`/`enum` conformance lists (`struct Point : Eq, Hash`, `enum Color : u8, Eq, Hash`, `enum Value : Eq, Hash`).
+  - Added generic trait bounds (`[T: Eq]`, `[K: Eq + Hash, V]`), validated on monomorphization.
+  - Built-in `Eq` and `Hash` support for primitives (`i8..u64`, `bool`, and `Eq` for floats/pointers), `[]u8`/`[]const u8`, plain enums, and auto-derived `Eq`/`Hash` on structs and tagged unions (with custom `eq`/`hash` method override support).
+  - Added `==` / `!=` support for `[]u8`/`[]const u8`, structs, and tagged unions implementing `Eq`.
+- Adopted `0.5.1` range loops (`0..n`) and single-symbol `import std.collections.Vec` across `std/` and `src/`.
+
 ## [0.5.1] - 2026-11-28
 
 ### Breaking Changes
