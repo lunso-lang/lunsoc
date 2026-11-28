@@ -109,25 +109,25 @@ fun peek(l: *Lexer): u8 {
     if l.offset >= (len(l.source) as u64) {
         return 0
     }
-    return l.source[l.offset as i64]
+    return l.source[l.offset]
 }
 
 fun peek_next(l: *Lexer): u8 {
     if l.offset + 1 >= (len(l.source) as u64) {
         return 0
     }
-    return l.source[(l.offset + 1) as i64]
+    return l.source[l.offset + 1]
 }
 
 fun advance(l: *Lexer): u8 {
-    var b = l.source[l.offset as i64]
+    var b = l.source[l.offset]
     l.offset += 1
     l.column += 1
     return b
 }
 
 fun match_byte(l: *Lexer, expected: u8): bool {
-    if l.offset >= (len(l.source) as u64) || l.source[l.offset as i64] != expected {
+    if l.offset >= (len(l.source) as u64) || l.source[l.offset] != expected {
         return false
     }
     advance(l)

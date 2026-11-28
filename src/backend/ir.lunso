@@ -178,7 +178,7 @@ fun uses_storage(t: SemaType): bool {
 fun make_result_type(l: *Lowering, inner: SemaType): SemaType {
     var al: u32 = 8
     if inner.kind == TypeKind.Struct && (inner.record as u64) < l.sem.records.len {
-        var ral = l.sem.records.data[inner.record as i64].alignment
+        var ral = l.sem.records.data[inner.record].alignment
         if ral > al { al = ral }
     }
     var val_off: u32 = 24
@@ -200,23 +200,23 @@ fun make_result_type(l: *Lowering, inner: SemaType): SemaType {
 
 fun lower_node(l: *Lowering, id: u32): SemaNode {
     if l.current_fn < (l.sem.functions.len as u32) {
-        var sf = &l.sem.functions.data[l.current_fn as i64]
+        var sf = &l.sem.functions.data[l.current_fn]
         if sf.nodes.len > 0 {
             var ast_fns = l.tree.functions.as_slice()
-            var first = ast_fns[sf.declaration as i64].nodes.first
-            return sf.nodes.data[(id - first) as i64]
+            var first = ast_fns[sf.declaration].nodes.first
+            return sf.nodes.data[id - first]
         }
     }
     var sn = l.sem.nodes.as_slice()
-    return sn[id as i64]
+    return sn[id]
 }
 
 fun lower_const(l: *Lowering, info: SemaNode): u32 {
     var consts = l.sem.constants.as_slice()
-    var sc = consts[info.binding as i64]
+    var sc = consts[info.binding]
     if sc.str_node != NODE_NONE {
         var nodes = l.tree.nodes.as_slice()
-        var sn_node = nodes[sc.str_node as i64]
+        var sn_node = nodes[sc.str_node]
         var st = lower_node(l, sc.str_node).type_info
         var bytes = emit_value(l, IrOp.Bytes, st, sn_node.pos, sn_node.a, 0)
         if info.type_info.kind == TypeKind.Slice {
@@ -242,7 +242,7 @@ fun lower_index(l: *Lowering, id: u32): u32 {
 
 fun lower_memory_address(l: *Lowering, id: u32): u32 {
     var nodes = l.tree.nodes.as_slice()
-    var node = nodes[id as i64]
+    var node = nodes[id]
     if node.kind == AstKind.Index {
         var base = lower_expression(l, node.a)
         var idx = lower_index(l, node.b)
@@ -259,7 +259,7 @@ fun lower_memory_address(l: *Lowering, id: u32): u32 {
     var bt = lower_node(l, node.a).type_info
     if bt.kind == TypeKind.Pointer {
         var pts = l.sem.pointees.as_slice()
-        bt = pts[bt.pointee as i64]
+        bt = pts[bt.pointee]
     }
     return emit_value(l, IrOp.FieldAddress, bt, base_val, lower_node(l, id).binding, 0)
 }
@@ -267,16 +267,16 @@ fun lower_memory_address(l: *Lowering, id: u32): u32 {
 fun lower_call(l: *Lowering, id: u32): u32 {
     var info = lower_node(l, id)
     var nodes = l.tree.nodes.as_slice()
-    var call = nodes[id as i64]
+    var call = nodes[id]
     var children = l.tree.children.as_slice()
     if info.builtin == SemaBuiltin.SizeOf {
         return emit_value(l, IrOp.Immediate, info.type_info, info.binding, 0, 0)
     }
     if info.builtin == SemaBuiltin.Fail {
-        return lower_expression(l, children[(call.a + 1) as i64])
+        return lower_expression(l, children[call.a + 1])
     }
     if info.builtin != SemaBuiltin.None {
-        var arg = children[(call.a + 1) as i64]
+        var arg = children[call.a + 1]
         var val = lower_expression(l, arg)
         var op = IrOp.Data
         if info.builtin == SemaBuiltin.Len {
@@ -288,16 +288,16 @@ fun lower_call(l: *Lowering, id: u32): u32 {
     // Lower arguments first so nested calls do not interleave in mod.arguments.
     var temp_vals: [64]u32
     if info.is_indirect_call {
-        var callee_val = lower_expression(l, children[call.a as i64])
+        var callee_val = lower_expression(l, children[call.a])
         for var i: u32 = 0; i < count && !l.failed; i += 1 {
-            var val = lower_expression(l, children[(call.a + 1 + i) as i64])
+            var val = lower_expression(l, children[call.a + 1 + i])
             if i < 64 {
-                temp_vals[i as i64] = val
+                temp_vals[i] = val
             }
         }
         var first = l.mod.arguments.len as u32
         for var i: u32 = 0; i < count && !l.failed; i += 1 {
-            if l.mod.arguments.push_value(temp_vals[i as i64]) < 0 {
+            if l.mod.arguments.push_value(temp_vals[i]) < 0 {
                 l.failed = true
             }
         }
@@ -306,17 +306,17 @@ fun lower_call(l: *Lowering, id: u32): u32 {
     }
     var arg_offset: u32 = 0
     if info.method_call != 0 {
-        var callee_id = children[call.a as i64]
-        if nodes[callee_id as i64].kind == AstKind.GenericCallee {
-            callee_id = children[nodes[callee_id as i64].a as i64]
+        var callee_id = children[call.a]
+        if nodes[callee_id].kind == AstKind.GenericCallee {
+            callee_id = children[nodes[callee_id].a]
         }
-        var recv_id = nodes[callee_id as i64].a
+        var recv_id = nodes[callee_id].a
         var recv_val: u32 = 0
         if info.method_call == 2 {
             var target = lower_node(l, recv_id)
             if uses_storage(target.type_info) || target.is_const {
                 recv_val = lower_expression(l, recv_id)
-            } else if nodes[recv_id as i64].kind != AstKind.Identifier {
+            } else if nodes[recv_id].kind != AstKind.Identifier {
                 recv_val = lower_memory_address(l, recv_id)
             } else {
                 recv_val = emit_value(l, IrOp.LocalAddress, target.type_info, target.binding, 0, 0)
@@ -328,31 +328,31 @@ fun lower_call(l: *Lowering, id: u32): u32 {
         arg_offset = 1
     }
     for var i: u32 = 0; i < count && !l.failed; i += 1 {
-        var val = lower_expression(l, children[(call.a + 1 + i) as i64])
+        var val = lower_expression(l, children[call.a + 1 + i])
         if (arg_offset + i) < 64 {
-            temp_vals[(arg_offset + i) as i64] = val
+            temp_vals[arg_offset + i] = val
         }
     }
     var total_count = count + arg_offset
-    var sf = l.sem.functions.data[info.binding as i64]
-    var fdecl = l.tree.functions.data[sf.declaration as i64]
+    var sf = l.sem.functions.data[info.binding]
+    var fdecl = l.tree.functions.data[sf.declaration]
     if fdecl.is_variadic && !l.failed {
         var fixed_total = fdecl.parameters.count - 1
         var var_count = total_count - fixed_total
         var first_var = l.mod.arguments.len as u32
         for var i: u32 = 0; i < var_count && !l.failed; i += 1 {
-            if l.mod.arguments.push_value(temp_vals[(fixed_total + i) as i64]) < 0 {
+            if l.mod.arguments.push_value(temp_vals[fixed_total + i]) < 0 {
                 l.failed = true
             }
         }
-        var var_slice_t = sf.param_types.data[(sf.param_types.len - 1) as i64]
+        var var_slice_t = sf.param_types.data[sf.param_types.len - 1]
         var var_val = emit_value(l, IrOp.VariadicSlice, var_slice_t, first_var, var_count, 0)
-        temp_vals[fixed_total as i64] = var_val
+        temp_vals[fixed_total] = var_val
         total_count = fixed_total + 1
     }
     var first = l.mod.arguments.len as u32
     for var i: u32 = 0; i < total_count && !l.failed; i += 1 {
-        if l.mod.arguments.push_value(temp_vals[i as i64]) < 0 {
+        if l.mod.arguments.push_value(temp_vals[i]) < 0 {
             l.failed = true
         }
     }
@@ -388,7 +388,7 @@ fun lower_logical(l: *Lowering, kind: AstKind, a: u32, b: u32, t: SemaType): u32
 fun lower_unconverted(l: *Lowering, id: u32): u32 {
     if l.failed { return 0 }
     var nodes = l.tree.nodes.as_slice()
-    var node = nodes[id as i64]
+    var node = nodes[id]
     var info = lower_node(l, id)
     if node.kind == AstKind.Identifier {
         if info.is_const {
@@ -410,12 +410,12 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
     if node.kind == AstKind.ArrayLiteral {
         var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
         var elems = l.sem.elements.as_slice()
-        var elem_t = elems[info.type_info.element_type as i64]
+        var elem_t = elems[info.type_info.element_type]
         var children = l.tree.children.as_slice()
         for var i: u32 = 0; i < node.b && !l.failed; i += 1 {
             var idx = emit_value(l, IrOp.Immediate, simple_type(TypeKind.I64), i, 0, 0)
             var dst = emit_value(l, IrOp.ElementAddress, info.type_info, addr, idx, 0)
-            var val = lower_expression(l, children[(node.a + i) as i64])
+            var val = lower_expression(l, children[node.a + i])
             if uses_storage(elem_t) {
                 emit(l, IrInstruction { op: IrOp.StorageInit, type_info: elem_t, result: 0, a: dst, b: val, c: 0 })
             } else {
@@ -429,8 +429,8 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
         emit(l, IrInstruction { op: IrOp.StorageInit, type_info: info.type_info, result: 0, a: addr, b: 0, c: 0 })
         var children = l.tree.children.as_slice()
         for var i: u32 = 1; i < node.b && !l.failed; i += 1 {
-            var init_id = children[(node.a + i) as i64]
-            var init_node = nodes[init_id as i64]
+            var init_id = children[node.a + i]
+            var init_node = nodes[init_id]
             var init_info = lower_node(l, init_id)
             var ft = init_info.type_info
             var dst = emit_value(l, IrOp.FieldAddress, ft, addr, init_info.binding, 0)
@@ -451,7 +451,7 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
         if uses_storage(target.type_info) || target.is_const {
             return lower_expression(l, node.a)
         }
-        if nodes[node.a as i64].kind != AstKind.Identifier {
+        if nodes[node.a].kind != AstKind.Identifier {
             return lower_memory_address(l, node.a)
         }
         return emit_value(l, IrOp.LocalAddress, target.type_info, target.binding, 0, 0)
@@ -465,7 +465,7 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
         }
         if info.is_enum_case {
             var evals = l.sem.enum_values.as_slice()
-            var bits = evals[info.binding as i64]
+            var bits = evals[info.binding]
             return emit_value(l, IrOp.Immediate, info.type_info, bits as u32, (bits >> 32) as u32, 0)
         }
         if node.kind == AstKind.Member && lower_node(l, node.a).type_info.kind == TypeKind.Any {
@@ -483,7 +483,7 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
     }
     if node.kind == AstKind.Slice {
         var base = lower_expression(l, node.a)
-        var rnode = nodes[node.b as i64]
+        var rnode = nodes[node.b]
         var start = lower_index(l, rnode.a)
         var end = lower_index(l, rnode.b)
         var src_t = lower_node(l, node.a).type_info
@@ -501,7 +501,7 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
         var err_lbl = new_label(l)
         emit_branch(l, ok_val, ok_lbl, err_lbl)
         emit_label(l, err_lbl)
-        var ret_t = l.sem.functions.data[l.current_fn as i64].result
+        var ret_t = l.sem.functions.data[l.current_fn].result
         var ret_slot = emit_value(l, IrOp.StorageAlloc, ret_t, 0, 0, 0)
         var bool_t = simple_type(TypeKind.Bool)
         var slice_t = simple_type(TypeKind.Slice)
@@ -525,7 +525,7 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
         return emit_value(l, IrOp.MemoryLoad, inner_t, val_addr, 0, 0)
     }
     if node.kind == AstKind.OrElse {
-        var oeh = l.tree.or_elses.as_slice()[node.a as i64]
+        var oeh = l.tree.or_elses.as_slice()[node.a]
         var r_addr = lower_expression(l, oeh.expr)
         var res_t = lower_node(l, oeh.expr).type_info
         var inner_t = info.type_info
@@ -583,7 +583,7 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
         return lower_expression(l, node.a)
     }
     if node.kind == AstKind.Negate {
-        var inner = nodes[node.a as i64]
+        var inner = nodes[node.a]
         if inner.kind == AstKind.Integer {
             return emit_value(l, IrOp.Number, info.type_info, inner.pos, inner.a, 1)
         }
@@ -600,7 +600,7 @@ fun lower_unconverted(l: *Lowering, id: u32): u32 {
         return lower_logical(l, node.kind, node.a, node.b, info.type_info)
     }
     if node.kind >= AstKind.Assign && node.kind <= AstKind.AssignShiftRight {
-        var tk = nodes[node.a as i64].kind
+        var tk = nodes[node.a].kind
         var memory = tk == AstKind.Index || tk == AstKind.Member || tk == AstKind.Dereference
         var target = lower_node(l, node.a).binding
         if memory {
@@ -668,7 +668,7 @@ fun lower_expression(l: *Lowering, id: u32): u32 {
         if orig_t.kind == TypeKind.Slice || orig_t.kind == TypeKind.Array {
             tag |= (orig_t.element as u32) << 8
         } else if orig_t.kind == TypeKind.Pointer {
-            tag |= (l.sem.pointees.data[orig_t.pointee as i64].kind as u32) << 8
+            tag |= (l.sem.pointees.data[orig_t.pointee].kind as u32) << 8
         }
         val = emit_value(l, IrOp.MakeAny, simple_type(TypeKind.Any), val, tag, 0)
     }
@@ -705,9 +705,9 @@ fun lower_expression(l: *Lowering, id: u32): u32 {
 
 fun lower_if(l: *Lowering, id: u32) {
     var nodes = l.tree.nodes.as_slice()
-    var node = nodes[id as i64]
+    var node = nodes[id]
     var brs = l.tree.if_branches.as_slice()
-    var arms = brs[node.b as i64]
+    var arms = brs[node.b]
     var cond = lower_expression(l, node.a)
     var yes = new_label(l)
     var no = new_label(l)
@@ -737,8 +737,8 @@ fun lower_if(l: *Lowering, id: u32) {
 fun lower_match(l: *Lowering, id: u32) {
     var nodes = l.tree.nodes.as_slice()
     var children = l.tree.children.as_slice()
-    var node = nodes[id as i64]
-    var scrut_id = children[node.a as i64]
+    var node = nodes[id]
+    var scrut_id = children[node.a]
     var scrut = lower_expression(l, scrut_id)
     var st = lower_node(l, scrut_id).type_info
     var end_lbl = new_label(l)
@@ -746,9 +746,9 @@ fun lower_match(l: *Lowering, id: u32) {
     var mvals = l.sem.match_values.as_slice()
 
     for var i: u32 = 0; i < arm_count && !l.failed; i += 1 {
-        var arm_id = children[(node.a + 1 + i) as i64]
-        var arm = nodes[arm_id as i64]
-        var body = children[(arm.a + arm.b - 1) as i64]
+        var arm_id = children[node.a + 1 + i]
+        var arm = nodes[arm_id]
+        var body = children[arm.a + arm.b - 1]
         if arm.b == 1 {
             lower_statement(l, body)
             if lower_node(l, body).falls_through {
@@ -764,8 +764,8 @@ fun lower_match(l: *Lowering, id: u32) {
             emit_jump(l, arm_body)
         } else {
             for var p: u32 = 0; p < arm.b - 1 && !l.failed; p += 1 {
-                var pat = children[(arm.a + p) as i64]
-                var bits = mvals[lower_node(l, pat).binding as i64]
+                var pat = children[arm.a + p]
+                var bits = mvals[lower_node(l, pat).binding]
                 var op = IrOp.Immediate
                 if st.kind == TypeKind.Bool { op = IrOp.Bool }
                 var pval = emit_value(l, op, st, bits as u32, (bits >> 32) as u32, 0)
@@ -795,11 +795,11 @@ fun lower_match(l: *Lowering, id: u32) {
 
 fun lower_loop(l: *Lowering, id: u32) {
     var nodes = l.tree.nodes.as_slice()
-    var node = nodes[id as i64]
+    var node = nodes[id]
     var header = AstForHeader { initializer: NODE_NONE, condition: node.a, step: NODE_NONE, label: Span { offset: 0, length: 0 } }
     if node.kind == AstKind.ForCStyle {
         var hdrs = l.tree.for_headers.as_slice()
-        header = hdrs[node.a as i64]
+        header = hdrs[node.a]
     }
     if header.initializer != NODE_NONE {
         lower_statement(l, header.initializer)
@@ -837,12 +837,12 @@ fun lower_loop(l: *Lowering, id: u32) {
 
 fun lower_for_in(l: *Lowering, id: u32) {
     var nodes = l.tree.nodes.as_slice()
-    var node = nodes[id as i64]
+    var node = nodes[id]
     var info = lower_node(l, id)
     var item_t = info.type_info
     var item_slot = info.binding
     var hdrs = l.tree.for_in_headers.as_slice()
-    var h = hdrs[node.a as i64]
+    var h = hdrs[node.a]
 
     var start = new_label(l)
     var body = new_label(l)
@@ -953,7 +953,7 @@ fun emit_defers(l: *Lowering, base: u64) {
     for i > base && !l.failed {
         i -= 1
         var top = l.defers.len
-        lower_statement(l, l.defers.data[i as i64])
+        lower_statement(l, l.defers.data[i])
         if l.defers.len > top {
             emit_defers(l, top)
             l.defers.len = top
@@ -964,13 +964,13 @@ fun emit_defers(l: *Lowering, base: u64) {
 fun lower_statement(l: *Lowering, id: u32) {
     if l.failed || id == NODE_NONE { return }
     var nodes = l.tree.nodes.as_slice()
-    var node = nodes[id as i64]
+    var node = nodes[id]
     var children = l.tree.children.as_slice()
     if node.kind == AstKind.Block {
         var defer_base = l.defers.len
         var fell = true
         for var i: u32 = 0; i < node.b && !l.failed; i += 1 {
-            var ch = children[(node.a + i) as i64]
+            var ch = children[node.a + i]
             lower_statement(l, ch)
             if !lower_node(l, ch).falls_through {
                 fell = false
@@ -988,7 +988,7 @@ fun lower_statement(l: *Lowering, id: u32) {
         if node.a != NODE_NONE {
             val = lower_expression(l, node.a)
         } else if l.current_fn < (l.sem.functions.len as u32) {
-            var ret_t = l.sem.functions.data[l.current_fn as i64].result
+            var ret_t = l.sem.functions.data[l.current_fn].result
             if ret_t.kind == TypeKind.Result {
                 var slot_addr = emit_value(l, IrOp.StorageAlloc, ret_t, 0, 0, 0)
                 var bool_t = simple_type(TypeKind.Bool)
@@ -1005,9 +1005,9 @@ fun lower_statement(l: *Lowering, id: u32) {
     } else if node.kind == AstKind.MatchType {
         var children = l.tree.children.as_slice()
         var matched_arm = lower_node(l, id).binding
-        var arm_id = children[(node.a + matched_arm) as i64]
-        var arm = nodes[arm_id as i64]
-        var body = children[(arm.a + arm.b - 1) as i64]
+        var arm_id = children[node.a + matched_arm]
+        var arm = nodes[arm_id]
+        var body = children[arm.a + arm.b - 1]
         lower_statement(l, body)
     } else if node.kind == AstKind.Match {
         lower_match(l, id)
@@ -1017,12 +1017,12 @@ fun lower_statement(l: *Lowering, id: u32) {
         lower_for_in(l, id)
     } else if node.kind == AstKind.Break {
         var loops = l.loops.as_slice()
-        var target = loops[lower_node(l, id).binding as i64]
+        var target = loops[lower_node(l, id).binding]
         emit_defers(l, target.defer_base)
         emit_jump(l, target.break_label)
     } else if node.kind == AstKind.Continue {
         var loops = l.loops.as_slice()
-        var target = loops[lower_node(l, id).binding as i64]
+        var target = loops[lower_node(l, id).binding]
         emit_defers(l, target.defer_base)
         emit_jump(l, target.continue_label)
     } else if node.kind == AstKind.Const {
@@ -1030,7 +1030,7 @@ fun lower_statement(l: *Lowering, id: u32) {
     } else if node.kind == AstKind.Var {
         var info = lower_node(l, id)
         var vars = l.tree.variables.as_slice()
-        var init_id = vars[node.a as i64].initializer
+        var init_id = vars[node.a].initializer
         if uses_storage(info.type_info) {
             var addr = emit_value(l, IrOp.StorageAlloc, info.type_info, 0, 0, 0)
             var src: u32 = 0
@@ -1070,7 +1070,7 @@ pub fun lower(arena: *mem.Arena, tree: *Ast, sem: *Sema, out: *IrModule): bool {
     var structs = tree.structs.as_slice()
     var recs = sem.records.as_slice()
     for rec in recs {
-        var sp = structs[rec.declaration as i64].name
+        var sp = structs[rec.declaration].name
         out.struct_names.push(&sp)
     }
 
@@ -1087,7 +1087,7 @@ pub fun lower(arena: *mem.Arena, tree: *Ast, sem: *Sema, out: *IrModule): bool {
     var sema_fns = sem.functions.as_slice()
     for i, sf in sema_fns {
         if l.failed { break }
-        var fdecl = ast_fns[sf.declaration as i64]
+        var fdecl = ast_fns[sf.declaration]
         var is_template = fdecl.type_parameters.count > 0 && sf.arguments.len == 0
         var is_spec = fdecl.type_parameters.count > 0 && sf.arguments.len > 0
         var first_param = out.parameters.len as u32
@@ -1162,7 +1162,7 @@ fun write_type(m: *IrModule, t_in: SemaType) {
         if t.kind == TypeKind.Pointer {
             io.print("*")
             if t.read_only { io.print("const ") }
-            t = pts[t.pointee as i64]
+            t = pts[t.pointee]
         } else if t.kind == TypeKind.Array || t.kind == TypeKind.Slice {
             if t.kind == TypeKind.Array {
                 io.print("[")
@@ -1171,14 +1171,14 @@ fun write_type(m: *IrModule, t_in: SemaType) {
             } else {
                 io.print("[]")
             }
-            t = elems[t.element_type as i64]
+            t = elems[t.element_type]
         } else {
             break
         }
     }
     if t.kind == TypeKind.Struct {
         var names = m.struct_names.as_slice()
-        write_span(m, names[t.record as i64])
+        write_span(m, names[t.record])
     } else {
         io.print(type_kind_name(t.kind))
     }
@@ -1319,11 +1319,11 @@ fun write_inst(m: *IrModule, inst: IrInstruction) {
         io.print("call.")
         write_type(m, inst.type_info)
         io.print(" @")
-        write_span(m, fns[inst.a as i64].name)
+        write_span(m, fns[inst.a].name)
         io.print("(")
         for var i: u32 = 0; i < inst.c; i += 1 {
             if i > 0 { io.print(", ") }
-            write_val(args[(inst.b + i) as i64])
+            write_val(args[inst.b + i])
         }
         io.print(")")
     } else if inst.op == IrOp.Jump {
@@ -1373,7 +1373,7 @@ pub fun write(m: *IrModule) {
                 fmt.print_u64(1, p as u64)
                 io.print(": ")
             }
-            write_type(m, params[(fn.first_parameter + p) as i64])
+            write_type(m, params[fn.first_parameter + p])
         }
         io.print("): ")
         write_type(m, fn.result)
@@ -1385,7 +1385,7 @@ pub fun write(m: *IrModule) {
         fmt.print_u64(1, fn.slot_count as u64)
         io.println("] {")
         for var j: u32 = 0; j < fn.instruction_count; j += 1 {
-            write_inst(m, insts[(fn.first_instruction + j) as i64])
+            write_inst(m, insts[fn.first_instruction + j])
         }
         io.println("}")
     }

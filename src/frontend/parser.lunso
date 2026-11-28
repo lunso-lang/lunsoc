@@ -55,14 +55,14 @@ fun read_token(l: *lexer.Lexer, in_group: bool): lexer.Token {
         var tok = lexer.next_token(l)
         if tok.kind == lexer.TokenKind.Comment {
             if !in_group && l.line != tok.line {
-                for l.source[tok.offset as i64] != '\r' && l.source[tok.offset as i64] != '\n' {
+                for l.source[tok.offset] != '\r' && l.source[tok.offset] != '\n' {
                     tok.offset += 1
                     tok.column += 1
                 }
                 tok.kind = lexer.TokenKind.Newline
-                if l.source[tok.offset as i64] == '\r' &&
+                if l.source[tok.offset] == '\r' &&
                    tok.offset + 1 < (len(l.source) as u64) &&
-                   l.source[(tok.offset + 1) as i64] == '\n' {
+                   l.source[tok.offset + 1] == '\n' {
                     tok.length = 2
                 } else {
                     tok.length = 1
@@ -326,7 +326,7 @@ fun parse_postfix(p: *Parser, base_in: u32): u32 {
         } else if tok.kind == lexer.TokenKind.LeftBrace {
             var base_kind = ast.AstKind.Invalid
             if base != ast.NODE_NONE {
-                base_kind = nodes[base as i64].kind
+                base_kind = nodes[base].kind
             }
             if p.disallow_struct_literal ||
                (base_kind != ast.AstKind.Identifier && base_kind != ast.AstKind.Member && base_kind != ast.AstKind.GenericType) {
@@ -335,7 +335,7 @@ fun parse_postfix(p: *Parser, base_in: u32): u32 {
             base = parse_struct_literal(p, base)
             nodes = p.tree.nodes.as_slice()
         } else if tok.kind == lexer.TokenKind.LeftBracket {
-            var base_kind = nodes[base as i64].kind
+            var base_kind = nodes[base].kind
             if !p.disallow_struct_literal &&
                (base_kind == ast.AstKind.Identifier || base_kind == ast.AstKind.Member) &&
                bracket_before_initializer(p) {
@@ -762,7 +762,7 @@ fun parse_for_with_label(p: *Parser, label: ast.Span): u32 {
                 var second_ident = p.current
                 advance(p)
                 if p.current.kind == lexer.TokenKind.Identifier && p.current.length == 2 &&
-                   p.lex.source[p.current.offset as i64] == 'i' && p.lex.source[(p.current.offset + 1) as i64] == 'n' {
+                   p.lex.source[p.current.offset] == 'i' && p.lex.source[p.current.offset + 1] == 'n' {
                     is_for_in = true
                     idx_sp = item_sp
                     item_sp = source_span(p, second_ident)
@@ -770,7 +770,7 @@ fun parse_for_with_label(p: *Parser, label: ast.Span): u32 {
                 }
             }
         } else if p.current.kind == lexer.TokenKind.Identifier && p.current.length == 2 &&
-                  p.lex.source[p.current.offset as i64] == 'i' && p.lex.source[(p.current.offset + 1) as i64] == 'n' {
+                  p.lex.source[p.current.offset] == 'i' && p.lex.source[p.current.offset + 1] == 'n' {
             is_for_in = true
             advance(p)
         }
@@ -1050,23 +1050,23 @@ fun parse_struct(p: *Parser, public: bool): u32 {
             var m_pub = match_tok(p, lexer.TokenKind.Pub)
             var fn_node = parse_function(p, m_pub)
             if !p.has_error {
-                var fn_idx = p.tree.nodes.data[fn_node as i64].a
-                p.tree.functions.data[fn_idx as i64].owner_struct = struct_idx
+                var fn_idx = p.tree.nodes.data[fn_node].a
+                p.tree.functions.data[fn_idx].owner_struct = struct_idx
                 if type_params.count > 0 {
-                    var own_tp = p.tree.functions.data[fn_idx as i64].type_parameters
+                    var own_tp = p.tree.functions.data[fn_idx].type_parameters
                     if own_tp.count == 0 {
-                        p.tree.functions.data[fn_idx as i64].type_parameters = type_params
+                        p.tree.functions.data[fn_idx].type_parameters = type_params
                     } else {
                         var first_tp = p.tree.children.len as u32
                         for var ti: u32 = 0; ti < type_params.count; ti += 1 {
-                            var cid = p.tree.children.data[(type_params.first + ti) as i64]
+                            var cid = p.tree.children.data[type_params.first + ti]
                             p.tree.children.push(&cid)
                         }
                         for var ti: u32 = 0; ti < own_tp.count; ti += 1 {
-                            var cid = p.tree.children.data[(own_tp.first + ti) as i64]
+                            var cid = p.tree.children.data[own_tp.first + ti]
                             p.tree.children.push(&cid)
                         }
-                        p.tree.functions.data[fn_idx as i64].type_parameters = ast.NodeRange {
+                        p.tree.functions.data[fn_idx].type_parameters = ast.NodeRange {
                             first: first_tp,
                             count: type_params.count + own_tp.count,
                         }

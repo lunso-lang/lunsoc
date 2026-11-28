@@ -67,7 +67,7 @@ fun dump_tokens(path: []u8, source: []u8, arena: *mem.Arena): i32 {
     if !lexer.tokenize_all(source, &tokens, &err_tok) {
         var msg = lexer.error_message(err_tok.kind)
         if err_tok.kind == lexer.TokenKind.Invalid && (err_tok.offset as i64) < len(source) {
-            msg = modules.format_unexpected_byte(arena, source[err_tok.offset as i64])
+            msg = modules.format_unexpected_byte(arena, source[err_tok.offset])
         }
         return report_error(path, source, err_tok, msg)
     }
@@ -91,7 +91,7 @@ fun run_parse(path: []u8, source: []u8, arena: *mem.Arena): i32 {
     if !parser.parse(arena, source, &tree, &err) {
         var msg = err.message
         if err.token.kind == lexer.TokenKind.Invalid && (err.token.offset as i64) < len(source) {
-            msg = modules.format_unexpected_byte(arena, source[err.token.offset as i64])
+            msg = modules.format_unexpected_byte(arena, source[err.token.offset])
         }
         return report_error(path, source, err.token, msg)
     }
