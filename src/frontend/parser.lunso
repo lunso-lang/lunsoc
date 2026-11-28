@@ -637,17 +637,37 @@ fun parse_if(p: *Parser): u32 {
     return add_node(p, ast.AstKind.If, kw, cond, idx)
 }
 
+fun is_match_type_kw(p: *Parser): bool {
+    if p.current.kind != lexer.TokenKind.Identifier || p.current.length != 4 {
+        return false
+    }
+    var off = p.current.offset as i64
+    var src = p.lex.source
+    if src[off] != 't' || src[off + 1] != 'y' || src[off + 2] != 'p' || src[off + 3] != 'e' {
+        return false
+    }
+    var look = p.lex
+    return read_token(&look, true).kind != lexer.TokenKind.LeftBrace
+}
+
 fun parse_match(p: *Parser): u32 {
     if !enter(p) {
         return ast.NODE_NONE
     }
     var kw = expect_tok(p, lexer.TokenKind.Match, "expected 'match'")
-    var saved = p.disallow_struct_literal
-    p.disallow_struct_literal = true
-    var scrutinee = parse_expression(p, PREC_ASSIGNMENT)
-    p.disallow_struct_literal = saved
-
-    expect_tok(p, lexer.TokenKind.LeftBrace, "expected '{' after match expression")
+    var is_type_match = is_match_type_kw(p)
+    var scrutinee = ast.NODE_NONE
+    if is_type_match {
+        advance(p)
+        scrutinee = parse_type(p)
+        expect_tok(p, lexer.TokenKind.LeftBrace, "expected '{' after match type")
+    } else {
+        var saved = p.disallow_struct_literal
+        p.disallow_struct_literal = true
+        scrutinee = parse_expression(p, PREC_ASSIGNMENT)
+        p.disallow_struct_literal = saved
+        expect_tok(p, lexer.TokenKind.LeftBrace, "expected '{' after match expression")
+    }
     var mark = p.pending.len
     push_child(p, scrutinee)
     for !p.has_error && is_separator(p.current.kind) {
@@ -658,7 +678,11 @@ fun parse_match(p: *Parser): u32 {
         var arm_mark = p.pending.len
         if !match_tok(p, lexer.TokenKind.Else) {
             for {
-                push_child(p, parse_expression(p, PREC_ASSIGNMENT))
+                if is_type_match {
+                    push_child(p, parse_type(p))
+                } else {
+                    push_child(p, parse_expression(p, PREC_ASSIGNMENT))
+                }
                 if !match_tok(p, lexer.TokenKind.Comma) {
                     break
                 }
@@ -682,6 +706,9 @@ fun parse_match(p: *Parser): u32 {
     expect_tok(p, lexer.TokenKind.RightBrace, "expected '}' after match")
     var items = finish_children(p, mark)
     p.recursion_depth -= 1
+    if is_type_match {
+        return add_node(p, ast.AstKind.MatchType, kw, items.first, items.count)
+    }
     return add_node(p, ast.AstKind.Match, kw, items.first, items.count)
 }
 

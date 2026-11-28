@@ -1002,6 +1002,13 @@ fun lower_statement(l: *Lowering, id: u32) {
         emit(l, IrInstruction { op: IrOp.Return, type_info: empty_type(), result: 0, a: val, b: 0, c: 0 })
     } else if node.kind == AstKind.If {
         lower_if(l, id)
+    } else if node.kind == AstKind.MatchType {
+        var children = l.tree.children.as_slice()
+        var matched_arm = lower_node(l, id).binding
+        var arm_id = children[(node.a + matched_arm) as i64]
+        var arm = nodes[arm_id as i64]
+        var body = children[(arm.a + arm.b - 1) as i64]
+        lower_statement(l, body)
     } else if node.kind == AstKind.Match {
         lower_match(l, id)
     } else if node.kind == AstKind.For || node.kind == AstKind.ForCStyle {

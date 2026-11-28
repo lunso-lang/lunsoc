@@ -2695,6 +2695,45 @@ fun check_statement(c: *Checker, id: u32): bool {
             var else_falls = check_statement(c, br.else_branch)
             falls = then_falls || else_falls
         }
+    } else if node.kind == AstKind.MatchType {
+        var children = c.tree.children.as_slice()
+        var st = resolve_type(c, children[node.a as i64])
+        var matched_arm: u32 = ~0 as u32
+        var matched_body: u32 = NODE_NONE
+        for var i: u32 = 1; i < node.b && !c.has_error; i += 1 {
+            var arm_id = children[(node.a + i) as i64]
+            var arm = nodes[arm_id as i64]
+            if arm.b == 1 {
+                if i + 1 < node.b {
+                    fail(c, arm_id, "else arm must be the last arm in match")
+                }
+                if matched_arm == (~0 as u32) {
+                    matched_arm = i
+                    matched_body = children[(arm.a + arm.b - 1) as i64]
+                }
+            } else {
+                var arm_matches = false
+                for var p: u32 = 0; p < arm.b - 1 && !c.has_error; p += 1 {
+                    var pat_id = children[(arm.a + p) as i64]
+                    var pt = resolve_type(c, pat_id)
+                    if !c.has_error && same_type(c, st, pt) {
+                        arm_matches = true
+                    }
+                }
+                if arm_matches && matched_arm == (~0 as u32) {
+                    matched_arm = i
+                    matched_body = children[(arm.a + arm.b - 1) as i64]
+                }
+            }
+        }
+        if !c.has_error {
+            if matched_arm == (~0 as u32) {
+                fail(c, id, "match type did not match any arm")
+            } else {
+                node_info(c, id).binding = matched_arm
+                falls = check_statement(c, matched_body)
+            }
+        }
     } else if node.kind == AstKind.Match {
         var children = c.tree.children.as_slice()
         var st = check_expr(c, children[node.a as i64], empty_type())

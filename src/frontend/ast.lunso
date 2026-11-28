@@ -26,6 +26,7 @@ pub enum AstKind : u8 {
     Return,
     If,
     Match,
+    MatchType,
     MatchArm,
     For,
     ForCStyle,
